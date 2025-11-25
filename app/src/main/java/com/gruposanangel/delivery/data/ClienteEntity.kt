@@ -6,7 +6,7 @@ import java.util.*
 
 @Entity(tableName = "clientes")
 data class ClienteEntity(
-    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    @PrimaryKey val id: String,
     val nombreNegocio: String,
     val nombreDueno: String,
     val telefono: String,
@@ -14,9 +14,16 @@ data class ClienteEntity(
     val tipoExhibidor: String,
     val ubicacionLat: Double,
     val ubicacionLon: Double,
-    val fotografiaUrl: String?,      // ruta local si offline, URL de Firebase si ya subido
+    val fotografiaUrl: String?,      // local o URL remota
+
     val activo: Boolean = true,
     val medio: String = "medio",
+
     val fechaDeCreacion: Long = System.currentTimeMillis(),
-    val syncStatus: Boolean = false  // false = pendiente de subir, true = ya sincronizado
+
+    val syncStatus: Boolean = false, // false = pendiente, true = sincronizado
+
+    // 🔥 Nuevos campos
+    val ownerUid: String = "",
+    val lastModified: Long = System.currentTimeMillis()
 )

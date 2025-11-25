@@ -316,6 +316,7 @@ fun CrearClienteScreen(navController: NavController?, repository: RepositoryClie
                                         val geoPoint = if (lastLocation != null) GeoPoint(lastLocation.latitude, lastLocation.longitude)
                                         else GeoPoint(19.4895, -96.8289) // Chalma fallback
                                         val fechaActual = Timestamp.now()
+
                                         val clienteData = hashMapOf(
                                             "FotografiaCliente" to downloadUrl,
                                             "nombreNegocio" to nombreNegocio.text,
@@ -326,10 +327,23 @@ fun CrearClienteScreen(navController: NavController?, repository: RepositoryClie
                                             "medio" to "medio",
                                             "activo" to true,
                                             "tipoExhibidor" to tipoExibidor,
-                                            "fechaDeCreacion" to fechaActual
+                                            "fechaDeCreacion" to fechaActual,
+                                            "ownerUid" to com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid,
+                                            "lastModified" to System.currentTimeMillis()
                                         )
-                                        FirebaseFirestore.getInstance().collection("clientes").add(clienteData).await()
+
+                                            // 🚀 YA NO USAMOS "add()". Ahora usamos el ID que generaste arriba:
+                                        FirebaseFirestore.getInstance()
+                                            .collection("clientes")
+                                            .document(clienteId) // <-- usa el mismo ID que usarás localmente
+                                            .set(clienteData)
+                                            .await()
+
+
+
                                     }
+
+
                                     Toast.makeText(context, "Cliente creado exitosamente", Toast.LENGTH_SHORT).show()
                                     navController?.navigate("delivery?screen=Inventario") { popUpTo("delivery") { inclusive = true } }
                                 } else {
