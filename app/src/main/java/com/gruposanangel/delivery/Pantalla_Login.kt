@@ -61,6 +61,7 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color.White) // <-- Fondo blanco
             .padding(24.dp)
             .alpha(screenAlpha),
         contentAlignment = Alignment.Center

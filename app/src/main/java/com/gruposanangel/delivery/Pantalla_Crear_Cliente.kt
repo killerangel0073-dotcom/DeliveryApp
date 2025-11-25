@@ -11,7 +11,6 @@ import android.location.Location
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
-import android.util.Log
 import android.util.Patterns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -55,7 +54,7 @@ import com.google.firebase.firestore.GeoPoint
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.gruposanangel.delivery.R
-import com.gruposanangel.delivery.data.ClienteRepository
+import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.ClienteEntity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
@@ -64,7 +63,7 @@ import java.io.File
 import java.util.*
 
 @Composable
-fun CrearClienteScreen(navController: NavController?, repository: ClienteRepository? = null) {
+fun CrearClienteScreen(navController: NavController?, repository: RepositoryCliente? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isInPreview = LocalInspectionMode.current
@@ -73,7 +72,8 @@ fun CrearClienteScreen(navController: NavController?, repository: ClienteReposit
     var nombreDueno by remember { mutableStateOf(TextFieldValue("")) }
     var telefono by remember { mutableStateOf(TextFieldValue("")) }
     var correo by remember { mutableStateOf(TextFieldValue("")) }
-    var ubicacion by remember { mutableStateOf(TextFieldValue("")) }
+    var ubicacion by remember { mutableStateOf(TextFieldValue("Cargando ubicación...")) }
+    var ubicacionValida by remember { mutableStateOf(false) }
 
     var tipoExibidor by remember { mutableStateOf("Elige una opción") }
     val opcionesExibidor = listOf("No asignado", "Exhibidor de Mesa", "Exhibidor Normal", "Exhibidor Premium")
@@ -85,7 +85,6 @@ fun CrearClienteScreen(navController: NavController?, repository: ClienteReposit
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Lanzadores
     val launcherGallery = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let { context.contentResolver.openInputStream(it)?.use { stream -> imageBitmap = BitmapFactory.decodeStream(stream) } }
     }
@@ -99,7 +98,15 @@ fun CrearClienteScreen(navController: NavController?, repository: ClienteReposit
     LaunchedEffect(Unit) {
         if (!isInPreview) {
             permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-            obtenerUbicacion(scope, context) { ubicacion = it }
+            obtenerUbicacion(scope, context) {
+                ubicacion = it
+                ubicacionValida = !it.text.contains("Error") && !it.text.contains("No se pudo")
+                // Si no se pudo obtener ubicación, usar Chalma como fallback
+                if (!ubicacionValida) {
+                    ubicacion = TextFieldValue("Chalma, Veracruz")
+                    ubicacionValida = true
+                }
+            }
         }
     }
 
@@ -114,10 +121,12 @@ fun CrearClienteScreen(navController: NavController?, repository: ClienteReposit
                 )
                 IconButton(
                     onClick = {
-                        navController?.navigate("delivery?screen=Inventario") {
-                            popUpTo("delivery") { inclusive = true }
+                        navController?.navigate("delivery?screen=Clientes") {
+                            launchSingleTop = true
+                            popUpTo(0) { inclusive = true } // Borra toda la pila
                         }
-                    },
+                    }
+                    ,
                     modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp)
                 ) {
                     Icon(Icons.Default.ArrowBack, contentDescription = "Regresar")
@@ -160,7 +169,6 @@ fun CrearClienteScreen(navController: NavController?, repository: ClienteReposit
 
             Spacer(Modifier.height(24.dp))
 
-            // Campos de texto
             Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
                 ModernOutlinedField("Nombre del negocio", nombreNegocio, onValueChange = { nombreNegocio = nombreNegocio.capitalizeWordsWithCursor(it) })
                 ModernOutlinedField("Nombre del dueño", nombreDueno, onValueChange = { nombreDueno = nombreDueno.capitalizeWordsWithCursor(it) })
@@ -195,12 +203,17 @@ fun CrearClienteScreen(navController: NavController?, repository: ClienteReposit
                     }
                 }
 
-                ModernOutlinedField("Ubicación", ubicacion, maxLines = 2, onValueChange = { ubicacion = it })
+                ModernOutlinedField(
+                    "Ubicación",
+                    ubicacion,
+                    maxLines = 2,
+                    onValueChange = { },
+                    readOnly = true
+                )
             }
 
             Spacer(Modifier.height(20.dp))
 
-            // Mensaje de error
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -231,31 +244,34 @@ fun CrearClienteScreen(navController: NavController?, repository: ClienteReposit
                 Spacer(Modifier.height(20.dp))
             }
 
-            // Botón Guardar
             Button(
                 onClick = {
+                    if (isLoading || isInPreview) return@Button
                     errorMessage = null
                     fun showError(msg: String) {
                         errorMessage = msg
                         scope.launch { delay(1500); errorMessage = null }
                     }
 
-                    // Validaciones
                     if (imageBitmap == null) { showError("Foto requerida"); return@Button }
                     if (nombreNegocio.text.isBlank()) { showError("Nombre del negocio requerido"); return@Button }
                     if (nombreDueno.text.isBlank()) { showError("Nombre del dueño requerido"); return@Button }
                     if (telefono.text.isBlank()) { showError("Teléfono requerido"); return@Button }
                     if (correo.text.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(correo.text).matches()) { showError("Correo inválido"); return@Button }
                     if (tipoExibidor == "Elige una opción") { showError("Debe seleccionar un tipo de exhibidor"); return@Button }
-                    if (ubicacion.text.isBlank()) { showError("Ubicación requerida"); return@Button }
+
+                    if (!ubicacionValida) {
+                        showError("Aún no se obtuvo ubicación, intente de nuevo")
+                        return@Button
+                    }
 
                     scope.launch {
                         isLoading = true
                         try {
                             val fused = LocationServices.getFusedLocationProviderClient(context)
                             val lastLocation: Location? = try { fused.lastLocation.await() } catch (_: SecurityException) { null }
-                            val lat = lastLocation?.latitude ?: 0.0
-                            val lon = lastLocation?.longitude ?: 0.0
+                            val lat = lastLocation?.latitude ?: 19.4895   // Chalma fallback
+                            val lon = lastLocation?.longitude ?: -96.8289 // Chalma fallback
 
                             val clienteId = UUID.randomUUID().toString()
                             val photosDir = File(context.filesDir, "clientes_photos")
@@ -297,7 +313,8 @@ fun CrearClienteScreen(navController: NavController?, repository: ClienteReposit
                                         imageBitmap!!.compress(Bitmap.CompressFormat.JPEG, 80, baos)
                                         ref.putBytes(baos.toByteArray()).await()
                                         val downloadUrl = ref.downloadUrl.await().toString()
-                                        val geoPoint = if (lastLocation != null) GeoPoint(lastLocation.latitude, lastLocation.longitude) else GeoPoint(0.0, 0.0)
+                                        val geoPoint = if (lastLocation != null) GeoPoint(lastLocation.latitude, lastLocation.longitude)
+                                        else GeoPoint(19.4895, -96.8289) // Chalma fallback
                                         val fechaActual = Timestamp.now()
                                         val clienteData = hashMapOf(
                                             "FotografiaCliente" to downloadUrl,
@@ -374,7 +391,8 @@ fun ModernOutlinedField(
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
     keyboardType: KeyboardType = KeyboardType.Text,
-    maxLines: Int = 1
+    maxLines: Int = 1,
+    readOnly: Boolean = false
 ) {
     OutlinedTextField(
         value = value,
@@ -382,6 +400,7 @@ fun ModernOutlinedField(
         label = { Text(label, color = if (value.text.isNotBlank()) Color.Red else Color.Gray) },
         singleLine = maxLines == 1,
         maxLines = maxLines,
+        readOnly = readOnly,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         colors = TextFieldDefaults.outlinedTextFieldColors(
             focusedBorderColor = Color.Red,
@@ -408,14 +427,26 @@ fun obtenerUbicacion(scope: CoroutineScope, context: android.content.Context, on
     scope.launch(Dispatchers.IO) {
         try {
             val fused = LocationServices.getFusedLocationProviderClient(context)
-            val location: Location? = fused.lastLocation.await()
-            location?.let {
+            val location = try {
+                withTimeoutOrNull(10000) {
+                    fused.getCurrentLocation(
+                        com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY,
+                        com.google.android.gms.tasks.CancellationTokenSource().token
+                    ).await()
+                }
+            } catch (e: Exception) {
+                null
+            }
+            val direccion = if (location != null) {
                 val geocoder = Geocoder(context, Locale.getDefault())
-                val dir = geocoder.getFromLocation(it.latitude, it.longitude, 1)
-                val direccion = dir?.firstOrNull()?.getAddressLine(0) ?: "${it.latitude}, ${it.longitude}"
-                onResult(TextFieldValue(direccion))
-            } ?: onResult(TextFieldValue("No se pudo obtener ubicación"))
-        } catch (_: Exception) {
+                val dir = geocoder.getFromLocation(location.latitude, location.longitude, 1)
+                dir?.firstOrNull()?.getAddressLine(0) ?: "${location.latitude}, ${location.longitude}"
+            } else {
+                "No se pudo obtener ubicación"
+            }
+            onResult(TextFieldValue(direccion))
+        } catch (e: Exception) {
+            e.printStackTrace()
             onResult(TextFieldValue("Error al obtener ubicación"))
         }
     }

@@ -16,7 +16,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
@@ -24,12 +23,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import com.gruposanangel.delivery.Plantilla_Cliente
 import com.gruposanangel.delivery.R
-import com.gruposanangel.delivery.data.ClienteRepository
+import com.gruposanangel.delivery.data.RepositoryCliente
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PantallaClientes(navController: NavController, repository: ClienteRepository) {
+fun PantallaClientes(navController: NavController, repository: RepositoryCliente) {
     var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
     var buscando by remember { mutableStateOf(false) }
 
@@ -38,11 +39,14 @@ fun PantallaClientes(navController: NavController, repository: ClienteRepository
 
     // Filtrado por búsqueda
     val listaFiltrada = if (buscando) {
-        clientesLocal.filter { it.nombreNegocio.contains(textFieldValue.text, ignoreCase = true) }
-            .map { ClienteVenta(it.nombreNegocio, it.nombreDueno, it.fotografiaUrl ?: "", it.activo) }
+        clientesLocal
+            .filter { it.nombreNegocio.contains(textFieldValue.text, ignoreCase = true) }
+            .map { Plantilla_Cliente(it.id, it.nombreNegocio, it.nombreDueno, it.fotografiaUrl ?: "", it.activo) }
     } else {
-        clientesLocal.map { ClienteVenta(it.nombreNegocio, it.nombreDueno, it.fotografiaUrl ?: "", it.activo) }
+        clientesLocal
+            .map { Plantilla_Cliente(it.id, it.nombreNegocio, it.nombreDueno, it.fotografiaUrl ?: "", it.activo) }
     }
+
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -86,7 +90,13 @@ fun PantallaClientes(navController: NavController, repository: ClienteRepository
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 6.dp)
-                            .clickable { },
+
+
+                            .clickable {
+                                navController.navigate("pantalla_venta/${cliente.id}")
+                            }
+
+                        ,
                         colors = CardDefaults.cardColors(containerColor = Color.White),
                         elevation = CardDefaults.cardElevation(8.dp)
                     ) {
@@ -152,9 +162,9 @@ fun PantallaClientes(navController: NavController, repository: ClienteRepository
 @Composable
 fun PantallaClientesPreview() {
     val clientesPreview = listOf(
-        ClienteVenta("Negocio 1", "Dueño 1", "", true),
-        ClienteVenta("Negocio 2", "Dueño 2", "", false),
-        ClienteVenta("Negocio 3", "Dueño 3", "", true)
+        Plantilla_Cliente("1", "Negocio 1", "Dueño 1", "", true),
+        Plantilla_Cliente("2", "Negocio 2", "Dueño 2", "", false),
+        Plantilla_Cliente("3", "Negocio 3", "Dueño 3", "", true)
     )
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
@@ -203,7 +213,7 @@ fun PantallaClientesPreview() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             AsyncImage(
-                                model = "",
+                                model = cliente.fotografiaCliente,
                                 contentDescription = cliente.nombreNegocio,
                                 placeholder = painterResource(R.drawable.repartidor),
                                 error = painterResource(R.drawable.repartidor),

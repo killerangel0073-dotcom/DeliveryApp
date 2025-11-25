@@ -1,5 +1,4 @@
 package com.gruposanangel.delivery.ui.screens
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,25 +12,33 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.gruposanangel.delivery.R
-import com.gruposanangel.delivery.data.ClienteRepository
-import com.gruposanangel.delivery.data.ClienteEntity
+import com.gruposanangel.delivery.data.VentaRepository
+import kotlinx.coroutines.launch
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
 import java.util.*
+import android.util.Log
+import androidx.compose.ui.text.style.TextAlign
+import com.gruposanangel.delivery.data.AppDatabase
+import com.gruposanangel.delivery.data.RepositoryInventario
 
-data class ClienteVenta(
-    val nombreNegocio: String = "",
-    val nombreDueno: String = "",
-    val fotografiaCliente: String = "",
-    val activo: Boolean = true
+data class TicketVenta(
+    val numeroTicket: String,
+    val cliente: String,
+    val total: Double,
+    val fecha: Date,
+    val sincronizado: Boolean,
+    val fotoCliente: String = ""
 )
 
 @Composable
@@ -39,17 +46,16 @@ fun MedidorDeMetaPremium(
     metaDelDia: Double,
     totalClientes: Int,
     clientesVisitados: Int,
+    avance: Double, // ahora lo pasamos desde afuera
     width: Int = 380,
     height: Int = 200
 ) {
     val currencyFormat = remember { NumberFormat.getCurrencyInstance(Locale("es", "MX")) }
-    var avance by remember { mutableStateOf(0.0) }
 
     val clientesFaltantes = (totalClientes - clientesVisitados).coerceAtLeast(0)
     val falta = (metaDelDia - avance).coerceAtLeast(0.0)
     val ticketPromedio = if (clientesVisitados > 0) avance / clientesVisitados else 0.0
     val ticketNecesario = if (clientesFaltantes > 0) falta / clientesFaltantes else 0.0
-    val progreso = (avance / metaDelDia).coerceIn(0.0, 1.0)
     val metaCumplida = avance >= metaDelDia
 
     Column(
@@ -59,19 +65,15 @@ fun MedidorDeMetaPremium(
             .background(Color(0xFFFF0000), RoundedCornerShape(20.dp))
             .padding(12.dp)
     ) {
-        Slider(
-            value = avance.toFloat(),
-            onValueChange = { avance = it.toDouble() },
-            valueRange = 0f..metaDelDia.toFloat(),
-            colors = SliderDefaults.colors(
-                thumbColor = Color.White,
-                activeTrackColor = Color.White,
-                inactiveTrackColor = Color(0xFF880E1F)
-            ),
+        // Slider solo si quieres que sea interactivo, sino puedes mostrar un ProgressBar
+        LinearProgressIndicator(
+            progress = (avance / metaDelDia).coerceIn(0.0, 1.0).toFloat(),
+            color = Color.White,
+            trackColor = Color(0xFF880E1F),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(28.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .height(30.dp)
+                .clip(RoundedCornerShape(10.dp))
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -97,8 +99,8 @@ fun MedidorDeMetaPremium(
                 horizontalArrangement = Arrangement.SpaceAround,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                InfoBlock("Total clientes", "$totalClientes")
-                InfoBlock("Visitados", "$clientesVisitados")
+                InfoBlock("Total Clientes", "$totalClientes")
+                InfoBlock("VENTAS", "$clientesVisitados")
                 InfoBlock("Faltantes", "$clientesFaltantes")
             }
 
@@ -126,35 +128,101 @@ fun MedidorDeMetaPremium(
     }
 }
 
+
 @Composable
+
 fun InfoBlock(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = Color(0xFF666666), style = MaterialTheme.typography.labelSmall)
+        Text(label, color = Color(0xFF666666), fontWeight = FontWeight.Normal, fontSize = 12.sp)
         Text(value, color = Color.White, fontWeight = FontWeight.SemiBold)
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+
+
+// -----------------------------
+// PANTALLA PRINCIPAL DE VENTAS
+// -----------------------------
 @Composable
-fun PaginaVentaScreen(repository: ClienteRepository) {
-    var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
-    var buscando by remember { mutableStateOf(false) }
+fun PaginaVentaScreen(
+    navController: NavController,
+    ventaRepository: VentaRepository
+) {
 
-    // Observa la base de datos local
-    val clientesLocal by repository.obtenerClientesLocal().collectAsState(initial = emptyList())
 
-    // Filtrado por búsqueda
-    val listaFiltrada = if (buscando) {
-        clientesLocal.filter { it.nombreNegocio.contains(textFieldValue.text, ignoreCase = true) }
-            .map { ClienteVenta(it.nombreNegocio, it.nombreDueno, it.fotografiaUrl ?: "", it.activo) }
-    } else {
-        clientesLocal.map { ClienteVenta(it.nombreNegocio, it.nombreDueno, it.fotografiaUrl ?: "", it.activo) }
+    val context = LocalContext.current
+    val db = AppDatabase.getDatabase(context)
+    val inventarioRepo = RepositoryInventario(db.productoDao()) // ✅ inicializar inventarioRepo
+    val ventaRepository = VentaRepository(db.VentaDao())
+
+
+    // ViewModel para manejar la lógica de ventas
+    val viewModel: VistaModeloVenta = viewModel(
+        factory = VistaModeloVentaFactory(
+            repositoryInventario = inventarioRepo,
+            ventaRepository = ventaRepository
+        )
+    )
+
+
+    // Estado observable de ventas de hoy
+    val ventasHoy by viewModel.ventasPeriodo.collectAsState(initial = emptyList())
+
+
+
+
+
+
+
+    // Cargar ventas de hoy al entrar
+    LaunchedEffect(Unit) {
+        viewModel.cargarVentasHoy()
     }
 
-    val totalClientes = clientesLocal.size
-    val clientesVisitados = clientesLocal.count { it.activo }
+    val ticketsHoy = ventasHoy.map { venta ->
+        TicketVenta(
+            numeroTicket = venta.id.toString(),
+            cliente = venta.clienteNombre,
+            total = venta.total,
+            fecha = Date(venta.fecha),
+            sincronizado = venta.sincronizado,
+            fotoCliente = venta.clienteImagenUrl ?: ""
+        )
+    }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color.White)) {
+    PaginaVentaContent(navController, ticketsHoy, viewModel)
+
+
+}
+
+
+
+@Composable
+fun PaginaVentaContent(
+    navController: NavController?,
+    ticketsHoy: List<TicketVenta>,
+    viewModel: VistaModeloVenta? = null // <-- opcional para preview✅ recibe el ViewModel
+) {
+
+
+    val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
+    val formatoFecha = SimpleDateFormat("EEEE d 'de' MMMM hh:mm a", Locale("es", "MX"))
+
+
+    // ✅ Definir estas variables aquí
+    val totalHoy = ticketsHoy.sumOf { it.total }
+    val totalTickets = ticketsHoy.size
+    val clientesVisitados = ticketsHoy.count { it.sincronizado }
+    // Para el medidor
+    val metaDelDia = 9821.0
+    val toatlClientes = 29
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
+    ) {
+        // Medidor actualizado dinámicamente
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -162,148 +230,152 @@ fun PaginaVentaScreen(repository: ClienteRepository) {
             contentAlignment = Alignment.Center
         ) {
             MedidorDeMetaPremium(
-                metaDelDia = 9821.0,
-                totalClientes = totalClientes,
-                clientesVisitados = clientesVisitados
+                metaDelDia = metaDelDia, // <-- aquí va la meta del día
+                totalClientes = toatlClientes, // <-- aquí va el total de clientes del día
+                clientesVisitados = totalTickets, // <-- aquí va el total de tickets emitidos
+                width = 380,
+                height = 200,
+                avance = totalHoy, // <-- aquí va el avance real
             )
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextField(
-                value = textFieldValue,
-                onValueChange = {
-                    textFieldValue = it
-                    buscando = it.text.isNotEmpty()
-                },
-                placeholder = { Text("Buscar Cliente", color = Color(0xFF888888)) },
-                colors = TextFieldDefaults.textFieldColors(
-                    containerColor = Color(0xFFF5F5F5),
-                    cursorColor = Color(0xFFB71C1C),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
-                ),
-                textStyle = TextStyle(color = Color.Black, fontSize = 16.sp),
+
+
+
+
+
+
+
+
+        if (ticketsHoy.isEmpty()) {
+            // ✅ Mensaje cuando no hay ventas
+            Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .height(52.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .padding(horizontal = 12.dp)
-            )
-        }
+                    .fillMaxSize()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Sin ventas el día de hoy",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
 
-        Spacer(modifier = Modifier.height(12.dp))
 
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(listaFiltrada) { cliente ->
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = 80.dp)
+        ) {
+            items(ticketsHoy) { ticket ->
+
+                val scope = rememberCoroutineScope()
+
                 Card(
-                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 6.dp)
-                        .clickable { /* Acción al seleccionar cliente */ },
+                        .clickable {
+                            val ticketIdLong = ticket.numeroTicket.toLongOrNull()
+                            if (ticketIdLong != null) {
+                                navController?.navigate("detalle_ticket_completo/$ticketIdLong")
+                            }
+                        },
+                    shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     elevation = CardDefaults.cardElevation(8.dp)
                 ) {
-                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         AsyncImage(
-                            model = cliente.fotografiaCliente,
-                            contentDescription = cliente.nombreNegocio,
+                            model = ticket.fotoCliente,
+                            contentDescription = ticket.cliente,
                             contentScale = ContentScale.Crop,
                             placeholder = painterResource(R.drawable.repartidor),
                             error = painterResource(R.drawable.repartidor),
                             modifier = Modifier
-                                .size(80.dp)
+                                .size(60.dp)
                                 .clip(RoundedCornerShape(12.dp))
                         )
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(Modifier.width(12.dp))
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(cliente.nombreNegocio, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            Text(cliente.nombreDueno, color = Color(0xFF555555), fontSize = 14.sp)
+                        Column(Modifier.weight(1f)) {
+                            Text("Ticket #${ticket.numeroTicket}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp)
+                            Text(ticket.cliente,
+                                color = Color(0xFF555555),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp)
+                            Text(formatoFecha.format(ticket.fecha), fontSize = 12.sp, color = Color.Gray)
                         }
 
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                if (cliente.activo) "Activo" else "Inactivo",
-                                color = if (cliente.activo) Color(0xFF388E3C) else Color(0xFFD32F2F),
-                                fontWeight = FontWeight.Bold
+                                formatoMoneda.format(ticket.total),
+                                color = Color.Red,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                if (ticket.sincronizado) "SINCRONIZADO" else "PENDIENTE",
+                                color = if (ticket.sincronizado) Color(0xFF388E3C) else Color(0xFFD32F2F),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
                             )
                         }
                     }
                 }
+            }
+        }
+        }
+
+
+
+
+
+        // Resumen
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Tickets: ${ticketsHoy.size}", fontWeight = FontWeight.Bold, color = Color.Black)
+                Text("Total: ${formatoMoneda.format(totalHoy)}", fontWeight = FontWeight.Bold, color = Color.Red)
             }
         }
     }
 }
 
+
 @Preview(showBackground = true)
 @Composable
 fun PaginaVentaPreview() {
-    val clientesPreview = listOf(
-        ClienteVenta("Negocio 1", "Dueño 1", "", true),
-        ClienteVenta("Negocio 2", "Dueño 2", "", false),
-        ClienteVenta("Negocio 3", "Dueño 3", "", true)
+    val ticketsPreview = listOf(
+        TicketVenta("001", "Negocio 1", 250.0, Date(), true),
+        TicketVenta("002", "Negocio 2", 380.5, Date(), false),
+        TicketVenta("003", "Negocio 3", 120.0, Date(), true)
     )
 
-    Column(modifier = Modifier.fillMaxSize().background(Color.White)) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            MedidorDeMetaPremium(
-                metaDelDia = 9821.0,
-                totalClientes = 3,
-                clientesVisitados = 2
-            )
-        }
-
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(clientesPreview) { cliente ->
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(8.dp)
-                ) {
-                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        AsyncImage(
-                            model = cliente.fotografiaCliente,
-                            contentDescription = cliente.nombreNegocio,
-                            placeholder = painterResource(R.drawable.repartidor),
-                            error = painterResource(R.drawable.repartidor),
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(80.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                        )
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(cliente.nombreNegocio, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            Text(cliente.nombreDueno, color = Color(0xFF555555), fontSize = 14.sp)
-                        }
-
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                if (cliente.activo) "Activo" else "Inactivo",
-                                color = if (cliente.activo) Color(0xFF388E3C) else Color(0xFFD32F2F),
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
+    PaginaVentaContent(
+        navController = null,
+        ticketsHoy = ticketsPreview
+    )
 }

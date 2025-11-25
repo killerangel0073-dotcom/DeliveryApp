@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
+    id("kotlin-parcelize")   // 👈 así, con paréntesis y comillas
     kotlin("kapt") // necesario para Room
 }
 
@@ -49,11 +50,28 @@ android {
 }
 
 dependencies {
-    // Firebase
+
+    // Firebase BOM
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+
+
+    // Dependencias sin versión
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-storage-ktx")
+    implementation("com.google.firebase:firebase-functions-ktx")
+    implementation("com.google.firebase:firebase-messaging-ktx") // 👈 FCM
+
+
+
+    implementation("com.google.firebase:firebase-appcheck-debug")
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
+
+
+
+
+
+
 
     // AndroidX + Material3
     implementation("androidx.core:core-ktx:1.12.0")
@@ -67,11 +85,18 @@ dependencies {
 
     // Coil
     implementation("io.coil-kt:coil-compose:2.5.0")
-    implementation(libs.androidx.compose.animation.core)
-    implementation(libs.androidx.compose.ui.text)
-    implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.compose.foundation)
-    // Nota: libs.androidx.room.ktx se elimina para evitar conflicto
+
+    implementation("androidx.compose.animation:animation:1.5.1")
+    implementation("androidx.compose.ui:ui-text:1.5.1")
+    implementation("androidx.navigation:navigation-compose:2.7.3")
+    implementation("androidx.compose.foundation:foundation:1.5.1")
+
+
+
+    // WorkManager
+    implementation("androidx.work:work-runtime-ktx:2.8.1")
+
+
 
     // Tests
     testImplementation("junit:junit:4.13.2")
@@ -92,7 +117,12 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.6.4")
+
 
     //barra superior
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
+
+    //ticket
+    implementation("androidx.core:core-ktx:1.12.0")
 }

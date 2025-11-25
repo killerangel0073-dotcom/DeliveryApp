@@ -30,4 +30,8 @@ interface ClienteDao {
      */
     @Query("SELECT * FROM clientes ORDER BY fechaDeCreacion DESC")
     fun getAllClientesFlow(): Flow<List<ClienteEntity>>
+
+    @Query("SELECT * FROM clientes WHERE id = :id")
+    suspend fun getClientePorId(id: String): ClienteEntity?
+
 }

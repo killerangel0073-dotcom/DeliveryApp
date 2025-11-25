@@ -20,50 +20,46 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
 import com.gruposanangel.delivery.R
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import com.google.firebase.auth.FirebaseAuth
+import com.gruposanangel.delivery.data.UsuarioDao
+import com.gruposanangel.delivery.data.UsuarioEntity
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
+// ======================== PERFIL DE USUARIO ========================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PerfilDeUsuarioScreen(navController: NavController?) {
+fun PerfilDeUsuarioScreen(
+    navController: NavController?,
+    usuarioDao: UsuarioDao
+) {
     val isPreview = LocalInspectionMode.current
+    val currentUserUid = if (isPreview) "123" else FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
-    var displayName by remember { mutableStateOf(if (isPreview) "Lizeth Vanesa Flores Corona" else "Cargando...") }
-    var jobTitle by remember { mutableStateOf(if (isPreview) "Supervisor de Ventas" else "") }
-    var bossName by remember { mutableStateOf(if (isPreview) "CEO Angel Lara" else "") }
-    var routeAssigned by remember { mutableStateOf(if (isPreview) "Ruta 1" else "") }
-    var licenseNumber by remember { mutableStateOf(if (isPreview) "x25448216-a25" else "") }
-    var voterId by remember { mutableStateOf(if (isPreview) "x25448216-a25" else "") }
-    var photoUrl by remember { mutableStateOf("") }
+    // Estado local del usuario
+    var usuario by remember { mutableStateOf<UsuarioEntity?>(null) }
 
-    // Cargar datos desde Firebase
-    if (!isPreview) {
-        val currentUser = FirebaseAuth.getInstance().currentUser
-        val uid = currentUser?.uid
-        LaunchedEffect(uid) {
-            uid?.let {
-                FirebaseFirestore.getInstance()
-                    .collection("users")
-                    .whereEqualTo("uid", it)
-                    .get()
-                    .addOnSuccessListener { docs ->
-                        if (!docs.isEmpty) {
-                            val userDoc = docs.documents[0]
-                            displayName = userDoc.getString("display_name") ?: ""
-                            jobTitle = userDoc.getString("puestoTrabajo") ?: ""
-                            bossName = userDoc.getString("jefeDirecto") ?: ""
-                            routeAssigned = userDoc.getString("rutaAsignada") ?: ""
-                            licenseNumber = userDoc.getString("licenciaConducir") ?: ""
-                            voterId = userDoc.getString("credencialElector") ?: ""
-                            photoUrl = userDoc.getString("photo_url") ?: ""
-                        }
-                    }
+    // Observa cambios desde Room
+    if (!isPreview && currentUserUid.isNotEmpty()) {
+        LaunchedEffect(currentUserUid) {
+            usuarioDao.obtenerPorIdFlow(currentUserUid).collect { u ->
+                usuario = u
             }
         }
     }
+
+    // Datos a mostrar en la UI
+    val displayName = usuario?.nombre ?: if (isPreview) "Lizeth Vanessa Flores Corona" else "Cargando..."
+    val jobTitle = usuario?.puestoTrabajo ?: if (isPreview) "Gerente General" else "Cargando..."
+    val licenseNumber = usuario?.licenciaConducir ?: if (isPreview) "Si tiene" else "Cargando..."
+    val photoUrl = usuario?.photoUrl ?: ""
+
+    val bossName = "No disponible"
+    val routeAssigned = "No asignada"
+    val voterId = "No disponible"
 
     Scaffold(
         topBar = {
@@ -78,7 +74,13 @@ fun PerfilDeUsuarioScreen(navController: NavController?) {
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navController?.popBackStack() }) {
+                    IconButton(
+                        onClick = {
+                            navController?.navigate("delivery?screen=Inicio") {
+                                launchSingleTop = true
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Regresar")
                     }
                 },
@@ -94,8 +96,7 @@ fun PerfilDeUsuarioScreen(navController: NavController?) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top
         ) {
-            // Foto de perfil
-            if (isPreview || photoUrl.isEmpty()) {
+            if (photoUrl.isEmpty()) {
                 Image(
                     painter = painterResource(R.drawable.repartidor),
                     contentDescription = "Foto de perfil",
@@ -116,13 +117,9 @@ fun PerfilDeUsuarioScreen(navController: NavController?) {
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-
-            // Nombre
             Text(displayName, style = MaterialTheme.typography.headlineSmall)
-
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Campos de información
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -140,6 +137,7 @@ fun PerfilDeUsuarioScreen(navController: NavController?) {
     }
 }
 
+// ======================== CAMPO DE INFO ========================
 @Composable
 fun InfoField(
     label: String,
@@ -172,10 +170,27 @@ fun InfoField(
     }
 }
 
+// ======================== PREVIEW ========================
 @Preview(showBackground = true)
 @Composable
 fun PerfilDeUsuarioPreview() {
-    // Usamos un NavController simulado para preview
     val navController = rememberNavController()
-    PerfilDeUsuarioScreen(navController = navController)
+    PerfilDeUsuarioScreen(navController = navController, usuarioDao = FakeUsuarioDao())
+}
+
+// ======================== DAO FALSO PARA PREVIEW ========================
+class FakeUsuarioDao : UsuarioDao {
+    override suspend fun insertar(vendedor: UsuarioEntity) {}
+    override suspend fun obtenerPorId(uid: String): UsuarioEntity? = null
+    override suspend fun limpiarTabla() {}
+    override fun obtenerPorIdFlow(uid: String): Flow<UsuarioEntity?> =
+        flowOf(
+            UsuarioEntity(
+                uid = "123",
+                nombre = "Lizeth Vanessa Flores Corona",
+                puestoTrabajo = "Gerente General",
+                licenciaConducir = "Si tiene",
+                photoUrl = ""
+            )
+        )
 }

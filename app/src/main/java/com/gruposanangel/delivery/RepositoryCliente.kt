@@ -14,7 +14,7 @@ import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.util.Date
 
-class ClienteRepository(private val dao: ClienteDao) {
+class RepositoryCliente(private val dao: ClienteDao) {
 
     private val firestore = FirebaseFirestore.getInstance()
     private val storage = FirebaseStorage.getInstance()
@@ -33,6 +33,16 @@ class ClienteRepository(private val dao: ClienteDao) {
             throw e
         }
     }
+
+
+    /**
+     * Obtiene un cliente local por su ID.
+     */
+
+    suspend fun obtenerClientesLocalPorId(id: String): ClienteEntity? {
+        return dao.getClientePorId(id)
+    }
+
 
     /**
      * Sincroniza clientes pendientes con Firebase.

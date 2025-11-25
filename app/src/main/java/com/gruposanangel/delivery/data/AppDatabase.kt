@@ -6,12 +6,20 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [ClienteEntity::class],
-    version = 1
+    entities = [ClienteEntity::class, ProductoEntity::class, VentaEntity::class, VentaDetalleEntity::class, UsuarioEntity::class],
+    version = 4 // subimos la versión
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun clienteDao(): ClienteDao
+    abstract fun productoDao(): ProductoDao
+    abstract fun VentaDao(): VentaDao
+
+    abstract fun usuarioDao(): UsuarioDao
+
+
+
+
 
     companion object {
         @Volatile
@@ -22,8 +30,10 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "mi_base_de_datos" // <- nombre de la base de datos
-                ).build()
+                    "mi_base_de_datos"
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }
