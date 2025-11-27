@@ -1,8 +1,6 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.bluetooth.BluetoothDevice
-import android.content.pm.PackageManager
-import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -38,9 +36,7 @@ import coil.compose.AsyncImage
 import com.gruposanangel.delivery.R
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.compose.rememberNavController
 import coil.request.ImageRequest
 import com.google.firebase.auth.FirebaseAuth
 import com.gruposanangel.delivery.data.AppDatabase
@@ -51,21 +47,16 @@ import com.gruposanangel.delivery.data.ClienteEntity
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.VentaRepository
-import java.text.NumberFormat
-import java.util.Locale
 import com.gruposanangel.delivery.utilidades.hayInternet
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.IOException
 
 
 // ----------------------------

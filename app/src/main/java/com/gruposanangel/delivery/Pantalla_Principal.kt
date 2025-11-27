@@ -7,6 +7,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -18,11 +19,12 @@ import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -41,15 +43,12 @@ import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryInventario
-import com.gruposanangel.delivery.data.VentaDao
 import com.gruposanangel.delivery.data.VentaRepository
 import kotlinx.coroutines.tasks.await
 
-
-
-// ---------------------------
+// ------------------------------------------------------------
 // SCREENS
-// ---------------------------
+// ------------------------------------------------------------
 sealed class Screen(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Inventario : Screen("Inventario", Icons.Default.Category)
     object Clientes : Screen("Clientes", Icons.Default.Groups)
@@ -58,20 +57,12 @@ sealed class Screen(val label: String, val icon: androidx.compose.ui.graphics.ve
     object Mapa : Screen("    Mapa    ", Icons.Default.Map)
 }
 
-
-
-
-
-
-
-
-
-// ---------------------------
-// Pantalla principal con barra inferior y contenido dinámico
-// ---------------------------
+// ------------------------------------------------------------
+// PANTALLA PRINCIPAL
+// ------------------------------------------------------------
 @Composable
 fun Pantalla_Principal(
-    navController: androidx.navigation.NavController,
+    navController: NavController,
     startScreen: String = "Inicio",
     repository: RepositoryCliente? = null,
     inventarioRepo: RepositoryInventario,
@@ -79,10 +70,10 @@ fun Pantalla_Principal(
     impresoraBluetooth: BluetoothDevice? = null,
     onImpresoraSeleccionada: (BluetoothDevice) -> Unit = {}
 ) {
-
     val context = LocalContext.current
     val ventaDao = AppDatabase.getDatabase(context).VentaDao()
     val ventaRepository = VentaRepository(ventaDao)
+
     val viewModel: VistaModeloVenta = viewModel(
         factory = VistaModeloVentaFactory(
             repositoryInventario = inventarioRepo,
@@ -90,26 +81,18 @@ fun Pantalla_Principal(
         )
     )
 
-
-
-
     val isPreview = LocalInspectionMode.current
     val items = listOf(Screen.Inventario, Screen.Clientes, Screen.Inicio, Screen.Ruta, Screen.Mapa)
     var selectedScreen by remember { mutableStateOf(items.find { it.label == startScreen } ?: Screen.Inicio) }
     var displayName by remember { mutableStateOf(if (isPreview) "Usuario de Prueba" else "Cargando...") }
     var photoUrl by remember { mutableStateOf("") }
 
-    // 🔹 Cargar datos de Firebase solo en runtime
+    // Cargar datos Firebase
     LaunchedEffect(Unit) {
         if (!isPreview) {
             try {
                 val currentUser = FirebaseAuth.getInstance().currentUser
-                val uid = currentUser?.uid
-
-                if (uid == null) {
-                    displayName = "Usuario no autenticado"
-                    return@LaunchedEffect
-                }
+                val uid = currentUser?.uid ?: return@LaunchedEffect
 
                 val docs = FirebaseFirestore.getInstance()
                     .collection("users")
@@ -119,30 +102,32 @@ fun Pantalla_Principal(
 
                 if (docs.isEmpty) {
                     displayName = "Usuario no encontrado"
-                    photoUrl = ""
                 } else {
-                    val userDoc = docs.documents[0]
+                    val userDoc = docs.documents.first()
                     displayName = userDoc.getString("nombre") ?: "Usuario"
                     photoUrl = userDoc.getString("photo_url") ?: ""
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 displayName = "Error al cargar usuario"
-                photoUrl = ""
             }
         }
     }
 
     Scaffold(
         bottomBar = {
-            AnimatedCurvedBottomBar2(
+            AnimatedCurvedBottomBarPro(
                 items = items,
                 selectedScreen = selectedScreen,
                 onItemSelected = { selectedScreen = it }
             )
         }
+
     ) { innerPadding ->
-        Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            // Barra superior solo en Inicio
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
             if (selectedScreen == Screen.Inicio) {
                 Row(
                     modifier = Modifier
@@ -158,14 +143,14 @@ fun Pantalla_Principal(
                     if (isPreview || photoUrl.isEmpty()) {
                         Image(
                             painter = painterResource(R.drawable.repartidor),
-                            contentDescription = "Foto de perfil",
+                            contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = clickableModifier
                         )
                     } else {
                         AsyncImage(
                             model = photoUrl,
-                            contentDescription = "Foto de perfil",
+                            contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = clickableModifier
                         )
@@ -185,144 +170,169 @@ fun Pantalla_Principal(
                     }) {
                         Icon(Icons.Default.Logout, contentDescription = "Cerrar sesión")
                     }
+
+
+
+
+
+
+
                 }
             }
 
-            // Contenido según la pantalla seleccionada
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 when (selectedScreen) {
-                    Screen.Inicio -> Pantalla_Inicio(onImpresoraSeleccionada = onImpresoraSeleccionada)
+                    Screen.Inicio -> Pantalla_Inicio(onImpresoraSeleccionada)
                     Screen.Clientes -> repository?.let { PantallaClientes(navController, it) }
-
-                    Screen.Inventario -> PantallaProductos(navController, inventarioRepo)
-
-                    Screen.Ruta -> {
-                        PaginaVentaScreen(
-                            navController = navController,
-                            ventaRepository = ventaRepository
-                        )
-                    }
-
+                    Screen.Inventario -> PantallaInventario(navController, inventarioRepo)
+                    Screen.Ruta -> PaginaVentaScreen(navController, ventaRepository)
                     Screen.Mapa -> MapaScreen()
-                    else -> Box {} // opción vacía por seguridad
                 }
             }
-
         }
     }
 }
 
+// ------------------------------------------------------------
+// CURVED BOTTOM BAR MEJORADA
+// ------------------------------------------------------------
 @Composable
-fun PantallaProductos(
-    navController: NavController,
-    inventarioRepo: RepositoryInventario
-) {
-    PantallaInventario(navController, inventarioRepo)
-}
-
-@Composable
-fun AnimatedCurvedBottomBar2(
+fun AnimatedCurvedBottomBarPro(
     items: List<Screen>,
     selectedScreen: Screen,
-    onItemSelected: (Screen) -> Unit,
-    modifier: Modifier = Modifier
+    onItemSelected: (Screen) -> Unit
 ) {
-    val barHeight = 70.dp
-    val indicatorHeight = 20.dp
-    val indicatorRadius = 28.dp
+    val barHeight = 72.dp
+    val notchRadius = 32.dp
+    val liftHeight = 24.dp
 
-    val iconPositions = remember { mutableStateListOf<Float>() }
+    val iconPositions = remember { MutableList(items.size) { 0f } }
     val selectedIndex = items.indexOf(selectedScreen)
 
-    Box(modifier = modifier.height(barHeight).fillMaxWidth()) {
-        val targetX = iconPositions.getOrNull(selectedIndex) ?: 0f
-        val animatedX by animateFloatAsState(
-            targetValue = targetX,
-            animationSpec = spring(
-                dampingRatio = 0.5f,
-                stiffness = 50f
-            )
-        )
+    // Detectar si todos los iconos ya reportaron su posición
+    val allMeasured = iconPositions.none { it == 0f }
 
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val notchWidth = indicatorRadius.toPx() * 2
-            val notchHeight = indicatorHeight.toPx()
+    // Posición inicial PRO (evita que se vaya a 0px)
+    val initialX = remember { mutableStateOf<Float?>(null) }
 
-            val path = androidx.compose.ui.graphics.Path().apply {
+    LaunchedEffect(iconPositions[selectedIndex]) {
+        val pos = iconPositions[selectedIndex]
+        if (pos != 0f && initialX.value == null) {
+            initialX.value = pos
+        }
+    }
+
+    val notchX by animateFloatAsState(
+        targetValue = if (allMeasured) iconPositions[selectedIndex] else (initialX.value ?: 0f),
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = 80f)
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(barHeight)
+    ) {
+
+        // Fondo con notch profesional + BLUR SUAVE
+        Canvas(Modifier.fillMaxSize()) {
+
+            val radius = notchRadius.toPx()
+            val lift = liftHeight.toPx()
+
+            val path = Path().apply {
                 moveTo(0f, 0f)
-                lineTo(0f, size.height)
-                lineTo(size.width, size.height)
+                lineTo(notchX - radius, 0f)
+                quadraticBezierTo(
+                    notchX,
+                    -lift,
+                    notchX + radius,
+                    0f
+                )
                 lineTo(size.width, 0f)
-
-                lineTo(animatedX + notchWidth / 2, 0f)
-                quadraticBezierTo(animatedX, -notchHeight, animatedX - notchWidth / 2, 0f)
+                lineTo(size.width, size.height)
+                lineTo(0f, size.height)
                 close()
             }
 
-            drawPath(path, color = Color(0xFFFF0000))
-
-
+            // BLUR/SOMBRA SUAVE debajo del notch
+            drawPath(
+                path = path,
+                color = Color(0xFFFF0000), // tu rojo original
+                alpha = 0.92f
+            )
         }
 
         Row(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
+
             items.forEachIndexed { index, screen ->
-                val isSelected = screen == selectedScreen
 
-                val offsetY by animateDpAsState(
-                    targetValue = if (isSelected) (-16).dp else 0.dp,
-                    animationSpec = spring(
-                        dampingRatio = 0.5f,
-                        stiffness = 50f
-                    )
-                )
+                val isSelected = index == selectedIndex
 
+                // Escala tipo iPhone
                 val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.3f else 1f,
+                    targetValue = if (isSelected) 1.35f else 1f,
                     animationSpec = spring(
-                        dampingRatio = 0.5f,
-                        stiffness = 50f
+                        dampingRatio = 0.45f,
+                        stiffness = 160f
                     )
                 )
 
-
-
-
-
-
-
-
+                // Levantamiento sutil
+                val offsetY by animateDpAsState(
+                    targetValue = if (isSelected) (-12).dp else 0.dp,
+                    animationSpec = spring(
+                        dampingRatio = 0.60f,
+                        stiffness = 140f
+                    )
+                )
 
                 Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
                     modifier = Modifier
+                        .width(70.dp)
                         .offset(y = offsetY)
-                        .clickable { onItemSelected(screen) }
-                        .onGloballyPositioned { coordinates ->
-                            val centerX =
-                                coordinates.positionInParent().x + coordinates.size.width / 2
-                            if (iconPositions.size <= index) {
-                                iconPositions.add(centerX)
-                            } else {
-                                iconPositions[index] = centerX
-                            }
-                        }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onItemSelected(screen) }
+                        .onGloballyPositioned { pos ->
+                            iconPositions[index] =
+                                pos.positionInParent().x + pos.size.width / 2f
+                        },
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(
-                        screen.icon,
-                        contentDescription = screen.label,
-                        tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(28.dp * scale)
-                    )
-                    Spacer(Modifier.height(2.dp))
+
+                    // ICONO CON GLOW PRO+
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                shadowElevation = if (isSelected) 20f else 0f
+                                shape = CircleShape
+                                clip = false
+                            }
+                    ) {
+                        Icon(
+                            screen.icon,
+                            contentDescription = screen.label,
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.height(3.dp))
+
                     Text(
-                        text = screen.label,
+                        text = screen.label.trim(),
                         color = Color.White,
-                        fontSize = 12.sp
+                        fontSize = 14.sp,
+                        maxLines = 1
                     )
                 }
             }
@@ -331,21 +341,15 @@ fun AnimatedCurvedBottomBar2(
 }
 
 
-
-
-
-
-
-
-// ---------------------------
-// Preview
-// ---------------------------
+// ------------------------------------------------------------
+// PREVIEW
+// ------------------------------------------------------------
 @Preview(showBackground = true)
 @Composable
 fun PantallaPrincipal_Preview() {
     Scaffold(
         bottomBar = {
-            AnimatedCurvedBottomBar2(
+            AnimatedCurvedBottomBarPro(
                 items = listOf(Screen.Inventario, Screen.Clientes, Screen.Inicio, Screen.Ruta, Screen.Mapa),
                 selectedScreen = Screen.Inicio,
                 onItemSelected = {}
@@ -353,15 +357,11 @@ fun PantallaPrincipal_Preview() {
         }
     ) { innerPadding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
+            modifier = Modifier.padding(innerPadding).fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("Pantalla Principal (Preview)", style = MaterialTheme.typography.titleLarge)
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Se muestran solo componentes estáticos para el Preview")
+            Text("Pantalla Principal (Preview)")
         }
     }
 }

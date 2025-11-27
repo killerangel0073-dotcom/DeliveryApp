@@ -21,8 +21,13 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.gruposanangel.delivery.ui.screens.PantallaLoginPro // opcional, solo si quieres abrir login específicamente
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.net.URL
 import java.util.*
+import kotlin.coroutines.resumeWithException
+
+import kotlin.coroutines.resume
+
 
 class MyFcmService : FirebaseMessagingService() {
 
@@ -199,4 +204,17 @@ class MyFcmService : FirebaseMessagingService() {
             }
             .addOnFailureListener { e -> Log.e(TAG, "Error guardando token en Firestore", e) }
     }
+
+
+
+
+
+
+
+
 }
+
+
+
+
+

@@ -1,20 +1,11 @@
 package com.gruposanangel.delivery.ui.screens
 
-import TicketVentaCompleto
+
 import android.bluetooth.BluetoothDevice
-import android.util.Log
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
+
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
@@ -22,7 +13,7 @@ import androidx.navigation.navArgument
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryInventario
-import com.gruposanangel.delivery.data.VentaDao
+
 import com.gruposanangel.delivery.data.VentaRepository
 import com.gruposanangel.delivery.model.Plantila_carga
 
@@ -56,6 +47,7 @@ fun Navegador(repository: RepositoryCliente?, onLogout: () -> Unit = {}) {
                 startScreen = screenArg,
                 repository = repository,
                 inventarioRepo = inventarioRepo,
+
                 onLogout = onLogout,
                 impresoraBluetooth = impresoraBluetooth,
                 onImpresoraSeleccionada = { device -> impresoraBluetooth = device }
@@ -82,6 +74,8 @@ fun Navegador(repository: RepositoryCliente?, onLogout: () -> Unit = {}) {
 
 
 
+
+        // Detalle de carga
         composable("DETALLE_CARGA") {
             val plantilacarga = navController
                 .previousBackStackEntry
@@ -90,7 +84,6 @@ fun Navegador(repository: RepositoryCliente?, onLogout: () -> Unit = {}) {
 
             PantallaDetalleCarga(navController, plantilacarga)
         }
-
 
 
 
@@ -122,7 +115,6 @@ fun Navegador(repository: RepositoryCliente?, onLogout: () -> Unit = {}) {
 
 
 
-
         // Crear cliente
         composable("crear_cliente") {
             CrearClienteScreen(navController, repository!!)
@@ -130,6 +122,7 @@ fun Navegador(repository: RepositoryCliente?, onLogout: () -> Unit = {}) {
 
 
 
+        // Lista de clientes
         composable(
             route = "detalle_ticket_completo/{ticketId}",
             arguments = listOf(navArgument("ticketId") { type = NavType.LongType })
@@ -149,12 +142,7 @@ fun Navegador(repository: RepositoryCliente?, onLogout: () -> Unit = {}) {
 
 
 
-
-
-
-
-
-// Ventas por periodo
+        // Ventas por periodo
         composable("ventas_periodo") {
             val context = LocalContext.current
 
@@ -206,6 +194,32 @@ fun Navegador(repository: RepositoryCliente?, onLogout: () -> Unit = {}) {
                 productosPreview = null
             )
         }
+
+
+
+        // PantallaVentas2 (Nueva pantalla)
+        composable(
+            route = "pantalla_ventas2/{clienteId}",
+            arguments = listOf(navArgument("clienteId") { type = NavType.StringType })
+        ) { backStackEntry ->
+
+            val clienteId = backStackEntry.arguments?.getString("clienteId") ?: ""
+            val context = LocalContext.current
+            val db = AppDatabase.getDatabase(context)
+
+            val inventarioRepo = RepositoryInventario(db.productoDao())
+            val ventaRepository = VentaRepository(db.VentaDao())
+
+            PantallaVentas2(
+                navController = navController,
+                clienteId = clienteId,
+                repository = repository,            // 🔹 SE LO PASAMOS DIRECTO (lo recibes en Navegador)
+                inventarioRepo = inventarioRepo,    // 🔹 El repo local del inventario
+                impresoraBluetooth = impresoraBluetooth,
+                productosPreview = null
+            )
+        }
+
 
 
 

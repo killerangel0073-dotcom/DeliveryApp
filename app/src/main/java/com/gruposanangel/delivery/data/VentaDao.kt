@@ -33,6 +33,9 @@ interface VentaDao {
     @Query("SELECT * FROM ventas WHERE fecha BETWEEN :inicio AND :fin ORDER BY fecha DESC")
     suspend fun obtenerVentasPorPeriodo(inicio: Long, fin: Long): List<VentaEntity>
 
+    @Query("UPDATE ventas SET sincronizado = :sincronizado, firestoreId = :firestoreId WHERE id = :id")
+    suspend fun updateSincronizacion(id: Long, firestoreId: String?, sincronizado: Boolean)
+
 
 
 

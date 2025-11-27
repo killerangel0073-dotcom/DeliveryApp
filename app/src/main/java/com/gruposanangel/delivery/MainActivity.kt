@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -47,6 +48,9 @@ import kotlinx.coroutines.*
 import com.gruposanangel.delivery.SegundoPlano.LocationService
 import com.gruposanangel.delivery.utilidades.FcmUtils
 import androidx.work.*
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.messaging.FirebaseMessaging
 import com.gruposanangel.delivery.SegundoPlano.scheduleSyncWorkers
 import com.gruposanangel.delivery.data.UsuarioDao
 import com.gruposanangel.delivery.model.Plantilla_Producto
@@ -424,7 +428,7 @@ class MainActivity : ComponentActivity() {
                             Log.w("FCM", "No había token en SharedPreferences al loguear")
                         }
 
-                       // 🔹 5️⃣ Forzar actualización del token actual de Firebase
+                        // 🔹 5️⃣ Forzar actualización del token actual de Firebase
                         FcmUtils.updateFcmToken(uid)
 
 
@@ -446,30 +450,33 @@ class MainActivity : ComponentActivity() {
 
             // Tema personalizado con Material3
             Box(modifier = Modifier.fillMaxSize().background(backgroundColor)) {
+
+
+
+
+
+
+                val context = LocalContext.current
+
                 if (loggedIn) {
-                    Navegador(repository = repository, onLogout = {
-
-
-
-                        repository.stopEscuchaFirebase()
-
-                        // 🔹 Eliminar token de Firestore (opcional)
-                        val uid = FirebaseAuth.getInstance().currentUser?.uid
-                        val prefs = getSharedPreferences("fcm_prefs", MODE_PRIVATE)
-                        val savedToken = prefs.getString("fcm_token", null)
-                        if (uid != null && savedToken != null) {
-                            FcmUtils.removeTokenFromArray(uid, savedToken)
-                            Log.d("FCM", "Token eliminado de Firestore en logout: $savedToken")
+                    Navegador(
+                        repository = repository,
+                        onLogout = {
+                            // Llama a cerrarSesion y solo actualiza loggedIn cuando termina
+                            cerrarSesion(context) {
+                                loggedIn = false
+                            }
                         }
-
-                        FirebaseAuth.getInstance().signOut()
-                        loggedIn = false
-
-
-                    })
+                    )
                 } else {
                     PantallaLoginPro(onLoginSuccess = { loggedIn = true })
                 }
+
+
+
+
+
+
 
                 if (showLocationDialogState.value) {
                     LocationRequiredDialog(openLocationSettings = {
@@ -488,6 +495,12 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+
+
+
+
+
 
     private fun startLocationService() {
         if (hasFineLocationState.value && hasBackgroundLocationState.value) {
@@ -518,4 +531,50 @@ class MainActivity : ComponentActivity() {
 
         }
     }
+
+
+
+    fun cerrarSesion(context: Context, onComplete: () -> Unit = {}) {
+        val auth = FirebaseAuth.getInstance()
+        val currentUser = auth.currentUser
+
+        if (currentUser != null) {
+            val uid = currentUser.uid
+            val prefs = context.getSharedPreferences("fcm_prefs", Context.MODE_PRIVATE)
+            val savedToken = prefs.getString("fcm_token", null)
+
+            if (savedToken != null) {
+                // ⚡ Asegúrate de eliminar el token antes de cerrar sesión
+                CoroutineScope(Dispatchers.IO).launch {
+                    FcmUtils.removeTokenFromArray(uid, savedToken)
+                    Log.d("FCM", "🗑 Token eliminado: $savedToken")
+
+                    // Ahora sí podemos cerrar sesión
+                    withContext(Dispatchers.Main) {
+                        prefs.edit().remove("fcm_token").apply()
+                        auth.signOut()
+                        Log.d("FCM", "🔴 Sesión cerrada correctamente")
+                        onComplete()
+                    }
+                }
+            } else {
+                // No hay token, simplemente cerramos sesión
+                prefs.edit().remove("fcm_token").apply()
+                auth.signOut()
+                Log.d("FCM", "🔴 Sesión cerrada (sin token)")
+                onComplete()
+            }
+        } else {
+            Log.w("FCM", "⚠ No hay usuario autenticado; solo ejecutando onComplete")
+            onComplete()
+        }
+    }
+
+
+
+
+
+
+
+
 }

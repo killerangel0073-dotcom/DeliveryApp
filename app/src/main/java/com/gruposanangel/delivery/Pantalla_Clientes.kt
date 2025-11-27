@@ -93,7 +93,9 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
 
 
                             .clickable {
-                                navController.navigate("pantalla_venta/${cliente.id}")
+                                //navController.navigate("pantalla_venta/${cliente.id}")
+                                navController.navigate("pantalla_ventas2/${cliente.id}")
+
                             }
 
                         ,
