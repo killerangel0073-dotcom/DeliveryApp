@@ -235,6 +235,8 @@ fun PantallaDetalleTicketCompleto(
                                     clienteId = ventaEntity?.clienteId ?: ""
                                 )
 
+
+
                                 withContext(Dispatchers.Main) {
                                     Toast.makeText(contexto, "Ticket impreso correctamente", Toast.LENGTH_SHORT).show()
                                 }

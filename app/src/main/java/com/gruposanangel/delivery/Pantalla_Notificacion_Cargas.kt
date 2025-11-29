@@ -265,7 +265,7 @@ fun PantallaNotificaciones(navController: NavController) {
 
                                             // Guardar en el SavedStateHandle del backStackEntry actual
                                             navController.currentBackStackEntry?.savedStateHandle?.set("carga", carga)
-                                            
+
 
                                             // Navegar al detalle asegurando singleTop
                                             navController.navigate("DETALLE_CARGA") {
@@ -316,4 +316,3 @@ fun PantallaNotificacionesPreview() {
     val navController = rememberNavController()
     PantallaNotificaciones(navController)
 }
-

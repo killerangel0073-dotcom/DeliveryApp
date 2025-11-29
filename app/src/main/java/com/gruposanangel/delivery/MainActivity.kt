@@ -182,6 +182,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Manejar notificación si abrió la app
+        val ticketIdFromIntent = intent?.getLongExtra("ticketId", -1L)?.takeIf { it != -1L }
+        val openPantallaInicio = intent?.getBooleanExtra("openPantallaInicio", false) ?: false
+
+
 
         // Programar workers periódicos
         scheduleSyncWorkers(this)
@@ -367,9 +372,6 @@ class MainActivity : ComponentActivity() {
         setContent {
 
 
-
-
-
             // Controlador de UI del sistema para barras de estado y navegación
             val systemUiController = rememberSystemUiController()
             val backgroundColor = Color(0xFFFF0000)
@@ -464,9 +466,10 @@ class MainActivity : ComponentActivity() {
                         onLogout = {
                             // Llama a cerrarSesion y solo actualiza loggedIn cuando termina
                             cerrarSesion(context) {
-                                loggedIn = false
-                            }
-                        }
+                                loggedIn = false }
+
+                        },
+                        autoOpenTicketId = ticketIdFromIntent // ⚡ Nuevo parámetro
                     )
                 } else {
                     PantallaLoginPro(onLoginSuccess = { loggedIn = true })

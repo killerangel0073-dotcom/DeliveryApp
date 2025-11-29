@@ -188,32 +188,54 @@ class VentaViewModel(
 
                 // 4. Finalizar
                 // ---- Aquí se limpia carrito y se llama onResultado ----
+                // 4. Finalizar
                 withContext(Dispatchers.Main) {
 
-
-
+                    // Obtener token del supervisor
                     val tokenSupervisor = obtenerTokenSupervisor()
                     if (!tokenSupervisor.isNullOrEmpty()) {
                         val totalVenta = productosVenta.sumOf { it.precio * it.cantidad }
+
+
+                        // Determinar ID de venta a enviar
+                        val ventaIdParaNotificacion = if (hayInternet && estadoRutaActual is EstadoRuta.ConRuta) {
+                            // Intentar usar firestoreId si existe
+                            val (exito, response) = guardarVentaEnServidorSuspend(
+                                ventaLocalId,
+                                clienteId,
+                                clienteNombre,
+                                productosVenta,
+                                metodoPago,
+                                uidVendedor,
+                                estadoRutaActual.almacenId
+                            )
+                            if (exito) JSONObject(response).optString("ventaId", ventaLocalId.toString())
+                            else ventaLocalId.toString()
+                        } else {
+                            ventaLocalId.toString()
+                        }
+
+                        // Enviar notificación
                         enviarNotificacionVenta(
                             token = tokenSupervisor,
                             vendedorNombre = obtenerNombreVendedor(),
+                            rutaAsignada = obtenerNombreRuta(),
+
+
                             clienteNombre = clienteNombre,
                             totalVenta = totalVenta,
-                            clienteFotoUrl = clienteFotoUrl
+                            clienteFotoUrl = clienteFotoUrl,
+                            ventaId = ventaIdParaNotificacion
+
                         )
+
                     }
-
-
-
-
-
-
 
                     limpiarCarrito()
                     _estaProcesando.value = false
                     onResultado(true, mensajeFinal, ventaLocalId)
                 }
+
 
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -236,13 +258,26 @@ class VentaViewModel(
     fun enviarNotificacionVenta(
         token: String,
         vendedorNombre: String,
+        rutaAsignada: String,
+
         clienteNombre: String,
         totalVenta: Double,
-        clienteFotoUrl: String?
+        clienteFotoUrl: String?,
+        ventaId: String // <-- nuevo parámetro
     ) {
         val client = OkHttpClient()
 
-        val mensaje = "El vendedor $vendedorNombre realizó una venta al cliente $clienteNombre de $${"%.2f".format(totalVenta)}"
+        //val mensaje = "$rutaAsignada al cliente $clienteNombre por $${"%.2f".format(totalVenta)}"
+        //val mensaje = "📦  $rutaAsignada al cliente $clienteNombre por 💰 $${"%.2f".format(totalVenta)}"
+        val mensaje = """
+                  📦 RUTA: $rutaAsignada
+                  👤 CLIENTE: $clienteNombre
+                  💰 TOTAL: $${"%.2f".format(totalVenta)}
+                   """.trimIndent()
+
+
+
+
 
         val json = JSONObject().apply {
             put("token", token)
@@ -250,6 +285,7 @@ class VentaViewModel(
             put("mensaje", mensaje)
             put("imagen", clienteFotoUrl ?: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/74/Dominos_pizza_logo.svg/768px-Dominos_pizza_logo.svg.png")
             put("estilo", "bigpicture") // Le indicamos a la Cloud Function que use BigPicture
+            put("ventaId", ventaId) // <-- aquí enviamos el ID
         }
 
         val requestBody = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -271,6 +307,24 @@ class VentaViewModel(
 
 
     //
+
+    private suspend fun obtenerNombreRuta(): String {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return "Sin ruta"
+
+        return try {
+            val db = FirebaseFirestore.getInstance()
+            val userDoc = db.collection("users").document(uid).get().await()
+            val rutaRef = userDoc.get("rutaAsignada") as? com.google.firebase.firestore.DocumentReference
+                ?: return "Sin ruta"
+
+            val rutaSnap = rutaRef.get().await()
+            rutaSnap.getString("nombre") ?: "Sin ruta"
+
+        } catch (e: Exception) {
+            "Sin ruta"
+        }
+    }
+
 
     private suspend fun obtenerNombreVendedor(): String {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return "Vendedor"
@@ -421,7 +475,6 @@ class VentaViewModelPreview : ViewModel() {
         onResultado(true, "Venta simulada en preview", 9999L)
     }
 }
-
 
 
 

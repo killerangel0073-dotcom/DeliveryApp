@@ -21,7 +21,15 @@ import com.gruposanangel.delivery.model.Plantila_carga
 // NAV HOST
 // ---------------------------
 @Composable
-fun Navegador(repository: RepositoryCliente?, onLogout: () -> Unit = {}) {
+fun Navegador(
+    repository: RepositoryCliente?,
+    onLogout: () -> Unit = {},
+    autoOpenTicketId: Long? = null // ⚡ Nuevo parámetro
+) {
+
+
+
+
     val navController = rememberNavController()
     var impresoraBluetooth by remember { mutableStateOf<BluetoothDevice?>(null) }
     val context = LocalContext.current
@@ -226,4 +234,21 @@ fun Navegador(repository: RepositoryCliente?, onLogout: () -> Unit = {}) {
 
 
     }
+
+    LaunchedEffect(autoOpenTicketId) {
+        autoOpenTicketId?.let { id ->
+
+            // Guardamos el ID en savedStateHandle para que la pantalla lo lea si lo necesita
+            navController.currentBackStackEntry
+                ?.savedStateHandle
+                ?.set("ticketId", id)
+
+            navController.navigate("detalle_ticket_completo/$id") {
+                popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                launchSingleTop = true
+            }
+        }
+    }
+
+
 }

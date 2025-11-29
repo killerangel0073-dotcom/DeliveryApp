@@ -184,7 +184,7 @@ fun PantallaDetalleCarga(
 
             if (!cargaReal.aceptada) { // <-- solo mostrar si no ha sido aceptada
 
-            // Botones
+                // Botones
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -256,7 +256,7 @@ fun PantallaDetalleCarga(
             }
 
         }
-}
+    }
 }
 
 @Preview(showBackground = true)

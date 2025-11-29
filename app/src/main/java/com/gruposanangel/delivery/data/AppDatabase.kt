@@ -7,14 +7,13 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [ClienteEntity::class, ProductoEntity::class, VentaEntity::class, VentaDetalleEntity::class, UsuarioEntity::class],
-    version = 4 // subimos la versión
+    version = 5 // subimos la versión
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun clienteDao(): ClienteDao
     abstract fun productoDao(): ProductoDao
     abstract fun VentaDao(): VentaDao
-
     abstract fun usuarioDao(): UsuarioDao
 
 
