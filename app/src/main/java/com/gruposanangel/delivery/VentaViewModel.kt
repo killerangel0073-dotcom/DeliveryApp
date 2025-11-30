@@ -220,8 +220,6 @@ class VentaViewModel(
                             token = tokenSupervisor,
                             vendedorNombre = obtenerNombreVendedor(),
                             rutaAsignada = obtenerNombreRuta(),
-
-
                             clienteNombre = clienteNombre,
                             totalVenta = totalVenta,
                             clienteFotoUrl = clienteFotoUrl,
@@ -270,7 +268,7 @@ class VentaViewModel(
         //val mensaje = "$rutaAsignada al cliente $clienteNombre por $${"%.2f".format(totalVenta)}"
         //val mensaje = "📦  $rutaAsignada al cliente $clienteNombre por 💰 $${"%.2f".format(totalVenta)}"
         val mensaje = """
-                  📦 RUTA: $rutaAsignada
+                  📦 RUTA: Borrame $rutaAsignada
                   👤 CLIENTE: $clienteNombre
                   💰 TOTAL: $${"%.2f".format(totalVenta)}
                    """.trimIndent()
