@@ -1,40 +1,33 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-
-
-    <!-- Permiso de Internet -->
+    <!-- Permisos -->
     <uses-permission android:name="android.permission.INTERNET"/>
-
-
-
-
-    <!-- Permisos de ubicación -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-
-    <!-- Permiso para servicios en primer plano -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-
-    <!-- Permiso para notificaciones Android 13+ -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Permisos Bluetooth -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+
+
+
+
         android:usesPermissionFlags="neverForLocation" />
-
     <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
-
-    <!-- Solo necesario si escribes fuera de almacenamiento privado Android < 10 -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
-
-    <!-- BOOT_COMPLETED -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
 
     <application
         android:allowBackup="true"
@@ -52,33 +45,31 @@
             android:foregroundServiceType="location"
             android:exported="false" />
 
+        <!-- WatchdogReceiver (internal) -->
+        <receiver
+            android:name=".SegundoPlano.WatchdogReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <!-- Receiver para iniciar servicio al encender el dispositivo -->
         <receiver
             android:name=".SegundoPlano.BootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
             </intent-filter>
         </receiver>
 
-
         <!-- Firebase Messaging Service -->
         <service
-            android:name=".MyFcmService"
+            android:name=".MyFirebaseMessagingService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
-
-
-
-
-
-
-
-
 
         <!-- API Key Google Maps -->
         <meta-data

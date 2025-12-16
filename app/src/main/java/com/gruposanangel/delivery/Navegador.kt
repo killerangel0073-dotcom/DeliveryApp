@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.gruposanangel.delivery.MainActivity
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryInventario
@@ -130,6 +131,20 @@ fun Navegador(
 
 
 
+
+
+
+
+
+        // Mapa
+        composable("MAPA_SCREEN") {
+            MapaScreen()
+        }
+
+
+
+
+
         // Lista de clientes
         composable(
             route = "detalle_ticket_completo/{ticketId}",
@@ -146,6 +161,26 @@ fun Navegador(
                 impresoraBluetooth = impresoraBluetooth // 🔹 PASAR LA IMPRESORA AQUÍ
             )
         }
+
+
+
+        // 🔍 DETALLE DE CLIENTE
+        composable(
+            route = "detalle_cliente/{clienteId}",
+            arguments = listOf(
+                navArgument("clienteId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+
+            val clienteId = backStackEntry.arguments?.getString("clienteId") ?: ""
+
+            DetalleClienteScreen(
+                clienteId = clienteId,
+                navController = navController,
+                repository = repository
+            )
+        }
+
 
 
 
@@ -203,6 +238,19 @@ fun Navegador(
             )
         }
 
+        composable(
+            route = "detalle_ticket_supervisor/{firestoreId}"
+        ) { backStackEntry ->
+
+            val firestoreId = backStackEntry.arguments?.getString("firestoreId") ?: ""
+
+            DetalleTicketSupervisorScreen(
+                firestoreId = firestoreId,
+                navController = navController,
+                impresoraBluetooth = null // si el supervisor imprime
+            )
+        }
+
 
 
         // PantallaVentas2 (Nueva pantalla)
@@ -249,6 +297,20 @@ fun Navegador(
             }
         }
     }
+
+
+
+    val openScreen = (context as? MainActivity)?.intent?.action
+
+    LaunchedEffect(openScreen) {
+        if (openScreen == "OPEN_MAPA") {
+            navController.navigate("MAPA_SCREEN") {
+                popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                launchSingleTop = true
+            }
+        }
+    }
+
 
 
 }

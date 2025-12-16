@@ -231,6 +231,25 @@ class RepositoryCliente(private val dao: ClienteDao) {
     }
 
 
+    suspend fun actualizarUbicacionClienteLocal(
+        clienteId: String,
+        lat: Double,
+        lon: Double
+    ) {
+        val now = System.currentTimeMillis()
+
+        dao.actualizarUbicacion(
+            clienteId = clienteId,
+            lat = lat,
+            lon = lon,
+            syncStatus = false,
+            lastModified = now
+        )
+
+        Log.d(TAG, "Ubicación actualizada localmente id=$clienteId")
+    }
+
+
     fun stopEscuchaFirebase() {
         listenerRegistration?.remove()
         listenerRegistration = null

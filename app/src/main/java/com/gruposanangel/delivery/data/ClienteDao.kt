@@ -34,4 +34,21 @@ interface ClienteDao {
     @Query("SELECT * FROM clientes WHERE id = :id")
     suspend fun getClientePorId(id: String): ClienteEntity?
 
+
+    @Query("""
+    UPDATE clientes SET
+        ubicacionLat = :lat,
+        ubicacionLon = :lon,
+        syncStatus = :syncStatus,
+        lastModified = :lastModified
+    WHERE id = :clienteId
+""")
+    suspend fun actualizarUbicacion(
+        clienteId: String,
+        lat: Double,
+        lon: Double,
+        syncStatus: Boolean,
+        lastModified: Long
+    )
+
 }

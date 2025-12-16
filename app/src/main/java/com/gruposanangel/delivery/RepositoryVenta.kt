@@ -74,5 +74,11 @@ class VentaRepository(private val ventaDao: VentaDao) {
     }
 
 
+    suspend fun obtenerFirestoreIdDeVenta(ventaLocalId: Long): String? =
+        withContext(Dispatchers.IO) {
+            ventaDao.obtenerFirestoreIdDeVenta(ventaLocalId)
+        }
+
+
 
 }

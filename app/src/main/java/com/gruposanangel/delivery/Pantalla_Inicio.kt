@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Print
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PaintingStyle.Companion.Stroke
@@ -56,6 +57,9 @@ import java.util.*
 import com.gruposanangel.delivery.utilidades.hayInternet
 import kotlin.math.cos
 import kotlin.math.sin
+import com.gruposanangel.delivery.SegundoPlano.LocationState
+
+
 
 
 
@@ -78,7 +82,9 @@ fun Pantalla_Inicio(
 ) {
 
 
-    val alertaVelocidad = LocationService.alertaVelocidad
+    val velocidad by LocationState.velocidad.collectAsState()
+
+
     var mostrarDialogo by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
@@ -86,11 +92,7 @@ fun Pantalla_Inicio(
     val fechaHora = remember { mutableStateOf("") }
     val prefs = context.getSharedPreferences("impresora_prefs", Context.MODE_PRIVATE)
 
-    LaunchedEffect(alertaVelocidad.value) {
-        if (alertaVelocidad.value != null) {
-            mostrarDialogo = true
-        }
-    }
+
 
 
     LaunchedEffect(Unit) {
@@ -183,99 +185,6 @@ fun Pantalla_Inicio(
 
 
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    // Botón izquierdo: Iniciar rastreo
-                    FloatingActionButton(
-                        onClick = {
-                            val intent = Intent(context, LocationService::class.java).apply {
-                                action = LocationService.ACTION_START
-                            }
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                context.startForegroundService(intent)
-                            } else {
-                                context.startService(intent)
-                            }
-                            Toast.makeText(context, "Rastreo iniciado", Toast.LENGTH_SHORT).show()
-                        },
-                        containerColor = Color(0xFF00FF00),
-                        contentColor = Color.White
-                    ) {
-                        Icon(Icons.Default.GppMaybe, contentDescription = "Iniciar rastreo")
-                    }
-
-
-                    FloatingActionButton(
-                        onClick = {
-                            val intent = Intent(context, LocationService::class.java).apply {
-                                action = LocationService.ACTION_TEST_ALERT
-                            }
-                            context.startService(intent)
-                        },
-                        containerColor = Color(0xFFFFA000),
-                        contentColor = Color.White
-                    ) {
-                        Icon(Icons.Default.GppMaybe, contentDescription = "Probar alerta")
-                    }
-
-
-
-
-
-                    FloatingActionButton(
-                        onClick = {
-                            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                                if (task.isSuccessful) {
-                                    val tokenActual = task.result
-                                    Toast.makeText(context, "Token FCM: $tokenActual", Toast.LENGTH_LONG).show()
-
-                                    val imagenUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/7/74/Dominos_pizza_logo.svg/768px-Dominos_pizza_logo.svg.png"
-
-                                    enviarNotificacionprueba(
-                                        token = tokenActual,
-                                        titulo = "Notificación Bonita",
-                                        mensaje = "¡Esta notificación tiene imagen y estilo moderno!",
-                                        imagen = imagenUrl
-                                    )
-
-                                } else {
-                                    Toast.makeText(context, "Error obteniendo token FCM", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        },
-                        containerColor = Color(0xFF000000),
-                        contentColor = Color.White
-                    ) {
-                        Icon(Icons.Default.Message, contentDescription = "Enviar notificación")
-                    }
-
-
-
-
-
-
-
-
-
-                    // Botón derecho: Detener rastreo
-                    FloatingActionButton(
-                        onClick = {
-                            val intent = Intent(context, LocationService::class.java).apply {
-                                action = LocationService.ACTION_STOP
-                            }
-                            context.startService(intent)
-                            Toast.makeText(context, "Rastreo detenido", Toast.LENGTH_SHORT).show()
-                        },
-                        containerColor = Color(0xFFFF0000),
-                        contentColor = Color.White
-                    ) {
-                        Icon(Icons.Default.CancelPresentation, contentDescription = "Detener rastreo")
-                    }
-                }
 
 
 
@@ -312,6 +221,7 @@ fun Pantalla_Inicio(
                 .fillMaxWidth()
                 .padding(6.dp)
         ) {
+            Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = if (estadoInternet.value) "Conectado a Internet" else "Sin conexión a Internet",
                 style = MaterialTheme.typography.bodyLarge,
@@ -326,7 +236,7 @@ fun Pantalla_Inicio(
 
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(96.dp))
 
         Column(
             modifier = Modifier
@@ -335,7 +245,14 @@ fun Pantalla_Inicio(
         ) {
 
             //Velocimetro(velocidad = LocationService.velocidadActual.value)
-            VelocimetroTeslaRojo(velocidad = LocationService.velocidadActual.value)
+            VelocimetroTeslaRojo(velocidad = velocidad)
+
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+
+
+
 
         }
 
@@ -343,130 +260,26 @@ fun Pantalla_Inicio(
             Spacer(modifier = Modifier.height(30.dp))
 
 
-            // 🔹 Zona inferior: Impresora seleccionada
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = selectedPrinter?.name?.let { "Impresora seleccionada: $it" }
-                        ?: "No hay impresora seleccionada",
-                    style = MaterialTheme.typography.titleLarge
-                )
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-
-                // Botón para mostrar diálogo de selección
-                Button(
-                    onClick = {
-
-
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            // Android 12+
-                            if (!hasBluetoothPermission) {
-                                bluetoothPermissionLauncher.launch(bluetoothPermissions)
-                                return@Button
-                            }
-                        }
-
-                        // Si llega aquí, ya hay permisos o el Android es <12
-                        val adapter = BluetoothAdapter.getDefaultAdapter()
-                        pairedDevices = adapter?.bondedDevices?.toList() ?: emptyList()
-                        showPrinterDialog = true
-
-                    },
-
-
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFFF0000),
-                        contentColor = Color.White
-                    )
-                ) {
-
-
-                    Text("Seleccionar impresora")
-                }
-            }
-
-            // Diálogo de selección de impresora
-            if (showPrinterDialog) {
-                AlertDialog(
-                    onDismissRequest = { showPrinterDialog = false },
-                    title = { Text("Seleccionar impresora") },
-
-
-                    text = {
-                        if (pairedDevices.isEmpty()) {
-                            Text("No hay impresoras emparejadas")
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 300.dp) // evita que el diálogo crezca demasiado
-                            ) {
-
-                                items(pairedDevices) { device ->
-                                    Text(
-                                        text = device.name ?: "Desconocido",
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                selectedPrinter = device
-                                                prefs.edit().putString("impresora_bluetooth", device.address).apply()
-                                                onImpresoraSeleccionada(device)
-                                                showPrinterDialog = false
-                                            }
-                                            .padding(12.dp),
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
-                    },
-
-
-
-
-                    confirmButton = {},
-                    dismissButton = {
-                        TextButton(
-                            onClick = { showPrinterDialog = false },
-                            colors = ButtonDefaults.textButtonColors(contentColor = Color.White)
-                        ) { Text("Cancelar", color = Color.White) }
-                    },
-                    containerColor = Color(0xFFFF0000),
-                    titleContentColor = Color.White,
-                    textContentColor = Color.White
-                )
-            }
         }
     }
 
 
-    if (mostrarDialogo && alertaVelocidad.value != null) {
-        AlertDialog(
-            onDismissRequest = { /* evitar cerrar tocando afuera */ },
-            title = { Text("⚠️ Exceso de velocidad") },
-            text = {
-                Text("Estás circulando a ${alertaVelocidad.value!!.toInt()} km/h.\nPor favor reduce la velocidad.")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        mostrarDialogo = false
-                        LocationService.alertaVelocidad.value = null
-                        LocationService.alarmaActiva = false   // ✅ AQUÍ VA
-                        LocationService.detenerAlarma() // ❗ AQUI SE DETIENE EL SONIDO
-                    }
-                ) {
-                    Text("Aceptar")
-                }
-            }
-        )
-    }
+
 
 
 }
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -584,47 +397,8 @@ fun enviarNotificacionprueba(token: String, titulo: String, mensaje: String, ima
 
 
 
-fun imprimirTicket58mm(device: BluetoothDevice, cliente: String, productos: List<ProductoTicket>) {
-    val uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-    try {
-        val socket: BluetoothSocket = device.createRfcommSocketToServiceRecord(uuid)
-        socket.connect()
-        val outputStream: OutputStream = socket.outputStream
 
-        val sb = StringBuilder()
-        val fechaHora = SimpleDateFormat("dd/MM/yy HH:mm:ss", Locale.getDefault()).format(Date())
 
-        sb.append("      SUPERMERCADO\n")
-        sb.append("Cliente: $cliente\n")
-        sb.append("Fecha: $fechaHora\n")
-        sb.append("-------------------------------\n")
-        sb.append("CANT DESCRIPCION    PRECIO\n")
-        sb.append("-------------------------------\n")
-
-        var total = 0.0
-        for (p in productos) {
-            val subtotal = p.cantidad * p.precio
-            total += subtotal
-            val nombreAjustado = if (p.nombre.length > 16) p.nombre.take(16) else p.nombre.padEnd(16)
-            val cantidadStr = p.cantidad.toString().padEnd(4)
-            val precioStr = String.format("%.2f", subtotal).padStart(6)
-            sb.append("$cantidadStr$nombreAjustado$precioStr\n")
-        }
-
-        sb.append("-------------------------------\n")
-        sb.append("TOTAL:".padEnd(24) + String.format("%.2f", total).padStart(8) + "\n")
-        sb.append("\n")
-        sb.append("¡Gracias por su compra!\n")
-        sb.append("\n\n\n") // saltos de papel
-
-        outputStream.write(sb.toString().toByteArray(Charsets.UTF_8))
-        outputStream.flush()
-        outputStream.close()
-        socket.close()
-    } catch (e: Exception) {
-        e.printStackTrace()
-    }
-}
 
 @Preview(showBackground = true)
 @Composable

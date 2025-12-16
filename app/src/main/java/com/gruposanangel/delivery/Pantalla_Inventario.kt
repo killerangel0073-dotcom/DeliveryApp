@@ -1,11 +1,11 @@
 package com.gruposanangel.delivery.ui.screens
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
+import android.net.Uri
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -50,28 +50,30 @@ import kotlin.math.absoluteValue
 import kotlin.math.pow
 import java.text.NumberFormat
 import java.util.Locale
-
-
+import com.google.firebase.firestore.ListenerRegistration
+import java.io.File
 
 // ---------- CARRUSEL DE CATEGORIAS ----------
 @Composable
 fun CategoriaCarrusel(categorias: List<String>) {
 
-    // Map de cada categoría a su drawable
-    val imagenesCategorias: Map<String, Int> = mapOf(
-        "Cacahuates" to R.drawable.cacahuates,
-        "Semillas" to R.drawable.semillas,
-        "Gomitas" to R.drawable.gomitas,
-        "Chocolates" to R.drawable.chocolates,
-        "Dulces" to R.drawable.dulces
-    )
+    // Map de cada categoría a su drawable (recordado para no recrearlo cada recomposición)
+    val imagenesCategorias = remember {
+        mapOf(
+            "Cacahuates" to R.drawable.cacahuates,
+            "Semillas" to R.drawable.semillas,
+            "Gomitas" to R.drawable.gomitas,
+            "Chocolates" to R.drawable.chocolates,
+            "Dulces" to R.drawable.dulces
+        )
+    }
 
     val itemWidth = 140.dp
     val itemHeight = 100.dp
     val itemSpacing = 16.dp
     val containerWidthPx = remember { mutableStateOf(0f) }
 
-    val initialIndex = categorias.size / 2
+    val initialIndex = (categorias.size / 2).coerceAtLeast(0)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     var selectedIndex by remember { mutableStateOf(initialIndex) }
     val coroutineScope = rememberCoroutineScope()
@@ -98,17 +100,17 @@ fun CategoriaCarrusel(categorias: List<String>) {
                 // Animaciones suaves para selección
                 val overlayAlpha by animateFloatAsState(
                     targetValue = if (isSelected) 0.15f else 0.33f,
-                    animationSpec = tween(1000)
+                    animationSpec = androidx.compose.animation.core.tween(1000)
                 )
-                // Elevación y borde animados
+                // Elevación animada
                 val animatedElevation by animateDpAsState(
                     targetValue = if (isSelected) 16.dp else 8.dp,
-                    animationSpec = tween(1000)
+                    animationSpec = androidx.compose.animation.core.tween(1000)
                 )
                 // Borde animado
                 val animatedBorderColor by animateColorAsState(
                     targetValue = if (isSelected) Color.Red else Color.Transparent,
-                    animationSpec = tween(1000)
+                    animationSpec = androidx.compose.animation.core.tween(1000)
                 )
 
                 Card(
@@ -128,7 +130,7 @@ fun CategoriaCarrusel(categorias: List<String>) {
                             val minScale = 0.85f
                             scale = maxScale - (maxScale - minScale) * factor
                         }
-                        .clip(RoundedCornerShape(16.dp)) // 👈 Recorta el contenido con la misma forma
+                        .clip(RoundedCornerShape(16.dp))
                         .clickable {
                             selectedIndex = index
                             coroutineScope.launch { listState.animateScrollToItem(index) }
@@ -137,7 +139,7 @@ fun CategoriaCarrusel(categorias: List<String>) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         Image(
                             painter = painterResource(
-                                imagenesCategorias[categoria] ?: R.drawable.repartidor // 👈 usa la imagen del mapa o fallback
+                                imagenesCategorias[categoria] ?: R.drawable.repartidor
                             ),
                             contentDescription = categoria,
                             contentScale = ContentScale.Crop,
@@ -166,30 +168,15 @@ fun CategoriaCarrusel(categorias: List<String>) {
     }
 }
 
-
-
-
 // ---------- RESUMEN INVENTARIO ----------
 @Composable
 fun ResumenInventario(
     totalProductos: Int,
     valorTotal: Double,
-    notificaciones: List<Notificacion>, // 🔹 lista real
+    notificaciones: List<Notificacion>,
     onNotificacionClick: () -> Unit
 ) {
     val totalNotificaciones = notificaciones.size
-
-
-
-
-
-
-
-
-
-
-
-
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -222,9 +209,11 @@ fun ResumenInventario(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
 
-                val nf = NumberFormat.getNumberInstance(Locale.US).apply {
-                    minimumFractionDigits = 2
-                    maximumFractionDigits = 2
+                val nf = remember {
+                    NumberFormat.getNumberInstance(Locale.US).apply {
+                        minimumFractionDigits = 2
+                        maximumFractionDigits = 2
+                    }
                 }
 
                 Text(
@@ -256,13 +245,7 @@ fun AnimatedNotificationButton(
 
     val coroutineScope = rememberCoroutineScope()
 
-
-
-
-
-
     Box(modifier = modifier) {
-        // Botón de notificaciones
         FloatingActionButton(
             onClick = {
                 clicked = true
@@ -279,13 +262,12 @@ fun AnimatedNotificationButton(
             Icon(Icons.Default.Notifications, contentDescription = "Notificaciones")
         }
 
-        // Badge solo si hay notificaciones
         if (notificaciones > 0) {
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .align(Alignment.TopEnd) // ✅ Esto lo pone arriba a la derecha del FAB
-                    .offset(x = 6.dp, y = (-6).dp) // Ajusta para que quede sobre el borde
+                    .align(Alignment.TopEnd)
+                    .offset(x = 6.dp, y = (-6).dp)
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -303,21 +285,7 @@ fun AnimatedNotificationButton(
             }
         }
     }
-
-
-
-
-
-
-
-
-
 }
-
-
-
-
-
 
 // ---------- UI PRINCIPAL PURA (para preview y pruebas) ----------
 @Composable
@@ -325,15 +293,13 @@ fun PantallaInventarioContent(
     navController: NavController,
     plantillaProductos: List<Plantilla_Producto>,
     listaDeNotificaciones: List<Notificacion> = emptyList(),
-    rutaAsignada: String? = null, // 🆕 agregamos esto
-    rutaCargada: Boolean = true // 🆕 indica si ya cargamos/intentamos cargar la ruta
+    rutaAsignada: String? = null,
+    rutaCargada: Boolean = true
 ) {
 
-
-
     val categorias = listOf("Cacahuates", "Semillas", "Gomitas", "Chocolates", "Dulces")
-    val totalProductos = plantillaProductos.sumOf { it.cantidad }
-    val valorTotal = plantillaProductos.sumOf { it.cantidad * it.precio }
+    val totalProductos by remember(plantillaProductos) { mutableStateOf(plantillaProductos.sumOf { it.cantidad }) }
+    val valorTotal by remember(plantillaProductos) { mutableStateOf(plantillaProductos.sumOf { it.cantidad * it.precio }) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -349,18 +315,15 @@ fun PantallaInventarioContent(
             CategoriaCarrusel(categorias)
             Spacer(modifier = Modifier.height(16.dp))
 
-
-
             // Contenido de productos o mensajes
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f), // ocupa solo el espacio disponible
+                    .weight(1f),
                 contentAlignment = Alignment.Center
             ) {
                 when {
                     !rutaCargada -> {
-                        // Indicador de carga **solo en el área de productos**
                         CircularProgressIndicator(color = Color(0xFFFF0000))
                     }
                     rutaAsignada == null -> {
@@ -381,7 +344,7 @@ fun PantallaInventarioContent(
                     }
                     else -> {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(plantillaProductos) { producto ->
+                            items(plantillaProductos, key = { it.id }) { producto ->
                                 val totalProducto = producto.cantidad * producto.precio
                                 Card(
                                     shape = RoundedCornerShape(12.dp),
@@ -467,20 +430,15 @@ fun PantallaInventarioContent(
     }
 }
 
-
-
 fun ProductoEntity.toModel(): Plantilla_Producto {
     return Plantilla_Producto(
         id = this.id,
         nombre = this.nombre,
         precio = this.precio,
-        cantidad = this.cantidadDisponible,   // 👈 ahora coincide con tu modelo
+        cantidad = this.cantidadDisponible,
         imagenUrl = this.imagenUrl ?: ""
     )
 }
-
-
-
 
 // ---------- UI CON FLOW PARA PRODUCCIÓN ----------
 @Composable
@@ -492,12 +450,13 @@ fun PantallaInventario(
         .obtenerProductosLocal()
         .collectAsState(initial = emptyList())
 
-    val productos = productosEntityState.value.map { it.toModel() }
+    val productos = remember(productosEntityState.value) {
+        productosEntityState.value.map { it.toModel() }
+    }
 
     val notificaciones = remember { mutableStateListOf<Notificacion>() }
 
     val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
-    val coroutineScope = rememberCoroutineScope()
 
     // Estado de la ruta
     var rutaAsignada by remember { mutableStateOf<String?>(null) }
@@ -506,6 +465,9 @@ fun PantallaInventario(
     val formatoFecha = remember {
         java.text.SimpleDateFormat("EEEE, dd 'de' MMMM 'de' yyyy, hh:mm a", java.util.Locale("es", "MX"))
     }
+
+    // ListenerRegistration guardado para evitar fugas
+    val listenerReg = remember { mutableStateOf<ListenerRegistration?>(null) }
 
     LaunchedEffect(uid) {
         if (uid == null) {
@@ -545,22 +507,17 @@ fun PantallaInventario(
                             if (!nombreAlmacen.isNullOrEmpty()) {
                                 rutaAsignada = nombreAlmacen
 
-
-
-
-
                                 // 👇 Aquí escuchamos las notificaciones en tiempo real
-                                db.collection("ordenesTransferencia")
+                                // Guardamos la ListenerRegistration para luego removerla y evitar fugas
+                                listenerReg.value = db.collection("ordenesTransferencia")
                                     .whereEqualTo("destino", nombreAlmacen)
                                     .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
                                     .addSnapshotListener { snapshots, error ->
                                         if (error != null) return@addSnapshotListener
                                         if (snapshots != null) {
-
-
                                             val nuevas = snapshots.documents.mapNotNull { doc ->
                                                 val estado = doc.getString("estado")
-                                                if (estado == "PENDIENTE") { // ✅ solo pendientes
+                                                if (estado == "PENDIENTE") {
                                                     val fecha = doc.getTimestamp("timestamp")?.toDate()
                                                     val fechaFormateada = fecha?.let { formatoFecha.format(it) } ?: ""
                                                     Notificacion(
@@ -579,11 +536,6 @@ fun PantallaInventario(
                                             notificaciones.addAll(nuevas)
                                         }
                                     }
-
-
-
-
-
 
                             } else {
                                 rutaAsignada = null
@@ -605,12 +557,17 @@ fun PantallaInventario(
             }
     }
 
+    // Remover listener cuando uid cambie o composable se dispose
+    DisposableEffect(key1 = uid) {
+        onDispose {
+            listenerReg.value?.remove()
+            listenerReg.value = null
+        }
+    }
+
     // Siempre renderizamos la pantalla completa (el contenido decide qué mostrar en el área de productos)
     PantallaInventarioContent(navController, productos, notificaciones, rutaAsignada, rutaCargada)
 }
-
-
-
 
 // ---------- INTERFAZ DE REPO ----------
 interface InventarioRepoInterface {

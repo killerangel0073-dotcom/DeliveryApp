@@ -1,5 +1,6 @@
 package com.gruposanangel.delivery.ui.screens
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -26,27 +27,39 @@ import coil.compose.AsyncImage
 import com.gruposanangel.delivery.Plantilla_Cliente
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.RepositoryCliente
-
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaClientes(navController: NavController, repository: RepositoryCliente) {
+    // Guardamos la búsqueda (rememberSaveable si quieres persistir en rotaciones)
     var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
     var buscando by remember { mutableStateOf(false) }
 
-    // ✅ Carga los clientes desde la base de datos local
+    // Carga los clientes desde la base de datos local (Flow -> State)
     val clientesLocal by repository.obtenerClientesLocal().collectAsState(initial = emptyList())
 
-    // Filtrado por búsqueda
-    val listaFiltrada = if (buscando) {
-        clientesLocal
-            .filter { it.nombreNegocio.contains(textFieldValue.text, ignoreCase = true) }
-            .map { Plantilla_Cliente(it.id, it.nombreNegocio, it.nombreDueno, it.fotografiaUrl ?: "", it.activo) }
-    } else {
-        clientesLocal
-            .map { Plantilla_Cliente(it.id, it.nombreNegocio, it.nombreDueno, it.fotografiaUrl ?: "", it.activo) }
+    // Lista filtrada memorizada: se recalcula sólo cuando cambia la búsqueda o la lista local
+    val listaFiltradaState = remember(textFieldValue.text, clientesLocal) {
+        derivedStateOf {
+            val lista = if (buscando && textFieldValue.text.isNotBlank()) {
+                clientesLocal.filter { it.nombreNegocio.contains(textFieldValue.text, ignoreCase = true) }
+            } else {
+                clientesLocal
+            }
+            // Mapear a Plantilla_Cliente
+            lista.map { dbItem ->
+                Plantilla_Cliente(
+                    id = dbItem.id,
+                    nombreNegocio = dbItem.nombreNegocio,
+                    nombreDueno = dbItem.nombreDueno,
+                    fotografiaCliente = dbItem.fotografiaUrl ?: "",
+                    activo = dbItem.activo
+                )
+            }
+        }
     }
-
+    val listaFiltrada by listaFiltradaState
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -82,63 +95,83 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // LISTA DE CLIENTES
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(listaFiltrada) { cliente ->
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
+            // Si no hay clientes -> mensaje vacío
+            if (listaFiltrada.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = if (clientesLocal.isEmpty()) "No hay clientes registrados" else "No se encontraron coincidencias",
+                        color = Color(0xFF666666),
+                        fontSize = 16.sp
+                    )
+                }
+            } else {
+                // LISTA DE CLIENTES
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(listaFiltrada, key = { it.id }) { cliente ->
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                                .clickable {
+                                    // Navegar a pantalla de ventas con el cliente seleccionado
+                                   // navController.navigate("pantalla_ventas2/${cliente.id}")
 
+                                    navController.navigate("detalle_cliente/${cliente.id}") {
+                                        launchSingleTop = true
+                                    }
 
-                            .clickable {
-                                //navController.navigate("pantalla_venta/${cliente.id}")
-                                navController.navigate("pantalla_ventas2/${cliente.id}")
-
-                            }
-
-                        ,
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        elevation = CardDefaults.cardElevation(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                },
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            elevation = CardDefaults.cardElevation(8.dp)
                         ) {
-                            AsyncImage(
-                                model = cliente.fotografiaCliente,
-                                contentDescription = cliente.nombreNegocio,
-                                placeholder = painterResource(R.drawable.repartidor),
-                                error = painterResource(R.drawable.repartidor),
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(80.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                            )
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Construir modelo de imagen robusto: si es ruta local, usar Uri.fromFile
+                                val imageModel = remember(cliente.fotografiaCliente) {
+                                    val path = cliente.fotografiaCliente
+                                    if (path.isNotBlank()) {
+                                        val f = File(path)
+                                        if (f.exists()) Uri.fromFile(f) else path
+                                    } else null
+                                }
 
-                            Spacer(modifier = Modifier.width(12.dp))
+                                AsyncImage(
+                                    model = imageModel,
+                                    contentDescription = cliente.nombreNegocio,
+                                    placeholder = painterResource(R.drawable.repartidor),
+                                    error = painterResource(R.drawable.repartidor),
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(80.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                )
 
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    cliente.nombreNegocio,
-                                    color = Color.Black,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
-                                Text(
-                                    cliente.nombreDueno,
-                                    color = Color(0xFF555555),
-                                    fontSize = 14.sp
-                                )
-                            }
+                                Spacer(modifier = Modifier.width(12.dp))
 
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    if (cliente.activo) "Activo" else "Inactivo",
-                                    color = if (cliente.activo) Color(0xFF388E3C) else Color(0xFFD32F2F),
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        cliente.nombreNegocio,
+                                        color = Color.Black,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
+                                    )
+                                    Text(
+                                        cliente.nombreDueno,
+                                        color = Color(0xFF555555),
+                                        fontSize = 14.sp
+                                    )
+                                }
+
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        if (cliente.activo) "Activo" else "Inactivo",
+                                        color = if (cliente.activo) Color(0xFF388E3C) else Color(0xFFD32F2F),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
@@ -172,7 +205,6 @@ fun PantallaClientesPreview() {
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // BUSCADOR simulado
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

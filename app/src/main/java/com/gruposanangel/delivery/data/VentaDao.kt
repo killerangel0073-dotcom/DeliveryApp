@@ -36,6 +36,10 @@ interface VentaDao {
     @Query("UPDATE ventas SET sincronizado = :sincronizado, firestoreId = :firestoreId WHERE id = :id")
     suspend fun updateSincronizacion(id: Long, firestoreId: String?, sincronizado: Boolean)
 
+    @Query("SELECT firestoreId FROM ventas WHERE id = :ventaLocalId LIMIT 1")
+    fun obtenerFirestoreIdDeVenta(ventaLocalId: Long): String?
+
+
 
 
 

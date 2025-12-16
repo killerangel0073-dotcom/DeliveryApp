@@ -197,23 +197,13 @@ class VentaViewModel(
                         val totalVenta = productosVenta.sumOf { it.precio * it.cantidad }
 
 
-                        // Determinar ID de venta a enviar
-                        val ventaIdParaNotificacion = if (hayInternet && estadoRutaActual is EstadoRuta.ConRuta) {
-                            // Intentar usar firestoreId si existe
-                            val (exito, response) = guardarVentaEnServidorSuspend(
-                                ventaLocalId,
-                                clienteId,
-                                clienteNombre,
-                                productosVenta,
-                                metodoPago,
-                                uidVendedor,
-                                estadoRutaActual.almacenId
-                            )
-                            if (exito) JSONObject(response).optString("ventaId", ventaLocalId.toString())
-                            else ventaLocalId.toString()
-                        } else {
-                            ventaLocalId.toString()
-                        }
+                        // Usar el id del servidor SI YA LO TENEMOS
+                        val ventaIdParaNotificacion = ventaRepository.obtenerFirestoreIdDeVenta(ventaLocalId)
+                            ?: ventaLocalId.toString()
+
+
+
+
 
                         // Enviar notificación
                         enviarNotificacionVenta(
@@ -268,7 +258,7 @@ class VentaViewModel(
         //val mensaje = "$rutaAsignada al cliente $clienteNombre por $${"%.2f".format(totalVenta)}"
         //val mensaje = "📦  $rutaAsignada al cliente $clienteNombre por 💰 $${"%.2f".format(totalVenta)}"
         val mensaje = """
-                  📦 RUTA: Borrame $rutaAsignada
+                  📦 RUTA:  $rutaAsignada
                   👤 CLIENTE: $clienteNombre
                   💰 TOTAL: $${"%.2f".format(totalVenta)}
                    """.trimIndent()
@@ -284,6 +274,14 @@ class VentaViewModel(
             put("imagen", clienteFotoUrl ?: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/74/Dominos_pizza_logo.svg/768px-Dominos_pizza_logo.svg.png")
             put("estilo", "bigpicture") // Le indicamos a la Cloud Function que use BigPicture
             put("ventaId", ventaId) // <-- aquí enviamos el ID
+            // si el id es convertible a Long, también lo mando como ticketId
+            ventaId.toLongOrNull()?.let {
+                put("ventaIdLong", it)
+
+            }
+
+            // *** FALTABA ESTO ***
+            put("click_action", "OPEN_TICKET_DETAIL")
         }
 
         val requestBody = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
