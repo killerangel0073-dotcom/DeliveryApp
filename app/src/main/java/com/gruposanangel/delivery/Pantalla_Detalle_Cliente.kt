@@ -62,8 +62,9 @@ import com.google.maps.android.compose.*
 @Composable
 fun DetalleClienteScreen(
     clienteId: String,
-    navController: NavController?,
-    repository: RepositoryCliente?
+    navController: NavController,
+    repository: RepositoryCliente?,
+    origen: String = "Clientes" // 🔹 valor por defecto
 ) {
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -440,11 +441,21 @@ fun DetalleClienteScreen(
 
                     IconButton(
                         onClick = {
-                            navController?.navigate("delivery?screen=Clientes") {
-                                popUpTo("delivery?screen=Clientes") { inclusive = true }
-                                launchSingleTop = true
+                            when (origen) {
+                                "Mapa" -> {
+                                    val popResult = navController.popBackStack("MAPA_SCREEN", inclusive = false)
+                                    if (!popResult) navController.navigate("MAPA_SCREEN") { launchSingleTop = true }
+                                }
+                                "Clientes" -> {
+                                    val popResult = navController.popBackStack("delivery?screen=Clientes", inclusive = false)
+                                    if (!popResult) navController.navigate("delivery?screen=Clientes") { launchSingleTop = true }
+                                }
+                                else -> navController.popBackStack()
                             }
                         },
+
+
+
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(20.dp)

@@ -1,6 +1,12 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.net.Uri
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,12 +15,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -27,8 +36,54 @@ import coil.compose.AsyncImage
 import com.gruposanangel.delivery.Plantilla_Cliente
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.RepositoryCliente
+import kotlinx.coroutines.launch
 import java.io.File
 
+
+
+
+
+@Composable
+fun CarritoAnimado(onClick: () -> Unit) {
+    val infiniteTransition = rememberInfiniteTransition()
+
+    // Animación de pulso infinito
+    val scaleBase by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        )
+    )
+
+    var scaleExtra by remember { mutableStateOf(1f) }
+    val scale = scaleBase * scaleExtra
+
+    val scope = rememberCoroutineScope() // <--- coroutine scope para clicks
+
+    Icon(
+        imageVector = Icons.Default.ShoppingCart,
+        contentDescription = "Ver ventas",
+        tint = Color(0xFFFF0000),
+        modifier = Modifier
+            .size(32.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clickable {
+                // Animación de click llamativa
+                scaleExtra = 1.5f
+                onClick()
+                scope.launch {
+                    kotlinx.coroutines.delay(150)
+                    scaleExtra = 1f
+                }
+            }
+    )
+}
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaClientes(navController: NavController, repository: RepositoryCliente) {
@@ -117,9 +172,11 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
                                     // Navegar a pantalla de ventas con el cliente seleccionado
                                    // navController.navigate("pantalla_ventas2/${cliente.id}")
 
-                                    navController.navigate("detalle_cliente/${cliente.id}") {
+                                    navController.navigate("detalle_cliente/${cliente.id}?origen=Clientes") {
                                         launchSingleTop = true
                                     }
+
+
 
                                 },
                             colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -165,19 +222,30 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
                                     )
                                 }
 
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        if (cliente.activo) "Activo" else "Inactivo",
-                                        color = if (cliente.activo) Color(0xFF388E3C) else Color(0xFFD32F2F),
-                                        fontWeight = FontWeight.Bold
-                                    )
+
+
+
+                                CarritoAnimado {
+                                    navController.navigate("pantalla_ventas2/${cliente.id}")
                                 }
+
+
+
+
+
+
+
                             }
                         }
                     }
                 }
             }
         }
+
+
+
+
+
 
         // BOTÓN FLOTANTE que navega a CrearClienteScreen
         FloatingActionButton(
@@ -188,10 +256,14 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Agregar Cliente")
+            Icon(Icons.Default.PersonAdd, contentDescription = "Agregar Cliente")
         }
     }
 }
+
+
+
+
 
 @Preview(showBackground = true)
 @Composable
@@ -273,14 +345,30 @@ fun PantallaClientesPreview() {
                                 )
                             }
 
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    if (cliente.activo) "Activo" else "Inactivo",
-                                    color = if (cliente.activo) Color(0xFF388E3C) else Color(0xFFD32F2F),
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+
+
+
+
+
+                            Icon(
+                                imageVector = Icons.Default.ShoppingCart, // o el icono que quieras
+                                contentDescription = "Ver ventas",
+                                tint = Color(0xFFFF0000), // rojo
+
+                                modifier = Modifier
+                                    .size(32.dp)
+
+                            )
+
+
+
+
+
+
                         }
+
+
+
                     }
                 }
             }
@@ -294,7 +382,7 @@ fun PantallaClientesPreview() {
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Agregar Cliente")
+            Icon(Icons.Default.PersonAdd, contentDescription = "Agregar Cliente")
         }
     }
 }

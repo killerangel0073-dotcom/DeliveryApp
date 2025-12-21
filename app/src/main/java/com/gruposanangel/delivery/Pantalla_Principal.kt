@@ -186,7 +186,10 @@ fun Pantalla_Principal(
                     Screen.Clientes -> repository?.let { PantallaClientes(navController, it) }
                     Screen.Inventario -> PantallaInventario(navController, inventarioRepo)
                     Screen.Ruta -> PaginaVentaScreen(navController, ventaRepository)
-                    Screen.Mapa -> MapaScreen()
+                    Screen.Mapa -> {
+                        MapaScreen(navController = navController)
+                    }
+
                 }
             }
         }

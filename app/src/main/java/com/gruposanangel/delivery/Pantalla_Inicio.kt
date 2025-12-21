@@ -1,6 +1,7 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
@@ -8,12 +9,23 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,6 +33,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Battery2Bar
+import androidx.compose.material.icons.filled.Battery4Bar
+import androidx.compose.material.icons.filled.Battery6Bar
+import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CancelPresentation
 import androidx.compose.material.icons.filled.GppMaybe
 import androidx.compose.material.icons.filled.Message
@@ -34,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PaintingStyle.Companion.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.tooling.preview.Preview
@@ -58,7 +78,11 @@ import com.gruposanangel.delivery.utilidades.hayInternet
 import kotlin.math.cos
 import kotlin.math.sin
 import com.gruposanangel.delivery.SegundoPlano.LocationState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gruposanangel.delivery.SegundoPlano.BatteryState
+import kotlinx.coroutines.delay
 
+import com.gruposanangel.delivery.utilidades.BatteryIndicator
 
 
 
@@ -82,7 +106,34 @@ fun Pantalla_Inicio(
 ) {
 
 
-    val velocidad by LocationState.velocidad.collectAsState()
+
+// 1. Obtenemos el estado bruto (con kmh y timestamp)
+// 1. Suscripción limpia al estado global
+    val estadoVelocidad by LocationState.velocidad.collectAsStateWithLifecycle()
+
+
+
+    // 2. El "Reloj" de la UI: Actualiza cada 500ms para reevaluar la frescura
+    var ticker by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(500)
+            ticker = System.currentTimeMillis()
+        }
+    }
+
+    // 3. Lógica de Negocio Visual: Solo se recalcula si cambia el GPS o el Ticker
+
+
+    val velocidadParaUI by remember(estadoVelocidad, ticker) {
+        derivedStateOf {
+            val tiempoTranscurrido = System.currentTimeMillis() - estadoVelocidad.timestamp
+            if (tiempoTranscurrido > 3000) 0f else estadoVelocidad.kmh
+        }
+    }
+
+
+
 
 
     var mostrarDialogo by remember { mutableStateOf(false) }
@@ -216,27 +267,50 @@ fun Pantalla_Inicio(
         ) {
 
         // 🔹 Zona superior: Estado de internet y fecha/hora
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(6.dp)
-        ) {
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = if (estadoInternet.value) "Conectado a Internet" else "Sin conexión a Internet",
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (estadoInternet.value) Color(0xFF2E7D32) else Color(0xFFC62828)
-            )
-            Text(
-                text = fechaHora.value,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.Gray
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(6.dp)
+            ) {
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 🔝 FILA SUPERIOR
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+
+                    // 🌐 Internet a la izquierda
+                    Text(
+                        text = if (estadoInternet.value)
+                            "Conectado a Internet"
+                        else
+                            "Sin conexión a Internet",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (estadoInternet.value)
+                            Color(0xFF2E7D32)
+                        else
+                            Color(0xFFC62828)
+                    )
+
+                    // ⬅️ Empuja la batería al extremo derecho
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // 🔋 Batería a la derecha
+                    BatteryIndicator()
+                }
+
+                // 🕒 Fecha abajo
+                Text(
+                    text = fechaHora.value,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray
+                )
+            }
 
 
-        }
-
-        Spacer(modifier = Modifier.height(96.dp))
+            Spacer(modifier = Modifier.height(96.dp))
 
         Column(
             modifier = Modifier
@@ -245,10 +319,11 @@ fun Pantalla_Inicio(
         ) {
 
             //Velocimetro(velocidad = LocationService.velocidadActual.value)
-            VelocimetroTeslaRojo(velocidad = velocidad)
+            VelocimetroTeslaRojo(velocidad = velocidadParaUI)
 
 
             Spacer(modifier = Modifier.height(16.dp))
+
 
 
 
@@ -288,13 +363,14 @@ fun Pantalla_Inicio(
 
 
 
+
 @Composable
 fun VelocimetroTeslaRojo(velocidad: Float) {
 
     // Animación suave al cambiar velocidad
     val velocidadAnimada by animateFloatAsState(
         targetValue = velocidad,
-        animationSpec = tween(600),
+        animationSpec = tween(300),
         label = "velocidadAnimada"
     )
 

@@ -7,6 +7,7 @@ import kotlinx.parcelize.Parcelize
 data class Plantila_carga(
     val id: String = "",
     val plantillaProductos: List<Plantilla_Producto> = emptyList(),
-    val nombreCarga: String = "Carga de Almacén",
-    val aceptada: Boolean = false // <-- nueva propiedad
+    val nombreCarga: String = "Detalle de transferencia",
+    val aceptada: Boolean = false, // <-- nueva propiedad
+    var fecha: java.util.Date? = null  // <-- mutable
 ) : Parcelable

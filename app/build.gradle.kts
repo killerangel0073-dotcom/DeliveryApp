@@ -97,6 +97,12 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.8.1")
 
 
+    // Permite usar collectAsStateWithLifecycle en la UI.
+    // Optimiza el velocímetro para que deje de procesar datos cuando la app está en segundo plano,
+    // ahorrando batería y evitando que el teléfono se caliente.
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
+
+
 
     // Tests
     testImplementation("junit:junit:4.13.2")

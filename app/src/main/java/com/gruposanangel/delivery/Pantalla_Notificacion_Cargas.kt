@@ -250,30 +250,29 @@ fun PantallaNotificaciones(navController: NavController) {
 
 
 
+                            // DENTRO DE PantallaNotificaciones, en el items de LazyColumn:
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    // ... dentro de LazyColumn en PantallaNotificaciones
                                     .clickable {
                                         if (noti.esCarga) {
-                                            // Crear objeto de carga
                                             val carga = Plantila_carga(
-                                                id = noti.id,
+                                                id = noti.id, // <--- ESTE ID DEBE SER EL DE FIRESTORE
                                                 nombreCarga = noti.titulo,
-                                                plantillaProductos = emptyList(), // aquí podrías cargar los productos de Firestore
+                                                plantillaProductos = emptyList(), // Se llena en la siguiente pantalla
                                                 aceptada = noti.aceptada
                                             )
 
-                                            // Guardar en el SavedStateHandle del backStackEntry actual
+                                            // Limpiamos cualquier dato previo y seteamos el nuevo
+                                            navController.currentBackStackEntry?.savedStateHandle?.remove<Plantila_carga>("carga")
                                             navController.currentBackStackEntry?.savedStateHandle?.set("carga", carga)
 
-
-                                            // Navegar al detalle asegurando singleTop
-                                            navController.navigate("DETALLE_CARGA") {
-                                                launchSingleTop = true
-                                                restoreState = true
-                                            }
+                                            navController.navigate("DETALLE_CARGA")
                                         }
+
                                     },
+                                // ... resto del código del Card
                                 shape = RoundedCornerShape(12.dp),
                                 colors = CardDefaults.cardColors(containerColor = Color.White),
                                 elevation = CardDefaults.cardElevation(4.dp)

@@ -13,39 +13,32 @@ class WatchdogReceiver : BroadcastReceiver() {
 
     companion object {
         private const val WATCHDOG_REQUEST_CODE = 1001
-        private const val WATCHDOG_INTERVAL_MS = 2 * 60 * 1000L // 2 minutos
+        private const val WATCHDOG_INTERVAL_MS = 15 * 60 * 1000L
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        Log.d("Watchdog", "Watchdog ejecutado")
+        Log.d("Watchdog", "🐶 Verificación de rutina iniciada")
 
-        // 1) Si el servicio NO está corriendo → arrancarlo (con ACTION_START para que reprograme)
-        if (!LocationService.isRunning) {
-            Log.d("Watchdog", "Servicio muerto, reiniciando")
-            val startIntent = Intent(context, LocationService::class.java).apply {
-                action = LocationService.ACTION_START
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ContextCompat.startForegroundService(context, startIntent)
-            } else {
-                context.startService(startIntent)
-            }
-        } else {
-            Log.d("Watchdog", "Servicio activo")
-            // ping para que el service reafirme programación en caso necesario
-            val pingIntent = Intent(context, LocationService::class.java).apply {
-                action = LocationService.ACTION_START
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ContextCompat.startForegroundService(context, pingIntent)
-            } else {
-                context.startService(pingIntent)
-            }
+        val serviceIntent = Intent(context, LocationService::class.java).apply {
+            action = LocationService.ACTION_START
         }
 
-        // 2) Reprogramar el próximo Watchdog (AlarmManager)
         try {
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(context, serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            Log.e("Watchdog", "⚠️ Error al despertar el servicio")
+        }
+
+        reprogramarWatchdog(context)
+    }
+
+    private fun reprogramarWatchdog(context: Context) {
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
             val alarmIntent = Intent(context, WatchdogReceiver::class.java)
             val pending = PendingIntent.getBroadcast(
                 context,
@@ -55,10 +48,14 @@ class WatchdogReceiver : BroadcastReceiver() {
             )
 
             val nextTrigger = System.currentTimeMillis() + WATCHDOG_INTERVAL_MS
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextTrigger, pending)
-            Log.d("Watchdog", "Watchdog reprogramado para +${WATCHDOG_INTERVAL_MS / 1000}s")
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextTrigger, pending)
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, nextTrigger, pending)
+            }
         } catch (e: Exception) {
-            Log.e("Watchdog", "Error reprogramando Watchdog", e)
+            Log.e("Watchdog", "❌ Error de reprogramación", e)
         }
     }
 }

@@ -52,6 +52,12 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import kotlin.experimental.or
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import com.gruposanangel.delivery.utilidades.DialogoConfirmacion
+
+
 
 
 
@@ -69,6 +75,11 @@ fun MovimientosInventarioScreen(
 ) {
 
 
+
+
+// 🔹 Stock disponible del almacén origen
+    val stockOrigen = remember { mutableStateMapOf<String, Int>() }
+    var cargandoStock by remember { mutableStateOf(false) }
 
 
 
@@ -115,6 +126,38 @@ fun MovimientosInventarioScreen(
             }
             .addOnFailureListener { cargando = false }
     }
+
+
+    LaunchedEffect(origen) {
+        if (origen == "Selecciona Origen") return@LaunchedEffect
+
+        cargandoStock = true
+        stockOrigen.clear()
+
+        FirebaseFirestore.getInstance()
+            .collection("inventarioStock")
+            .whereEqualTo("almacenNombre", origen)
+            .get()
+            .addOnSuccessListener { result ->
+                for (doc in result.documents) {
+                    val productoRef = doc.getDocumentReference("productoRef")
+                    val cantidad = doc.getLong("cantidad")?.toInt() ?: 0
+
+                    productoRef?.id?.let { productoId ->
+                        stockOrigen[productoId] = cantidad
+                    }
+                }
+                cargandoStock = false
+            }
+            .addOnFailureListener {
+                cargandoStock = false
+            }
+    }
+
+
+
+
+
 
     Column(
         modifier = Modifier
@@ -203,6 +246,13 @@ fun MovimientosInventarioScreen(
                 items(plantillaProductos) { producto ->
                     val cantidadActual = cantidades[producto.id] ?: 0
                     var textCantidad by remember(producto.id) { mutableStateOf(cantidadActual.toString()) }
+                    val focusRequester = remember { FocusRequester() }
+                    val numberFormatter = remember {
+                        NumberFormat.getIntegerInstance(Locale.US)
+                    }
+
+
+
 
 
                     Card(
@@ -210,8 +260,14 @@ fun MovimientosInventarioScreen(
                         colors = CardDefaults.cardColors(containerColor = Color.White),
                         elevation = CardDefaults.cardElevation(8.dp),
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp)
+                            .fillMaxSize()
+                            .focusRequester(focusRequester)
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused && textCantidad == "0") {
+                                    textCantidad = ""
+                                }
+                            }
+
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -232,6 +288,8 @@ fun MovimientosInventarioScreen(
                                 Text(producto.nombre, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.Black)
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text("Precio: $${producto.precio}", fontSize = 14.sp, color = Color(0xFF555555))
+
+
                                 Spacer(modifier = Modifier.height(4.dp))
                                 val subtotal = (cantidades[producto.id] ?: 0) * producto.precio
 
@@ -242,72 +300,129 @@ fun MovimientosInventarioScreen(
 
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                // Botón Restar
-                                Box(
-                                    modifier = Modifier
-                                        .size(30.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            val current = textCantidad.toIntOrNull() ?: 0
-                                            if (current > 0) {
-                                                val nuevo = current - 1
+
+
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Botón Restar
+                                    Box(
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                val current = textCantidad.toIntOrNull() ?: 0
+                                                if (current > 0) {
+                                                    val nuevo = current - 1
+                                                    textCantidad = nuevo.toString()
+                                                    cantidades[producto.id] = nuevo
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("-", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    Spacer(modifier = Modifier.width(4.dp))
+
+                                    // Campo cantidad
+                                    Box(
+                                        modifier = Modifier
+                                            .width(60.dp)
+                                            .height(30.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+
+
+
+                                        BasicTextField(
+                                            value = numberFormatter.format(textCantidad.toIntOrNull() ?: 0),
+
+                                            onValueChange = { newValue ->
+
+                                                // 🔹 Quitar comas antes de procesar
+                                                val limpio = newValue
+                                                    .replace(",", "")
+                                                    .filter { it.isDigit() }
+                                                    .trimStart('0')
+
+                                                val numeroIngresado = if (limpio.isEmpty()) 0 else limpio.toInt()
+
+                                                val valorFinal = if (origen == "Compra Producto") {
+                                                    numeroIngresado.coerceAtLeast(0)
+                                                } else {
+                                                    val disponible = stockOrigen[producto.id] ?: 0
+                                                    numeroIngresado.coerceIn(0, disponible)
+                                                }
+
+                                                textCantidad = valorFinal.toString()
+                                                cantidades[producto.id] = valorFinal
+                                            },
+
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            textStyle = LocalTextStyle.current.copy(
+                                                fontSize = 20.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.Red,
+                                                textAlign = TextAlign.Center
+                                            ),
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+
+                                    }
+
+                                    Spacer(modifier = Modifier.width(4.dp))
+
+                                    // Botón Sumar
+                                    val disponible = stockOrigen[producto.id] ?: 0
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                val current = textCantidad.toIntOrNull() ?: 0
+                                                val nuevo = current + 1
+
+                                                if (origen != "Compra Producto") {
+                                                    val disponible = stockOrigen[producto.id] ?: 0
+                                                    if (nuevo > disponible) return@clickable
+                                                }
+
                                                 textCantidad = nuevo.toString()
                                                 cantidades[producto.id] = nuevo
+                                            },
 
-                                            }
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) { Text("-", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
 
-                                Spacer(modifier = Modifier.width(1.dp))
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
 
-                                // Campo cantidad
-                                Box(
-                                    modifier = Modifier
-                                        .width(40.dp)
-                                        .height(30.dp)
-                                        .clip(RoundedCornerShape(8.dp)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    BasicTextField(
-                                        value = textCantidad,
-                                        onValueChange = { newValue ->
-                                            val filtered = newValue.filter { it.isDigit() }
-                                            val limited = if (filtered.length > 6) filtered.take(6) else filtered
-                                            textCantidad = if (limited.isEmpty()) "0" else limited
-                                            cantidades[producto.id] = textCantidad.toIntOrNull() ?: 0
-
-                                        },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        textStyle = LocalTextStyle.current.copy(
-                                            fontSize = 20.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.Red,
-                                            textAlign = TextAlign.Center
-                                        ),
-                                        modifier = Modifier.fillMaxSize()
+                                // 👇 STOCK DEBAJO DEL CONTADOR
+                                if (origen != "Compra Producto") {
+                                    Text(
+                                        text = "Disponible: ${stockOrigen[producto.id] ?: 0}",
+                                        fontSize = 14.sp,
+                                        color = if ((stockOrigen[producto.id] ?: 0) == 0)
+                                            Color.Red
+                                        else
+                                            Color(0xFF2E7D32),
+                                        modifier = Modifier.padding(top = 4.dp)
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(1.dp))
-
-                                // Botón Sumar
-                                Box(
-                                    modifier = Modifier
-                                        .size(30.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            val current = textCantidad.toIntOrNull() ?: 0
-                                            val nuevo = current + 1
-                                            textCantidad = nuevo.toString()
-                                            cantidades[producto.id] = nuevo
-
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) { Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
                             }
+
+
+
+
 
                         }
                     }
@@ -345,161 +460,76 @@ fun MovimientosInventarioScreen(
         // Estados para origen y destino (ejemplo)
 
 
+        // Estado para mostrar el diálogo
+        var mostrarDialogConfirmacion by remember { mutableStateOf(false) }
+
+// Botón que dispara el diálogo
         Button(
             onClick = {
-
-                // 1️⃣ Validar origen
+                // Validaciones antes de mostrar el diálogo
                 if (origen == "Selecciona Origen") {
                     Toast.makeText(context, "Selecciona un almacén de origen", Toast.LENGTH_LONG).show()
                     return@Button
                 }
 
-                // 2️⃣ Validar destino
                 if (destino == "Selecciona Destino") {
                     Toast.makeText(context, "Selecciona un almacén de destino", Toast.LENGTH_LONG).show()
                     return@Button
                 }
 
-
-                // 3️⃣ Validar que haya al menos un producto con cantidad > 0
                 val productosConCantidad = plantillaProductos.filter { (cantidades[it.id] ?: 0) > 0 }
                 if (productosConCantidad.isEmpty()) {
                     Toast.makeText(context, "Selecciona al menos un producto", Toast.LENGTH_LONG).show()
                     return@Button
                 }
 
-                // Si todo está bien, mostrar el diálogo de confirmación
+                if (origen != "Compra Producto") {
+                    for (producto in plantillaProductos) {
+                        val solicitada = cantidades[producto.id] ?: 0
+                        if (solicitada > 0) {
+                            val disponible = stockOrigen[producto.id] ?: 0
+                            if (solicitada > disponible) {
+                                Toast.makeText(
+                                    context,
+                                    "Stock insuficiente de ${producto.nombre}. Disponible: $disponible",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                return@Button
+                            }
+                        }
+                    }
+                }
+
+                // Mostrar diálogo de confirmación
                 mostrarDialogConfirmacion = true
             },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.Red,
-                contentColor = Color.White
-            ),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth().padding(8.dp)
         ) {
             Text("Crear Orden de Transferencia", fontSize = 16.sp)
         }
 
-
-
+// Composable reutilizable para el diálogo
         if (mostrarDialogConfirmacion) {
-            AlertDialog(
-                onDismissRequest = { mostrarDialogConfirmacion = false },
-                containerColor = Color.White,
-                title = {
-                    Text(
-                        text = "Confirmación",
-                        color = Color.Red,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
+            DialogoConfirmacion(
+                titulo = "Confirmación",
+                mensaje = "¿Deseas crear esta orden de transferencia?",
+                textoConfirmar = "CONFIRMAR",
+                textoCancelar = "CANCELAR",
+                colorConfirmar = Color.Red,
+                onConfirmar = {
+                    mostrarDialogConfirmacion = false
+                    crearOrdenDeTransferencia(
+                        navController = navController,
+                        plantillaProductos = plantillaProductos,
+                        cantidades = cantidades,
+                        origen = origen,
+                        destino = destino,
+                        impresoraBluetooth = impresoraBluetooth
                     )
                 },
-                text = {
-                    Text(
-                        text = "¿Deseas crear esta orden de transferencia?",
-                        fontSize = 18.sp,
-                        color = Color.Black,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            mostrarDialogConfirmacion = false
-                            val context = navController.context
-
-                            try {
-                                // Filtrar solo los productos con cantidad > 0
-                                val productosConCantidad = plantillaProductos.filter { (cantidades[it.id] ?: 0) > 0 }
-
-                                if (productosConCantidad.isEmpty()) {
-                                    Toast.makeText(context, "Selecciona al menos un producto", Toast.LENGTH_LONG).show()
-                                    return@Button
-                                }
-
-                                // Construir lista de productos
-                                val listaProductos = productosConCantidad.map { p ->
-                                    mapOf(
-                                        "productoId" to p.id,
-                                        "cantidad" to (cantidades[p.id] ?: 0)
-                                    )
-                                }
-
-                                val db = FirebaseFirestore.getInstance()
-
-                                // Crear un documento nuevo en ordenesTransferencia con ID automático
-                                val ordenRef = db.collection("ordenesTransferencia").document()
-
-                                // Datos de la orden
-                                val ordenData = mapOf(
-                                    "origen" to origen,
-                                    "destino" to destino,
-                                    "productos" to listaProductos,
-                                    "vendedorId" to FirebaseAuth.getInstance().currentUser?.uid,
-                                    "estado" to "PENDIENTE",
-                                    "timestamp" to FieldValue.serverTimestamp()
-                                )
-
-                                // Subir la orden a Firestore
-                                ordenRef.set(ordenData)
-                                    .addOnSuccessListener {
-                                        Toast.makeText(context, "Orden de transferencia creada con éxito", Toast.LENGTH_LONG).show()
-                                    }
-                                    .addOnFailureListener { e ->
-                                        Toast.makeText(context, "Error creando la orden: ${e.message}", Toast.LENGTH_LONG).show()
-                                    }
-
-                                // 2. Generar PDF y visualizarlo
-                                val file = generarPdfMovimientoInventario(
-                                    context = context,
-                                    origen = origen,
-                                    destino = destino,
-                                    plantillaProductos = plantillaProductos,
-                                    cantidades = cantidades
-                                )
-                                abrirPdfConFileProvider(context, file)
-
-                                // 3. Imprimir Ticket en Bluetooth (si hay impresora seleccionada)
-                                if (impresoraBluetooth != null) {
-                                    imprimirMovimientoInventario58mmCorregida(
-                                        device = impresoraBluetooth,
-                                        context = context,
-                                        logoDrawableId = R.drawable.logo, // tu logo aquí
-                                        origen = origen,
-                                        destino = destino,
-                                        plantillaProductos = plantillaProductos,
-                                        cantidades = cantidades
-                                    )
-                                    Toast.makeText(context, "Enviando impresión...", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Toast.makeText(context, "No hay impresora Bluetooth seleccionada", Toast.LENGTH_LONG).show()
-                                }
-
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Error generando PDF o imprimiendo: ${e.message}", Toast.LENGTH_LONG).show()
-                            }
-
-
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(text = "CONFIRMAR", fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    Button(
-                        onClick = { mostrarDialogConfirmacion = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE0E0E0), contentColor = Color.Gray),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(text = "CANCELAR", fontWeight = FontWeight.Bold)
-                    }
-                }
+                onCancelar = { mostrarDialogConfirmacion = false }
             )
         }
 
@@ -507,8 +537,112 @@ fun MovimientosInventarioScreen(
 
 
 
+
     }
 }
+
+
+
+private fun crearOrdenDeTransferencia(
+    navController: NavController,
+    plantillaProductos: List<Plantilla_Producto>,
+    cantidades: Map<String, Int>,
+    origen: String,
+    destino: String,
+    impresoraBluetooth: BluetoothDevice?
+) {
+    val context = navController.context
+
+    try {
+        // Filtrar solo los productos con cantidad > 0
+        val productosConCantidad = plantillaProductos.filter { (cantidades[it.id] ?: 0) > 0 }
+
+        if (productosConCantidad.isEmpty()) {
+            Toast.makeText(context, "Selecciona al menos un producto", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        // Construir lista de productos para Firestore
+        val listaProductos = productosConCantidad.map { p ->
+            mapOf(
+                "productoId" to p.id,
+                "cantidad" to (cantidades[p.id] ?: 0)
+            )
+        }
+
+        val db = FirebaseFirestore.getInstance()
+
+        // Crear un documento nuevo en ordenesTransferencia con ID automático
+        val ordenRef = db.collection("ordenesTransferencia").document()
+
+        val tipoOrden = when {
+            origen == "Compra Producto" -> "COMPRA_PRODUCTO"
+            destino.startsWith("Vendedor") -> "TRANSFERENCIA_VENDEDOR"
+            else -> "TRANSFERENCIA_INTERNA"
+        }
+
+        // Datos de la orden
+        val estadoOrden = "PENDIENTE"
+        val ordenData = mapOf(
+            "tipo" to tipoOrden,
+            "origen" to origen,
+            "destino" to destino,
+            "productos" to listaProductos,
+            "vendedorId" to FirebaseAuth.getInstance().currentUser?.uid,
+            "estado" to estadoOrden,
+            "timestamp" to FieldValue.serverTimestamp()
+        )
+
+        // Guardar orden en Firestore
+        Toast.makeText(
+            context,
+            "Orden guardada localmente, se enviará cuando haya conexión",
+            Toast.LENGTH_LONG
+        ).show()
+
+        ordenRef.set(ordenData)
+            .addOnSuccessListener {
+                Toast.makeText(context, "Orden sincronizada con la nube", Toast.LENGTH_LONG).show()
+            }
+            .addOnFailureListener { e ->
+                Toast.makeText(context, "Error creando la orden: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+
+        // 2️⃣ Generar PDF y visualizarlo
+        val file = generarPdfMovimientoInventario(
+            context = context,
+            origen = origen,
+            destino = destino,
+            plantillaProductos = plantillaProductos,
+            cantidades = cantidades
+        )
+        abrirPdfConFileProvider(context, file)
+
+        // 3️⃣ Imprimir Ticket en Bluetooth (si hay impresora seleccionada)
+        if (impresoraBluetooth != null) {
+            imprimirMovimientoInventario58mmCorregida(
+                device = impresoraBluetooth,
+                context = context,
+                logoDrawableId = R.drawable.logo, // tu logo aquí
+                origen = origen,
+                destino = destino,
+                plantillaProductos = plantillaProductos,
+                cantidades = cantidades
+            )
+            Toast.makeText(context, "Enviando impresión...", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "No hay impresora Bluetooth seleccionada", Toast.LENGTH_LONG).show()
+        }
+
+    } catch (e: Exception) {
+        Toast.makeText(context, "Error generando PDF o imprimiendo: ${e.message}", Toast.LENGTH_LONG).show()
+        e.printStackTrace()
+    }
+}
+
+
+
+
 
 
 // Conversión segura de bitmap a bytes para impresora 58mm con ESC/POS GS v0

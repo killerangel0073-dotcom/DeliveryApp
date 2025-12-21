@@ -2,9 +2,18 @@ package com.gruposanangel.delivery.ui.screens
 
 import android.bluetooth.BluetoothDevice
 import android.widget.Toast
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -13,7 +22,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Remove
@@ -21,8 +34,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -31,9 +50,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
@@ -52,6 +75,9 @@ import com.gruposanangel.delivery.utilidades.hayInternet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.gruposanangel.delivery.utilidades.DialogoConfirmacion
+
+
 
 @Composable
 fun PantallaVentas2(
@@ -62,6 +88,9 @@ fun PantallaVentas2(
     impresoraBluetooth: BluetoothDevice? = null,
     productosPreview: List<Plantilla_Producto>? = null
 ) {
+
+    val mostrandoSnackbar = remember { mutableStateOf(false) }
+
     val context = LocalContext.current
     val isPreview = LocalInspectionMode.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -154,14 +183,38 @@ fun PantallaVentas2(
     // -------- UI Principal --------
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
 
+        // 1️⃣ Header fijo arriba y clicable
+        val alturaHeader = 120.dp
+        InfoClienteCompacta(
+            cliente = cliente.value,
+            navController = navController, // Pasamos el NavController
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(alturaHeader)
+                .align(Alignment.TopStart)
+                .zIndex(1f) // ✅ asegura que esté encima de la LazyColumn
+                .background(Color.White) // opcional: para tapar la LazyColumn debajo
+        )
+
+
+
+
+
+
+
+
+        // 2️⃣ Lista de productos
         LazyColumn(
-            contentPadding = PaddingValues(top = 16.dp, bottom = 140.dp, start = 16.dp, end = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(
+                top = alturaHeader + 8.dp, // dejar espacio para el header
+                bottom = 140.dp,
+                start = 16.dp,
+                end = 16.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Header Cliente
-            item {
-                CardInfoCliente2(cliente.value)
-            }
+
 
             // Estados de Carga / Error / Lista
             when (val estado = estadoRuta) {
@@ -187,14 +240,22 @@ fun PantallaVentas2(
                                 producto = producto,
                                 isPreview = isPreview,
                                 formatoMoneda = formatoMoneda,
+
                                 onSumar = {
                                     if (producto.cantidad < producto.cantidadDisponible) {
                                         ventaViewModel.actualizarCantidad(index, producto.cantidad + 1)
                                     } else {
-                                        scope.launch { snackbarHostState.showSnackbar("No hay suficiente inventario") }
+                                        if (!mostrandoSnackbar.value) {
+                                            mostrandoSnackbar.value = true
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar("No hay suficiente inventario")
+                                                mostrandoSnackbar.value = false
+                                            }
+                                        }
                                     }
                                 },
-                                onRestar = {
+
+                                        onRestar = {
                                     if (producto.cantidad > 0) {
                                         ventaViewModel.actualizarCantidad(index, producto.cantidad - 1)
                                     }
@@ -209,28 +270,57 @@ fun PantallaVentas2(
             }
         }
 
-        // Footer Total
-        CardTotal2(
-            total = totalGeneral,
-            formato = formatoMoneda,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
 
-        // Botón Flotante Venta
-        if (!procesandoVenta) {
-            FloatingActionButton(
-                onClick = { if (!isPreview) mostrarDialog = true },
-                containerColor = Color(0xFFFF0000),
-                contentColor = Color.White,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 16.dp, bottom = 6.dp)
-            ) {
-                Icon(Icons.Default.ReceiptLong, contentDescription = "Finalizar venta")
-            }
-        } else {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp))
+
+
+        // 3️⃣ Total fijo abajo
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+        ) {
+            LineaResplandorRoja()
+            CardTotal2(total = totalGeneral, formato = formatoMoneda, modifier = Modifier.fillMaxWidth())
         }
+
+
+        // 4️⃣ Botón flotante
+        var botonBloqueado by remember { mutableStateOf(false) }
+
+        FloatingActionButton(
+            onClick = {
+                val productosParaVenta = productosEnCarrito.filter { it.cantidad > 0 }
+                if (productosParaVenta.isEmpty()) {
+                    if (!botonBloqueado) {
+                        // Mostrar mensaje solo si no está bloqueado
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Seleccione al menos un producto")
+                        }
+                        botonBloqueado = true
+                        // Desbloquear después de 2 segundos
+                        scope.launch {
+                            kotlinx.coroutines.delay(2000)
+                            botonBloqueado = false
+                        }
+                    }
+                } else {
+                    // Abrir diálogo solo si hay productos
+                    mostrarDialog = true
+                }
+            },
+            containerColor = Color(0xFFFF0000),
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 16.dp, bottom = 6.dp)
+        ) {
+            Icon(Icons.Default.ReceiptLong, contentDescription = "Finalizar venta")
+        }
+
+
+
+
+
 
         // Snackbar Host
         SnackbarHost(
@@ -242,66 +332,271 @@ fun PantallaVentas2(
         if (mostrarDialog) {
             val productosParaVenta = productosEnCarrito.filter { it.cantidad > 0 }
 
-            AlertDialog(
-                onDismissRequest = { mostrarDialog = false },
-                containerColor = Color.White,
-                title = { Text("Confirmación", color = Color.Red, fontSize = 30.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) },
-                text = { Text("¿Deseas realizar la venta de ${productosParaVenta.size} productos?", fontSize = 18.sp, textAlign = TextAlign.Center) },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (productosParaVenta.isEmpty()) {
-                                scope.launch { snackbarHostState.showSnackbar("Seleccione al menos un producto") }
-                                return@Button
+            DialogoConfirmacion(
+                titulo = "Confirmación",
+                mensaje = "¿Deseas realizar la venta para \n\n${cliente.value?.nombreNegocio ?: "Cliente"} \npor  ${formatoMoneda.format(totalGeneral)}?",
+
+                textoConfirmar = "CONFIRMAR",
+                textoCancelar = "CANCELAR",
+                colorConfirmar = Color.Red,
+                onConfirmar = {
+                    if (productosParaVenta.isEmpty()) {
+                        scope.launch { snackbarHostState.showSnackbar("Seleccione al menos un producto") }
+                        return@DialogoConfirmacion
+                    }
+                    mostrarDialog = false
+
+                    // INICIO PROCESO DE VENTA (delegado al ViewModel)
+                    ventaViewModel.procesarVenta(
+                        clienteId = cliente.value?.id ?: "",
+                        clienteNombre = cliente.value?.nombreNegocio ?: "Negocio",
+                        clienteFotoUrl = cliente.value?.fotografiaUrl,
+                        metodoPago = "Efectivo",
+                        hayInternet = hayInternet(context)
+                    ) { exito, mensaje, ventaLocalId ->
+
+                        scope.launch {
+                            snackbarHostState.showSnackbar(mensaje)
+                            Toast.makeText(context, mensaje, Toast.LENGTH_SHORT).show()
+                        }
+
+                        if (exito) {
+                            // 1. Generar PDF
+                            generarYAbrirPDF2(
+                                context,
+                                cliente.value?.nombreNegocio ?: "Negocio",
+                                productosParaVenta,
+                                totalGeneral,
+                                scope,
+                                snackbarHostState
+                            )
+
+                            // 2. Imprimir Ticket
+                            impresoraBluetooth?.let { device ->
+                                imprimirTicket2(
+                                    context,
+                                    device,
+                                    cliente.value?.nombreNegocio ?: "Negocio",
+                                    productosParaVenta,
+                                    scope,
+                                    snackbarHostState
+                                )
+                            } ?: run {
+                                scope.launch { snackbarHostState.showSnackbar("No hay impresora conectada") }
                             }
-                            mostrarDialog = false
-
-                            // INICIO PROCESO DE VENTA (Delegado al ViewModel)
-                            ventaViewModel.procesarVenta(
-                                clienteId = cliente.value?.id ?: "",
-                                clienteNombre = cliente.value?.nombreDueno ?: "Cliente",
-                                clienteFotoUrl = cliente.value?.fotografiaUrl,
-                                metodoPago = "Efectivo",
-                                hayInternet = hayInternet(context)
-                            ) { exito, mensaje, ventaLocalId ->
-
-                                scope.launch {
-                                    snackbarHostState.showSnackbar(mensaje)
-                                    Toast.makeText(context, mensaje, Toast.LENGTH_SHORT).show()
-                                }
-
-                                if (exito) {
-                                    // 1. Generar PDF
-                                    generarYAbrirPDF2(context, cliente.value?.nombreDueno ?: "", productosParaVenta, totalGeneral, scope, snackbarHostState)
-
-                                    // 2. Imprimir Ticket
-                                    impresoraBluetooth?.let { device ->
-                                        imprimirTicket2(context, device, cliente.value?.nombreDueno ?: "", productosParaVenta, scope, snackbarHostState)
-                                    } ?: run {
-                                        scope.launch { snackbarHostState.showSnackbar("No hay impresora conectada") }
-                                    }
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("CONFIRMAR", fontWeight = FontWeight.Bold)
+                        }
                     }
                 },
-                dismissButton = {
-                    Button(
-                        onClick = { mostrarDialog = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE0E0E0), contentColor = Color.Gray),
-                        shape = RoundedCornerShape(8.dp)
-                    ) { Text("CANCELAR", fontWeight = FontWeight.Bold) }
-                }
+                onCancelar = { mostrarDialog = false }
             )
         }
+
     }
 }
 
 // ---------------- Componentes de UI (Renombrados con '2' para evitar colisiones) ----------------
+
+
+@Composable
+fun LineaResplandorRoja() {
+    val infiniteTransition = rememberInfiniteTransition()
+    // Animación de desplazamiento horizontal
+    val offsetX by infiniteTransition.animateFloat(
+        initialValue = -300f, // inicia fuera de la pantalla
+        targetValue = 300f,   // termina al otro lado
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        )
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .background(Color.Red) // línea base
+    ) {
+        // Capa de resplandor animada
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(100.dp) // ancho del resplandor
+                .offset(x = offsetX.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.6f), Color.Transparent)
+                    )
+                )
+        )
+    }
+}
+
+
+@Composable
+fun InfoClienteCompacta(
+    cliente: ClienteEntity?,
+    modifier: Modifier = Modifier,
+    navController: NavController? = null // Pasamos el NavController
+) {
+    var mostrarImagenGrande by remember { mutableStateOf(false) }
+
+    Column(modifier = modifier) {
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            // Foto del cliente
+            Box(
+                modifier = Modifier
+                    .size(70.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .clickable { mostrarImagenGrande = true }
+            ) {
+                if (!cliente?.fotografiaUrl.isNullOrEmpty()) {
+                    AsyncImage(
+                        model = cliente!!.fotografiaUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(Color.LightGray),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Person, null, tint = Color.DarkGray)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Textos del cliente con peso y overflow
+            Column(
+                modifier = Modifier
+                    .weight(1f) // ocupa el espacio disponible sin empujar al icono
+            ) {
+                Text(
+                    cliente?.nombreNegocio ?: "",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    cliente?.nombreDueno ?: "Cargando...",
+                    fontSize = 18.sp,
+                    color = Color.Gray,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Icono de clientes con tamaño fijo
+            Box(
+                modifier = Modifier.size(40.dp), // tamaño fijo para que no se comprima
+                contentAlignment = Alignment.Center
+            ) {
+                IconButton(
+                    onClick = {
+                        navController?.navigate("delivery?screen=Clientes") {
+                            launchSingleTop = true
+                            popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize() // llena el box para que sea clicable
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Group,
+                        contentDescription = "Ir a Clientes",
+                        tint = Color.Red,
+                        modifier = Modifier.fillMaxSize() // el ícono ocupa todo el botón
+                    )
+                }
+            }
+        }
+
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        LineaResplandorRoja()
+
+        if (mostrarImagenGrande && !cliente?.fotografiaUrl.isNullOrEmpty()) {
+            FullscreenClienteImage(cliente!!.fotografiaUrl!!) {
+                mostrarImagenGrande = false
+            }
+        }
+    }
+}
+
+
+
+@Composable
+fun FullscreenClienteImage(
+    imageUrl: String,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Fondo blur
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().blur(40.dp)
+            )
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
+
+            // Imagen con zoom
+            var scale by remember { mutableStateOf(1f) }
+            var offsetX by remember { mutableStateOf(0f) }
+            var offsetY by remember { mutableStateOf(0f) }
+
+            val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+                scale = (scale * zoomChange).coerceIn(1f, 4f)
+                offsetX += panChange.x
+                offsetY += panChange.y
+            }
+
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 12.dp)
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(22.dp))
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offsetX
+                        translationY = offsetY
+                    }
+                    .transformable(state = transformState)
+            )
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).size(44.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(50))
+            ) {
+                Icon(Icons.Default.Close, null, tint = Color.White)
+            }
+        }
+    }
+}
+
+
+
+
+
 
 @Composable
 fun CardInfoCliente2(cliente: ClienteEntity?) {
@@ -366,7 +661,7 @@ fun ItemProductoVenta2(
             }
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                ContadorCantidad2(producto.cantidad, onSumar, onRestar, onCantidadCambiada)
+                ContadorCantidad2(producto.cantidad,cantidadDisponible = producto.cantidadDisponible, onSumar, onRestar, onCantidadCambiada)
                 Spacer(modifier = Modifier.height(10.dp))
                 Text("${producto.cantidadDisponible}", fontSize = 14.sp, color = Color(0xFFFF0000), fontWeight = FontWeight.Bold)
                 Text("Disponible", fontSize = 12.sp, color = Color(0xFF555555))
@@ -388,9 +683,9 @@ fun CardTotal2(total: Double, formato: java.text.NumberFormat, modifier: Modifie
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Total General:", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF333333))
+            Text("Total Venta:", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF333333))
             Spacer(modifier = Modifier.width(8.dp))
-            Text(formato.format(total), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0000FF))
+            Text(formato.format(total), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFF0000))
         }
     }
 }
@@ -412,32 +707,112 @@ fun MessageView2(msg: String) {
     }
 }
 
+
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ContadorCantidad2(cantidad: Int, onSumar: () -> Unit, onRestar: () -> Unit, onCantidadCambiada: (Int) -> Unit = {}) {
-    var textoCantidad by remember(cantidad) { mutableStateOf(cantidad.toString()) }
+fun ContadorCantidad2(
+    cantidad: Int,
+    cantidadDisponible: Int,
+    onSumar: () -> Unit,
+    onRestar: () -> Unit,
+    onCantidadCambiada: (Int) -> Unit
+) {
+    var textCantidad by remember(cantidad) { mutableStateOf(cantidad.toString()) }
 
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        IconButton(onClick = { onRestar() }, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Remove, "Restar", tint = Color(0xFFD32F2F), modifier = Modifier.size(24.dp))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // Botón Restar
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable {
+                    val current = textCantidad.toIntOrNull() ?: 0
+                    if (current > 0) {
+                        val nuevo = current - 1
+                        textCantidad = nuevo.toString()
+                        onCantidadCambiada(nuevo)
+                        onRestar()
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("-", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD32F2F))
         }
-        BasicTextField(
-            value = textoCantidad,
-            onValueChange = { nuevo ->
-                val num = nuevo.filter { it.isDigit() }
-                textoCantidad = if (num.isEmpty()) "0" else num
-                onCantidadCambiada(textoCantidad.toInt())
-            },
-            singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-            modifier = Modifier.width(65.dp).height(30.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFFF0000)).padding(vertical = 4.dp)
-        )
-        IconButton(onClick = onSumar, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Add, "Sumar", tint = Color(0xFF388E3C), modifier = Modifier.size(24.dp))
+
+        // Campo de texto cantidad
+        Box(
+            modifier = Modifier
+                .width(65.dp)
+                .height(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFFFF0000)),
+            contentAlignment = Alignment.Center
+        ) {
+            BasicTextField(
+                value = textCantidad,
+                onValueChange = { newValue ->
+                    val limpio = newValue.filter { it.isDigit() }.trimStart('0')
+                    val numeroIngresado = if (limpio.isEmpty()) 0 else limpio.toInt()
+                    val valorFinal = numeroIngresado.coerceIn(0, cantidadDisponible)
+                    textCantidad = valorFinal.toString()
+                    onCantidadCambiada(valorFinal)
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done
+                ),
+                textStyle = LocalTextStyle.current.copy(
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 32.sp  // <- Esto asegura que el texto quede centrado verticalmente
+                ),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused && textCantidad == "0") {
+                            textCantidad = ""
+                        }
+                        if (!focusState.isFocused && textCantidad.isEmpty()) {
+                            textCantidad = "0"
+                        }
+                    }
+            )
+
         }
+
+        // Botón Sumar
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable {
+                    val current = textCantidad.toIntOrNull() ?: 0
+                    val nuevo = (current + 1).coerceAtMost(cantidadDisponible)
+                    textCantidad = nuevo.toString()
+                    onCantidadCambiada(nuevo)
+                    onSumar()
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF388E3C))
+        }
+
+
     }
 }
+
+
+
+
+
 
 // ---------------- Utilidades ----------------
 
@@ -507,7 +882,7 @@ fun PantallaVentas2PreviewContent(productosPreview: List<Plantilla_Producto>) {
         ) {
 
             item {
-                CardInfoCliente2(
+                InfoClienteCompacta(
                     ClienteEntity(
                         id = "preview",
                         nombreNegocio = "Negocio Preview",
@@ -537,11 +912,19 @@ fun PantallaVentas2PreviewContent(productosPreview: List<Plantilla_Producto>) {
             }
         }
 
-        CardTotal2(
-            total = totalGeneral,
-            formato = formatoMoneda,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+        ) {
+            LineaResplandorRoja()
+            CardTotal2(
+                total = totalGeneral,
+                formato = formatoMoneda,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
     }
 }
 

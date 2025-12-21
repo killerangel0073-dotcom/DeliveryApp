@@ -138,8 +138,9 @@ fun Navegador(
 
         // Mapa
         composable("MAPA_SCREEN") {
-            MapaScreen()
+            MapaScreen(navController = navController)
         }
+
 
 
 
@@ -166,20 +167,23 @@ fun Navegador(
 
         // 🔍 DETALLE DE CLIENTE
         composable(
-            route = "detalle_cliente/{clienteId}",
+            route = "detalle_cliente/{clienteId}?origen={origen}",
             arguments = listOf(
-                navArgument("clienteId") { type = NavType.StringType }
+                navArgument("clienteId") { type = NavType.StringType },
+                navArgument("origen") { type = NavType.StringType; defaultValue = "Clientes"; nullable = true }
             )
         ) { backStackEntry ->
-
             val clienteId = backStackEntry.arguments?.getString("clienteId") ?: ""
+            val origen = backStackEntry.arguments?.getString("origen") ?: "Clientes"
 
             DetalleClienteScreen(
                 clienteId = clienteId,
                 navController = navController,
-                repository = repository
+                repository = repository,
+                origen = origen // 🔹 pasamos el origen
             )
         }
+
 
 
 
