@@ -84,7 +84,7 @@ fun PantallaNotificaciones(navController: NavController) {
                                                             mensaje = "Nueva carga asignada",
                                                             fecha = fechaFormateada,
                                                             esCarga = true,
-                                                            aceptada = doc.getString("estado") == "ACEPTADA"
+                                                            aceptada = doc.getString("estado") == "COMPLETADA"
                                                         )
                                                     }
                                                     notificaciones.clear()

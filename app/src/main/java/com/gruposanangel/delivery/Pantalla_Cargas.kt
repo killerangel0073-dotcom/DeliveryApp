@@ -83,6 +83,7 @@ fun MovimientosInventarioScreen(
 
 
 
+
     var mostrarDialogConfirmacion by remember { mutableStateOf(false) }
     var origen by remember { mutableStateOf("Selecciona Origen") }
     var destino by remember { mutableStateOf("Selecciona Destino") }
@@ -338,19 +339,22 @@ fun MovimientosInventarioScreen(
                                     ) {
 
 
+                                        var isFocused by remember(producto.id) { mutableStateOf(false) }
+
 
                                         BasicTextField(
-                                            value = numberFormatter.format(textCantidad.toIntOrNull() ?: 0),
+                                            value = if (isFocused && (cantidades[producto.id] ?: 0) == 0) {
+                                                ""
+                                            } else {
+                                                numberFormatter.format(cantidades[producto.id] ?: 0)
+                                            },
 
                                             onValueChange = { newValue ->
-
-                                                // 🔹 Quitar comas antes de procesar
                                                 val limpio = newValue
                                                     .replace(",", "")
                                                     .filter { it.isDigit() }
-                                                    .trimStart('0')
 
-                                                val numeroIngresado = if (limpio.isEmpty()) 0 else limpio.toInt()
+                                                val numeroIngresado = limpio.toIntOrNull() ?: 0
 
                                                 val valorFinal = if (origen == "Compra Producto") {
                                                     numeroIngresado.coerceAtLeast(0)
@@ -359,7 +363,6 @@ fun MovimientosInventarioScreen(
                                                     numeroIngresado.coerceIn(0, disponible)
                                                 }
 
-                                                textCantidad = valorFinal.toString()
                                                 cantidades[producto.id] = valorFinal
                                             },
 
@@ -371,8 +374,17 @@ fun MovimientosInventarioScreen(
                                                 color = Color.Red,
                                                 textAlign = TextAlign.Center
                                             ),
-                                            modifier = Modifier.fillMaxSize()
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .onFocusChanged { focusState ->
+                                                    isFocused = focusState.isFocused
+                                                }
                                         )
+
+
+
+
+
 
                                     }
 

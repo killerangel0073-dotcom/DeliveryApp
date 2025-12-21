@@ -56,21 +56,43 @@ async function ejecutarTransferenciaConDetalle(db, ordenId, ordenData) {
       });
     }
 
-    // 🔺 DESTINO
+
+
+
+
+    // 🔺 DESTINO (FORMA CORRECTA Y CONSISTENTE)
     if (destinoSnap.exists) {
       const stockDestino = destinoSnap.get('cantidad') || 0;
+
       batch.update(stockDestinoRef, {
         cantidad: stockDestino + cantidad,
         ultimaActualizacion: ahora
       });
+
     } else {
       batch.set(stockDestinoRef, {
-        productoId,
+        // 🔑 IDENTIDAD
+        productoRef: db.collection('producto').doc(productoId),
+        productoId: productoId,
+
+        // 🔑 INFO PRODUCTO
+        productoNombre: p.nombre ?? null,
+        precioUnitario: Number(p.precioUnitario ?? p.precio ?? 0),
+
+        // 🔑 INFO ALMACÉN
         almacenNombre: ordenData.destino,
-        cantidad,
+        almacenRef: db.collection('almacenes').doc(ordenData.destino),
+
+        // 🔑 STOCK
+        cantidad: cantidad,
         ultimaActualizacion: ahora
       });
     }
+
+
+
+
+
 
     // 📦 MOVIMIENTO
     const tipoMovimiento =
@@ -79,6 +101,8 @@ async function ejecutarTransferenciaConDetalle(db, ordenId, ordenData) {
         : ordenData.destino.startsWith('Vendedor')
           ? 'TRANSFERENCIA_VENDEDOR'
           : 'TRANSFERENCIA_INTERNA';
+
+
 
     batch.set(db.collection('movimientosStock').doc(), {
       tipoMovimiento,
@@ -89,7 +113,11 @@ async function ejecutarTransferenciaConDetalle(db, ordenId, ordenData) {
       destino: ordenData.destino,
       ordenId,
       timestamp: ahora
+
+
     });
+
+
   } // ✅ AQUÍ CIERRA EL FOR
 
   // ✅ ACTUALIZAR ORDEN (UNA SOLA VEZ)

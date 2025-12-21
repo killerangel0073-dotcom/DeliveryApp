@@ -132,6 +132,11 @@ fun Navegador(
 
 
 
+        composable("CREAR_PRODUCTO") {
+            CrearProductoScreen(navController)
+        }
+
+
 
 
 

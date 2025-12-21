@@ -93,14 +93,24 @@ class RepositoryInventario(private val productoDao: ProductoDao) {
             try {
                 val almacenRef = obtenerAlmacenAsignado(uid) ?: return@launch
 
+
+
                 listenerRegistration = firestore.collection("inventarioStock")
                     .whereEqualTo("almacenRef", almacenRef)
+
                     .addSnapshotListener { snapshot, error ->
+
+
+
                         if (error != null) {
                             Log.e(TAG, "escucharCambiosFirebase: error escuchando firestore", error)
                             return@addSnapshotListener
                         }
                         if (snapshot == null) return@addSnapshotListener
+
+
+                        // 🔴 🔴 AQUÍ PEGA ESTO 🔴 🔴
+                        Log.d(TAG, "🔥 Snapshot recibido - documentos: ${snapshot.documents.size}")
 
                         repositoryScope.launch {
                             try {

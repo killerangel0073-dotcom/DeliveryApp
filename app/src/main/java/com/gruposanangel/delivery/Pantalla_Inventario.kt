@@ -427,6 +427,20 @@ fun PantallaInventarioContent(
         ) {
             Icon(Icons.Default.ShoppingCart, contentDescription = "Agregar Producto")
         }
+
+
+
+        // NUEVO FAB para CrearProductoScreen
+        FloatingActionButton(
+            onClick = { navController.navigate("CREAR_PRODUCTO") }, // nueva pantalla
+            containerColor = Color(0xFF00AAFF),
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 90.dp) // separarlo del otro FAB
+        ) {
+            Icon(Icons.Default.Notifications, contentDescription = "Nuevo Producto") // Cambia icono si quieres
+        }
     }
 }
 
