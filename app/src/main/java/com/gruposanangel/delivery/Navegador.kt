@@ -132,11 +132,27 @@ fun Navegador(
 
 
 
+        // Crear producto
         composable("CREAR_PRODUCTO") {
             CrearProductoScreen(navController)
         }
 
 
+        // PANTALLA PRODUCTOS
+        composable("PRODUCTOS") {
+            ListaProductosScreen(navController)
+        }
+
+
+
+        // Editar producto
+        composable(
+            "EDITAR_PRODUCTOS/{productoId}",
+            arguments = listOf(navArgument("productoId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("productoId")
+            EditarProductoScreen(navController, productoId = id)
+        }
 
 
 
@@ -145,6 +161,34 @@ fun Navegador(
         composable("MAPA_SCREEN") {
             MapaScreen(navController = navController)
         }
+
+
+
+        // Aquí agregamos la nueva pantalla
+        composable("ventas_filtradas") {
+            VentasFirebaseScreen(navController)
+        }
+
+
+        // 📊 INFO DE VENTAS DEL VENDEDOR
+        composable("VENDEDOR_INFO_VENTAS") {
+            VendedorInfoVentasScreen()
+        }
+
+
+        // POANTALLA VENTAS ROOM
+        composable("ventas_room") {
+            val context = LocalContext.current
+            val db = AppDatabase.getDatabase(context)
+            val ventaRepository = VentaRepository(db.VentaDao())
+
+            VentasRoomScreen(
+                context = context,
+                navController = navController,
+                ventaRepository = ventaRepository
+            )
+        }
+
 
 
 

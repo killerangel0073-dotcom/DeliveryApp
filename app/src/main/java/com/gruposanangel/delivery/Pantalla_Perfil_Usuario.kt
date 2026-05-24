@@ -28,6 +28,9 @@ import com.gruposanangel.delivery.data.UsuarioDao
 import com.gruposanangel.delivery.data.UsuarioEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 
 // ======================== PERFIL DE USUARIO ========================
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,21 +60,29 @@ fun PerfilDeUsuarioScreen(
     val licenseNumber = usuario?.licenciaConducir ?: if (isPreview) "Si tiene" else "Cargando..."
     val photoUrl = usuario?.photoUrl ?: ""
 
-    val bossName = "No disponible"
-    val routeAssigned = "No asignada"
-    val voterId = "No disponible"
+    val bossName = usuario?.jefeDirectoNombre ?: "No disponible"
+
+    val routeAssigned = usuario?.ultimaRutaNombre ?: "No asignada"
+    val warehouse = usuario?.ultimoAlmacenNombre ?: "No asignado"
+    val voterId = usuario?.credencialElector ?: "No disponible"
+    val isActive = if (usuario?.activo == true) "Activo" else "Inactivo"
+    val email = usuario?.email ?: "No disponible"
+
+
+
+
+
+
+
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = {
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            "Perfil General",
-                            modifier = Modifier.align(Alignment.Center),
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Text(
+                        "Perfil General",
+                        textAlign = TextAlign.Center
+                    )
                 },
                 navigationIcon = {
                     IconButton(
@@ -80,7 +91,8 @@ fun PerfilDeUsuarioScreen(
                                 launchSingleTop = true
                                 popUpTo(0) { inclusive = true }
                             }
-                        }) {
+                        }
+                    ) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Regresar")
                     }
                 },
@@ -102,7 +114,7 @@ fun PerfilDeUsuarioScreen(
                     contentDescription = "Foto de perfil",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(100.dp)
+                        .size(150.dp)
                         .clip(CircleShape)
                 )
             } else {
@@ -111,7 +123,7 @@ fun PerfilDeUsuarioScreen(
                     contentDescription = "Foto de perfil",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(100.dp)
+                        .size(150.dp)
                         .clip(CircleShape)
                 )
             }

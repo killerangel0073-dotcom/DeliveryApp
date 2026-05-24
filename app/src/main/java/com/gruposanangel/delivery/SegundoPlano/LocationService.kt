@@ -1,8 +1,11 @@
 package com.gruposanangel.delivery.SegundoPlano
 
+import android.Manifest
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -39,14 +42,25 @@ import com.gruposanangel.delivery.SegundoPlano.LocationState
 import kotlin.coroutines.coroutineContext
 
 
+
+
+
+object LocationConfig {
+    const val LIMITE_VELOCIDAD = 70f
+    const val MARGEN_APAGADO_ALERTA = 68f
+    const val VELOCIDAD_MAX_SALTO = 250f
+    const val DISTANCIA_MAX_SALTO = 2000f
+    const val WAKELOCK_TIMEOUT = 10 * 60 * 1000L // 10 minutos
+    const val NOTIFY_THROTTLE_MS = 120_000L
+}
+
 class LocationService : Service() {
 
 
 
 
-    private var batteryReceiverRegistered = false
 
-    @Volatile private var ubicacionPendiente: Location? = null
+    private var batteryReceiverRegistered = false
     private var lastUploadedLocation: Location? = null // 🔥 Nueva: Controla el rastro real en Firestore
     private var lastUploadTimestamp: Long = 0
 
@@ -72,6 +86,22 @@ class LocationService : Service() {
     private var velocidadFiltrada = 0f
     private var velocidadFiltradaUI = 0f
     val velocidadActual = mutableStateOf(0f)
+
+
+    // ===============================
+// DOBLE VELOCIDAD (UI vs LÓGICA)
+// ===============================
+
+    // UI: más sensible, más fluida
+    private var velocidadUIInterna = 0f
+    val velocidadUI = mutableStateOf(0f)
+
+    // Lógica: más estable (alertas, Firestore)
+    private var velocidadLogicaInterna = 0f
+    val velocidadLogica = mutableStateOf(0f)
+
+
+
     val alertaVelocidad = mutableStateOf<Float?>(null)
 
     private var alarmaActiva = false
@@ -94,10 +124,20 @@ class LocationService : Service() {
         isRunning = true
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
+
+        if (!tienePermisosUbicacion()) {
+            Log.e(TAG, "❌ Sin permisos de ubicación. Cerrando servicio.")
+            stopSelf()
+            return
+        }
+
+
         startForeground(1, buildNotification())
         adquirirWakeLock()
         requestLocationUpdates()
         registrarBatteryReceiver()
+        iniciarWatchdog() // <--- AGREGA ESTA LÍNEA AQUÍ
+
 
         // LANZAMIENTO ÚNICO DE MOTORES
         serviceScope.launch {
@@ -116,21 +156,18 @@ class LocationService : Service() {
             delay(30_000)
 
             val user = firebaseUser
-            val loc = lastLocation
             val ruta = rutaNombreCache
-            val velocidad = velocidadActual.value // <-- Usamos tu variable filtrada
+            val velocidad = velocidadActual.value
 
-            if (user != null && loc != null && !ruta.isNullOrEmpty()) {
-                // Decidimos el status según la realidad del movimiento
+            if (user != null && !ruta.isNullOrEmpty()) {
+                // Decidimos el status según la velocidad filtrada
                 val statusActual = if (velocidad > 1.5f) "MOVING" else "ONLINE"
 
+                // 🔥 AJUSTE: Solo enviamos pulso de tiempo y estado.
+                // La ubicación solo la escribe 'subirUbicacion' cuando el GPS es real.
                 val data = mapOf(
-                    "latitude" to loc.latitude,
-                    "longitude" to loc.longitude,
-                    "accuracy" to loc.accuracy,
-                    "speed" to velocidad,
                     "timestamp" to Timestamp.now(),
-                    "status" to statusActual // <-- Dinámico
+                    "status" to statusActual
                 )
 
                 firestore.collection("locations")
@@ -144,24 +181,31 @@ class LocationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        isRunning = true
-        startForeground(1, buildNotification())
 
-        when (intent?.action) {
-            ACTION_START -> {
-                adquirirWakeLock()
-                requestLocationUpdates()
-                Log.d(TAG, "Acción START recibida")
-            }
-            ACTION_STOP -> {
-                detenerTodo()
-                stopForeground(true)
-                stopSelf()
-            }
-            ACTION_TEST_ALERT -> {
-                if (!alarmaActiva) {
-                    alarmaActiva = true
-                    lanzarAlertaExceso(75f)
+        if (!tienePermisosUbicacion()) {
+            Log.e(TAG, "❌ Sin permisos en onStartCommand")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // 1. REPORTE INMEDIATO AL SISTEMA (Evita ANR/Crashes)
+        startForeground(1, buildNotification())
+        isRunning = true
+
+        if (intent == null || intent.action == null) {
+            Log.d(TAG, "Reinicio por el sistema detectado (Sticky)")
+            adquirirWakeLock()
+            requestLocationUpdates()
+            iniciarWatchdog() // 2. RE-PROGRAMAR EL SEGURO
+        } else {
+            when (intent.action) {
+                ACTION_START -> {
+                    adquirirWakeLock()
+                    requestLocationUpdates()
+                }
+                ACTION_STOP -> {
+                    detenerTodo()
+                    stopForeground(STOP_FOREGROUND_REMOVE) // Usar constante moderna
+                    stopSelf()
                 }
             }
         }
@@ -175,6 +219,22 @@ class LocationService : Service() {
         val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
         registerReceiver(batteryReceiver, filter)
         batteryReceiverRegistered = true
+    }
+
+    private fun tienePermisosUbicacion(): Boolean {
+        val fine = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val background = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
+
+        return fine && background
     }
 
 
@@ -213,11 +273,15 @@ class LocationService : Service() {
 
 
 
+
+
     private fun requestLocationUpdates() {
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L) // <--- 1 segundo exacto
-            .setMinUpdateIntervalMillis(800L) // Permitir hasta 800ms
-            .setMaxUpdateDelayMillis(1000L)
-            .setWaitForAccurateLocation(false)
+        // Configuramos para que SEA AGRESIVO buscando GPS real, no caché
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L)
+            .setMinUpdateIntervalMillis(2000L)
+            .setMaxUpdateDelayMillis(5000L)
+            .setWaitForAccurateLocation(true) // 🔥 CLAVE: No acepta lo primero que encuentre
+            .setMinUpdateDistanceMeters(0f)
             .build()
 
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -233,73 +297,181 @@ class LocationService : Service() {
         }
     }
 
-    private fun procesarNuevaUbicacion(location: Location) {
-        // --- FILTROS DE CALIDAD ---
-        lastLocation?.let {
-            if (location.distanceTo(it) > 80) return
-        }
-        if (!location.hasAccuracy() || location.accuracy > 80f) return
 
-        // --- CÁLCULO DE VELOCIDAD CRUDA ---
+
+    private fun iniciarWatchdog() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, WatchdogReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this,
+            1001,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val triggerAt = System.currentTimeMillis() + 20 * 60 * 1000L
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
+                if (alarmManager.canScheduleExactAlarms()) {
+                    val alarmClockInfo = AlarmManager.AlarmClockInfo(triggerAt, pendingIntent)
+                    alarmManager.setAlarmClock(alarmClockInfo, pendingIntent)
+                } else {
+                    Log.w("Watchdog", "No se puede programar alarma exacta: permiso no concedido")
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAt,
+                    pendingIntent
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAt,
+                    pendingIntent
+                )
+            }
+            Log.d("Watchdog", "Watchdog programado correctamente")
+        } catch (se: SecurityException) {
+            Log.e("Watchdog", "No se puede programar alarma exacta: ${se.message}")
+        }
+    }
+
+
+
+
+
+
+    private fun procesarNuevaUbicacion(location: Location) {
+        // --- 1. FILTRO DE ANTIGÜEDAD (ANTI-CACHÉ) ---
+        val edadMs = System.currentTimeMillis() - location.time
+        if (edadMs > 90_000) {
+            Log.w(TAG, "Ignorada: Ubicación vieja detectada (Caché de la casa)")
+            return
+        }
+
+        // --- 2. FILTRO DE PRECISIÓN ---
+        if (!location.hasAccuracy() || location.accuracy > 80f) {
+            Log.w(TAG, "Ignorada: Baja precisión (${location.accuracy}m)")
+            return
+        }
+
+        // --- 3. FILTRO DE SALTOS IMPOSIBLES (CON AUTO-RESET) ---
+        lastLocation?.let {
+            val distancia = location.distanceTo(it)
+            val deltaSegundos = (location.elapsedRealtimeNanos - it.elapsedRealtimeNanos) / 1_000_000_000f
+
+            if (deltaSegundos > 0) {
+                val velocidadCalculada = (distancia / deltaSegundos) * 3.6f
+
+                // Si el salto es mayor a 250km/h Y la distancia es grande
+                if (velocidadCalculada > 250f && distancia > 2000) {
+                    Log.e(TAG, "⚠️ Salto detectado ($velocidadCalculada km/h). Reseteando caché para validar nueva zona.")
+
+                    // 🔥 LA CLAVE: Borramos el pasado.
+                    // Esto causa que el PRÓXIMO punto que llegue se acepte sin preguntas.
+                    lastLocation = null
+                    lastUploadedLocation = null
+                    return // Ignoramos ESTE punto actual, pero el que viene en 1 segundo entrará OK.
+                }
+            }
+        }
+
+        // 🔥 AJUSTE: Log de éxito para saber exactamente cuándo el GPS está sano
+        Log.i(TAG, "✅ GPS OK → Provider: ${location.provider} | Precisión: ${location.accuracy}m")
+
+        // --- 4. CÁLCULO DE VELOCIDAD (VERSIÓN ROBUSTA) ---
         val speedKmhRaw = if (location.hasSpeed()) {
             location.speed * 3.6f
         } else {
             lastLocation?.let {
-                (location.distanceTo(it) / ((location.time - it.time) / 1000f)) * 3.6f
+                val d = location.distanceTo(it)
+                val t = (location.elapsedRealtimeNanos - it.elapsedRealtimeNanos) / 1_000_000_000f
+                if (t > 0) (d / t) * 3.6f else 0f
             } ?: 0f
         }
 
-        // --- FILTRO 1: VELOCIDAD PARA LA UI (ULTRA RÁPIDA) ---
-        // Usamos alpha 0.8f para que la aguja reaccione de inmediato
-        val alphaUI = 0.8f
-        velocidadFiltradaUI = alphaUI * speedKmhRaw + (1 - alphaUI) * velocidadFiltradaUI
-        val finalSpeedUI = if (velocidadFiltradaUI < 1.5f) 0f else velocidadFiltradaUI
 
-        // Esta es la que va al velocímetro Tesla
-        LocationState.updateVelocidad(finalSpeedUI)
 
-        // --- FILTRO 2: VELOCIDAD PARA LOGICA/FIREBASE (ESTABLE) ---
-        // Mantenemos tu alpha 0.3f original para reportes limpios
-        val alphaLogic = 0.3f
-        velocidadFiltrada = alphaLogic * speedKmhRaw + (1 - alphaLogic) * velocidadFiltrada
-        val finalSpeedLogic = if (velocidadFiltrada < 1.5f) 0f else velocidadFiltrada
 
-        // Esta se usa para el loop de subida a Firestore
-        velocidadActual.value = finalSpeedLogic
 
-        // --- MANEJO DE ALERTAS (Usamos la estable para evitar alarmas por ruido GPS) ---
-        if (finalSpeedLogic > 70f && !alarmaActiva) {
-            alarmaActiva = true
-            lanzarAlertaExceso(finalSpeedLogic)
-        } else if (finalSpeedLogic <= 68f && alarmaActiva) {
-            alarmaActiva = false
-            detenerAlarma()
-            alertaVelocidad.value = null
+
+
+
+        // Suavizado para la UI y Lógica
+// ===============================
+// 1️⃣ VELOCIDAD PARA UI (RESPONSIVA)
+// ===============================
+        velocidadUIInterna = 0.65f * speedKmhRaw + 0.35f * velocidadUIInterna
+        val velocidadFinalUI = if (velocidadUIInterna < 0.8f) 0f else velocidadUIInterna
+
+        velocidadUI.value = velocidadFinalUI
+        LocationState.updateVelocidad(velocidadFinalUI)
+
+// ===============================
+// 2️⃣ VELOCIDAD LÓGICA (ESTABLE)
+// ===============================
+        velocidadLogicaInterna = 0.25f * speedKmhRaw + 0.75f * velocidadLogicaInterna
+        val velocidadFinalLogica = if (velocidadLogicaInterna < 1.5f) 0f else velocidadLogicaInterna
+
+        velocidadLogica.value = velocidadFinalLogica
+        velocidadActual.value = velocidadFinalLogica // 🔒 Mantienes compatibilidad total
+
+
+
+
+
+
+        // --- 5. ACTUALIZACIÓN DE REFERENCIA ÚNICA ---
+        lastLocation = Location(location).apply {
+            // Forzamos que el tiempo del objeto sea el tiempo actual del sistema
+            time = System.currentTimeMillis()
         }
 
-        // --- ACTUALIZACIÓN DE REFERENCIAS ---
-        lastLocation = location
-        ubicacionPendiente = location
+
+
+        // --- 6. AUTO-DISPARO DE ALERTA CON UMBRAL ---
+        val limiteMaximo = 70f
+        val margenApagado = 68f // 🚩 Umbral pequeño para que no "parpadee" la alarma
+
+        if (velocidadActual.value > limiteMaximo) {
+            if (!alarmaActiva) {
+                alarmaActiva = true
+                lanzarAlertaExceso(velocidadActual.value)
+                Log.w(TAG, "🚨 ALERTA: Exceso detectado (>70 km/h)")
+            }
+        } else if (velocidadActual.value < margenApagado) {
+            // Solo se apaga cuando baja de 68 km/h
+            if (alarmaActiva) {
+                alarmaActiva = false
+                detenerAlarma()
+                alertaVelocidad.value = null
+                Log.i(TAG, "✅ Velocidad normalizada (<68 km/h)")
+            }
+        }
+
+
     }
+
+
 
     private fun iniciarLoopDeSubida() {
         serviceScope.launch {
             while (isActive) {
-                delay(1000) // Tick de revisión
+                delay(1000) // Tick de revisión cada segundo
 
-                val loc = ubicacionPendiente ?: continue
+                // 🔥 AJUSTE: Usamos lastLocation como única fuente de verdad filtrada
+                val loc = lastLocation ?: continue
                 val user = firebaseUser ?: continue
-                val ruta = rutaNombreCache ?: cargarRutaSuspend(user.uid)
-
-                if (ruta.isNullOrEmpty()) continue // No bloqueamos con delays extra, el loop ya espera 1s
+                val ruta = rutaNombreCache ?: cargarRutaSuspend(user.uid) ?: continue
 
                 val now = System.currentTimeMillis()
                 val tiempoSinSubir = now - lastUploadTimestamp
 
-                // Si es la primera vez, forzamos la subida usando Float.MAX_VALUE
+                // Calculamos distancia desde el último punto que SI subimos a Firestore
                 val distanciaDesdeUltimaSubida = lastUploadedLocation?.distanceTo(loc) ?: Float.MAX_VALUE
 
-                // Lógica de decisión ultra clara
+                // Decisión de subida
                 val debeSubirPorMovimiento = distanciaDesdeUltimaSubida >= DISTANCIA_MINIMA &&
                         tiempoSinSubir >= INTERVALO_SUBIDA_MOVIMIENTO_MS
 
@@ -308,15 +480,17 @@ class LocationService : Service() {
                 if (debeSubirPorMovimiento || debeSubirPorTiempo) {
                     subirUbicacion(loc, ruta, velocidadActual.value)
 
-                    // 🔥 Actualizamos los marcadores de control
                     lastUploadTimestamp = now
-                    lastUploadedLocation = loc
+                    lastUploadedLocation = Location(loc) // 🔥 CLON
 
-                    Log.d(TAG, "✅ Ubicación enviada a Firestore ($ruta). Motivo: ${if(debeSubirPorMovimiento) "Movimiento" else "Tiempo"}")
+
+                    Log.d(TAG, "✅ Enviado a Firestore ($ruta). Motivo: ${if(debeSubirPorMovimiento) "Movimiento" else "Tiempo"}")
                 }
             }
         }
     }
+
+
 
 
     private fun subirUbicacion(location: Location, ruta: String, speedKmh: Float) {
@@ -325,8 +499,9 @@ class LocationService : Service() {
             "latitude" to location.latitude,
             "longitude" to location.longitude,
             "accuracy" to location.accuracy,
+            "provider" to location.provider, // 🧠 Auditoría: "gps" o "network"
             "speed" to speedKmh,
-            "battery" to BatteryState.state.value.level, // ✅ CORRECTO
+            "battery" to BatteryState.state.value.level,
             "timestamp" to Timestamp.now(),
             "status" to statusActual
         )
@@ -336,6 +511,11 @@ class LocationService : Service() {
             .set(data, SetOptions.merge())
             .addOnFailureListener { e -> Log.e(TAG, "Error subiendo", e) }
     }
+
+
+
+
+
 
 
     // ==========================================
@@ -373,7 +553,16 @@ class LocationService : Service() {
         } catch (e: Exception) { null }
     }
 
-    private fun enviarNotificacionSupervisorVelocidad(token: String, velocidad: Int, ruta: String, userId: String) {
+
+    // Variable de clase (UNA SOLA INSTANCIA)
+    private val httpClient = OkHttpClient()
+
+    private fun enviarNotificacionSupervisorVelocidad(
+        token: String,
+        velocidad: Int,
+        ruta: String,
+        userId: String
+    ) {
         val json = JSONObject().apply {
             put("token", token)
             put("titulo", "Alerta de velocidad")
@@ -382,37 +571,125 @@ class LocationService : Service() {
             put("click_action", "OPEN_MAPA")
             put("ventaId", "velocidad-$userId-${System.currentTimeMillis()}")
         }
+
         val request = Request.Builder()
             .url("https://us-central1-appventas--san-angel.cloudfunctions.net/enviarNotificacion")
             .post(json.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        OkHttpClient().newCall(request).enqueue(object : okhttp3.Callback {
-            override fun onFailure(call: okhttp3.Call, e: IOException) { Log.e(TAG, "Error red supervisor", e) }
-            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) { response.close() }
+
+        // 🔥 AQUÍ ESTÁ LA CLAVE
+        httpClient.newCall(request).enqueue(object : okhttp3.Callback {
+
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                Log.e(TAG, "Error red supervisor", e)
+            }
+
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                response.close()
+            }
         })
     }
+
 
     // ==========================================
     // SISTEMA Y UTILIDADES
     // ==========================================
 
+    private var vibrando = false // Control de estado para evitar saturar el hardware
+
+    private fun gestionarVibracion(encender: Boolean) {
+        // 🛡️ Blindaje: Si ya estamos en el estado deseado, no hacemos nada
+        if (encender && vibrando) return
+        if (!encender && !vibrando) return
+
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
+                vibratorManager.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            }
+
+            if (encender) {
+                vibrando = true
+                val timings = longArrayOf(0, 500, 500) // Espera 0, Vibra 500, Espera 500
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    // Forzamos intensidad máxima (255)
+                    val amplitudes = intArrayOf(0, 255, 0)
+                    val effect = android.os.VibrationEffect.createWaveform(timings, amplitudes, 0) // 0 = repite
+                    vibrator.vibrate(effect)
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(timings, 0)
+                }
+                Log.d(TAG, "📳 Motor de vibración: ACTIVADO (Máxima potencia)")
+            } else {
+                vibrando = false
+                vibrator.cancel()
+                Log.d(TAG, "📳 Motor de vibración: APAGADO")
+            }
+        } catch (e: Exception) {
+            vibrando = false // Reset en caso de error
+            Log.e(TAG, "❌ Error en motor de vibración: ${e.message}")
+        }
+    }
+
     private fun reproducirAlarma() {
         try {
+            // 1. Si ya está sonando, no hacemos nada
             if (mediaPlayer?.isPlaying == true) return
+
+            // 2. Limpieza previa por seguridad
+            detenerAlarma()
+
+            // 🔥 ENCENDER VIBRACIÓN
+            gestionarVibracion(true)
+
+            // 3. Crear e iniciar
             mediaPlayer = MediaPlayer.create(applicationContext, R.raw.aaaeee)?.apply {
+
+                // 🔴 MANEJO DE ERROR AQUÍ
+                setOnErrorListener { _, what, extra ->
+                    Log.e(TAG, "MediaPlayer error what=$what extra=$extra")
+                    detenerAlarma()
+                    true // true = error manejado, evita crash
+                }
+
                 isLooping = true
                 setVolume(1.0f, 1.0f)
                 start()
             }
-        } catch (e: Exception) { Log.e(TAG, "Media Error", e) }
+
+            Log.d(TAG, "Alarma iniciada correctamente")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error al reproducir sonido: ${e.message}")
+        }
     }
+
+
 
     private fun detenerAlarma() {
         try {
-            mediaPlayer?.stop()
-            mediaPlayer?.release()
-        } catch (e: Exception) {} finally { mediaPlayer = null }
+
+            // 🔥 APAGAR VIBRACIÓN
+            gestionarVibracion(false)
+
+            mediaPlayer?.let {
+                if (it.isPlaying) {
+                    it.stop()
+                }
+                it.release()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error al liberar MediaPlayer: ${e.message}")
+        } finally {
+            mediaPlayer = null
+        }
     }
+
 
     private fun adquirirWakeLock() {
         try {
@@ -514,10 +791,50 @@ class LocationService : Service() {
 
 
 
+
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.d(TAG, "Cierre por swipe detectado. Activando Watchdog de emergencia.")
+
+        val intent = Intent(applicationContext, WatchdogReceiver::class.java)
+
+        val pendingIntent = PendingIntent.getBroadcast(
+            applicationContext,
+            1001,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                System.currentTimeMillis() + 5_000,
+                pendingIntent
+            )
+        } else {
+            alarmManager.set(
+                AlarmManager.RTC_WAKEUP,
+                System.currentTimeMillis() + 5_000,
+                pendingIntent
+            )
+        }
+
+        super.onTaskRemoved(rootIntent)
+    }
+
+
+
+
+
+
     override fun onDestroy() {
+
         super.onDestroy()
         detenerTodo()
     }
+
 
     override fun onBind(intent: Intent?): IBinder? = null
 

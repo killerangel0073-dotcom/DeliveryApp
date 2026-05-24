@@ -186,14 +186,36 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
                                 modifier = Modifier.padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+
+
+                                //IMAGEN LA TOMABA DE FIREBASE
                                 // Construir modelo de imagen robusto: si es ruta local, usar Uri.fromFile
-                                val imageModel = remember(cliente.fotografiaCliente) {
+                                val imageModel2 = remember(cliente.fotografiaCliente) {
                                     val path = cliente.fotografiaCliente
                                     if (path.isNotBlank()) {
                                         val f = File(path)
                                         if (f.exists()) Uri.fromFile(f) else path
                                     } else null
                                 }
+
+
+                                //USA LA IMAGEN DE LA BASE DE DATOS LOCAL DE DISPOSITIVO
+                                // Construir modelo de imagen robusto: si es ruta local, usar Uri.fromFile
+                                val imageModel = remember(cliente.fotografiaCliente) {
+                                    val path = cliente.fotografiaCliente
+                                    if (path.isBlank()) {
+                                        null
+                                    } else {
+                                        val file = File(path)
+                                        if (file.exists()) {
+                                            Uri.fromFile(file) // ✅ SOLO almacenamiento local
+                                        } else {
+                                            null               // ❌ NUNCA remoto
+                                        }
+                                    }
+                                }
+
+
 
                                 AsyncImage(
                                     model = imageModel,

@@ -32,7 +32,8 @@ import java.util.TimeZone
 class VistaModeloVenta(
 
     private val repositoryInventario: RepositoryInventario,
-    private val ventaRepository: VentaRepository
+    private val ventaRepository: VentaRepository,
+
 ) : ViewModel() {
 
 
@@ -115,32 +116,30 @@ fun guardarVentaLocal(
 
 
 
-suspend fun obtenerTicketDirecto(ticketId: Long): TicketVentaCompleto? {
-    // Obtenemos la venta usando el método existente en el repositorio
-    val venta = ventaRepository.obtenerVentaPorId(ticketId) ?: return null
+    // Reemplaza tu función actual por esta
+    suspend fun obtenerTicketDirecto(ticketId: Long): TicketVentaCompleto? {
+        try {
+            // ✅ Llamamos al repository que ya arma el ticket completo con la lista de productos
+            val ticketCompleto = ventaRepository.obtenerTicketCompleto(ticketId)
 
-    // Obtenemos los detalles de la venta
-    val detalles = ventaRepository.obtenerDetallesDeVenta(ticketId)
+            // Verificación de debug opcional
+            ticketCompleto?.let {
+                Log.d(
+                    "VistaModeloVenta",
+                    "Ticket obtenido: id=${it.numeroTicket}, productos=${it.productos.size}"
+                )
+            } ?: run {
+                Log.d("VistaModeloVenta", "No se encontró ticket con id=$ticketId")
+            }
 
-    // Mapear los detalles a productos para el TicketVentaCompleto
-    val productos = detalles.map { detalle ->
-        ProductoTicketDetalle(
-            nombre = detalle.nombre,
-            cantidad = detalle.cantidad,
-            precio = detalle.precio
-        )
+            return ticketCompleto
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Log.e("VistaModeloVenta", "Error obteniendo ticket directo: ${e.message}")
+            return null
+        }
     }
 
-    return TicketVentaCompleto(
-        numeroTicket = venta.id.toString(),
-        cliente = venta.clienteNombre,
-        total = venta.total,
-        fecha = Date(venta.fecha),
-        sincronizado = venta.sincronizado,
-        fotoCliente = venta.clienteImagenUrl ?: "",
-        productos = productos
-    )
-}
 
 
 
@@ -156,9 +155,38 @@ suspend fun obtenerDetallesDeVentaSuspend(ticketId: Long) =
     ventaRepository.obtenerDetallesDeVenta(ticketId)
 
 
+    // ✅ Nueva función para descargar ventas desde Firebase
+    fun descargarVentasDia(vendedorId: String) {
+        viewModelScope.launch {
+            try {
+                val ventasFirebase = ventaRepository.descargarVentasDia(vendedorId)
+
+                // Fusionar ventas locales con las de Firebase sin duplicados
+                val ventasLocales = _ventasPeriodo.value
+                val combinadas = (ventasLocales + ventasFirebase)
+                    .distinctBy { it.id } // evita duplicados según localId
+
+                _ventasPeriodo.value = combinadas
+
+            } catch (e: Exception) {
+                Log.e("VistaModeloVenta", "Error descargando ventas Firebase", e)
+            }
+        }
+    }
+
+    fun descargarVentasDiaYRefrescar(vendedorId: String) {
+        viewModelScope.launch {
+            try {
+                val ventasDelDia = ventaRepository.descargarVentasDia(vendedorId)
+                _ventasPeriodo.value = ventasDelDia // Compose se actualiza automáticamente
+            } catch (e: Exception) {
+                Log.e("VistaModeloVenta", "Error descargando ventas Firebase", e)
+            }
+        }
+    }
 
 
-// Carga ventas del día actual.
+    // Carga ventas del día actual.
 fun cargarVentasHoy() {
     val tz = TimeZone.getDefault() // usa la misma zona horaria del dispositivo
     val calendar = Calendar.getInstance(tz)

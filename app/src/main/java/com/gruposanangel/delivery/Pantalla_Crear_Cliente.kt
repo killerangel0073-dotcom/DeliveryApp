@@ -378,7 +378,13 @@ fun CrearClienteScreen(navController: NavController?, repository: RepositoryClie
                             if (repository != null) {
                                 withContext(Dispatchers.IO) { repository.guardarLocal(cliente) }
                                 Toast.makeText(context, "Cliente guardado localmente.", Toast.LENGTH_SHORT).show()
-                                scope.launch(Dispatchers.IO) { repository.sincronizarConFirebase() }
+
+                                scope.launch(Dispatchers.IO) {
+                                    repository?.sincronizarConFirebase(context)
+                                }
+
+
+
                                 navController?.navigate("delivery?screen=Clientes") { popUpTo("delivery") { inclusive = true } }
 
                             } else {

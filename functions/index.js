@@ -1,17 +1,23 @@
 const admin = require('firebase-admin');
-admin.initializeApp();
+
+// Inicializar una sola vez para todo el proyecto
+if (admin.apps.length === 0) {
+    admin.initializeApp();
+}
 
 const { registrarVenta } = require('./registrarVenta');
+const { enviarNotificacion } = require('./enviarNotificacion');
+const { enviarNotificacionUniversal } = require('./enviarNotificacionUniversal');
+const { onOrdenTransferenciaAceptadaConDetalle } = require('./onOrdenTransferenciaAceptadaConDetalle');
 
-const { enviarNotificacion } = require('./enviarNotificacion'); // 1 token
-const { enviarNotificacionUniversal } = require('./enviarNotificacionUniversal'); // varios tokens
+// Importar la nueva función
+const { notificarNuevaVenta } = require('./notificarNuevaVenta');
 
-const { onOrdenTransferenciaAceptadaConDetalle } =
-  require('./onOrdenTransferenciaAceptadaConDetalle');
-
+// Exportaciones
 exports.registrarVenta = registrarVenta;
-
-exports.enviarNotificacion = enviarNotificacion; // 1 token
-exports.enviarNotificacionUniversal = enviarNotificacionUniversal; // varios tokens
-
+exports.enviarNotificacion = enviarNotificacion;
+exports.enviarNotificacionUniversal = enviarNotificacionUniversal;
 exports.onOrdenTransferenciaAceptadaConDetalle = onOrdenTransferenciaAceptadaConDetalle;
+
+// Exportación de la nueva función
+exports.notificarNuevaVenta = notificarNuevaVenta;

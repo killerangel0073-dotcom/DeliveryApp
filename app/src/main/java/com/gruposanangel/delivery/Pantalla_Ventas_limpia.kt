@@ -62,7 +62,9 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.google.firebase.auth.FirebaseAuth
 import com.gruposanangel.delivery.R
+import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.ClienteEntity
 import com.gruposanangel.delivery.data.RepositoryCliente
@@ -98,14 +100,21 @@ fun PantallaVentas2(
 
     // 1. Inicialización del ViewModel (VentaViewModel)
     val db = AppDatabase.getDatabase(context)
+    val repoUsuario = RepositoryUsuario(db.usuarioDao())
+
     val ventaViewModel: VentaViewModel = if (!isPreview) {
+        // Repositorios reales
         val repoInventarioReal = inventarioRepo ?: RepositoryInventario(db.productoDao())
         val repoVentaReal = VentaRepository(db.VentaDao())
-        viewModel(factory = VentaViewModelFactory(repoInventarioReal, repoVentaReal))
+        viewModel(factory = VentaViewModelFactory(repoInventarioReal, repoVentaReal, repoUsuario))
     } else {
-        // Mock simple para preview
-        viewModel(factory = VentaViewModelFactory(RepositoryInventario(db.productoDao()), VentaRepository(db.VentaDao())))
+        // Mock simple para preview (ahora incluyendo repoUsuario también)
+        val repoInventarioMock = RepositoryInventario(db.productoDao())
+        val repoVentaMock = VentaRepository(db.VentaDao())
+        val repoUsuarioMock = RepositoryUsuario(db.usuarioDao())
+        viewModel(factory = VentaViewModelFactory(repoInventarioMock, repoVentaMock, repoUsuarioMock))
     }
+
 
     // 2. Estados observados desde el ViewModel
     val productosEnCarrito = ventaViewModel.productosEnCarrito
@@ -130,9 +139,17 @@ fun PantallaVentas2(
     }
 
     // Cargar Ruta
+   // LaunchedEffect(Unit) {
+     //   if (!isPreview) {
+       //     ventaViewModel.verificarRutaAsignada()
+
+       // }
+    //}
+
     LaunchedEffect(Unit) {
         if (!isPreview) {
-            ventaViewModel.verificarRutaAsignada()
+            val uid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+            ventaViewModel.verificarRutaAsignadaLocal(uid)
         }
     }
 
@@ -285,37 +302,54 @@ fun PantallaVentas2(
 
 
         // 4️⃣ Botón flotante
+        // ---------- Botón flotante de finalizar venta ----------
         var botonBloqueado by remember { mutableStateOf(false) }
 
-        FloatingActionButton(
-            onClick = {
-                val productosParaVenta = productosEnCarrito.filter { it.cantidad > 0 }
-                if (productosParaVenta.isEmpty()) {
-                    if (!botonBloqueado) {
-                        // Mostrar mensaje solo si no está bloqueado
-                        scope.launch {
-                            snackbarHostState.showSnackbar("Seleccione al menos un producto")
-                        }
-                        botonBloqueado = true
-                        // Desbloquear después de 2 segundos
-                        scope.launch {
-                            kotlinx.coroutines.delay(2000)
-                            botonBloqueado = false
-                        }
-                    }
-                } else {
-                    // Abrir diálogo solo si hay productos
-                    mostrarDialog = true
-                }
-            },
-            containerColor = Color(0xFFFF0000),
-            contentColor = Color.White,
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 16.dp, bottom = 6.dp)
         ) {
-            Icon(Icons.Default.ReceiptLong, contentDescription = "Finalizar venta")
+            // Solo mostrar el FAB si no se está procesando la venta
+            if (!procesandoVenta) {
+                FloatingActionButton(
+                    onClick = {
+                        val productosParaVenta = productosEnCarrito.filter { it.cantidad > 0 }
+                        if (productosParaVenta.isEmpty()) {
+                            if (!botonBloqueado) {
+                                botonBloqueado = true
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Seleccione al menos un producto")
+                                    kotlinx.coroutines.delay(2000)
+                                    botonBloqueado = false
+                                }
+                            }
+                        } else {
+                            mostrarDialog = true
+                        }
+                    },
+                    containerColor = Color(0xFFFF0000),
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.ReceiptLong, contentDescription = "Finalizar venta")
+                }
+            } else {
+                // Mientras se procesa la venta, mostramos un FAB "bloqueado" con indicación
+                FloatingActionButton(
+                    onClick = {},
+                    containerColor = Color.Gray,
+                    contentColor = Color.White
+                ) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
         }
+
+
 
 
 
@@ -361,15 +395,21 @@ fun PantallaVentas2(
                         }
 
                         if (exito) {
+
+
+
+                            
+                            
+
                             // 1. Generar PDF
-                            generarYAbrirPDF2(
-                                context,
-                                cliente.value?.nombreNegocio ?: "Negocio",
-                                productosParaVenta,
-                                totalGeneral,
-                                scope,
-                                snackbarHostState
-                            )
+                            //generarYAbrirPDF2(
+                              //  context,
+                                //cliente.value?.nombreNegocio ?: "Negocio",
+                                //productosParaVenta,
+                                //totalGeneral,
+                                //scope,
+                                //snackbarHostState
+                           // )
 
                             // 2. Imprimir Ticket
                             impresoraBluetooth?.let { device ->
@@ -384,6 +424,16 @@ fun PantallaVentas2(
                             } ?: run {
                                 scope.launch { snackbarHostState.showSnackbar("No hay impresora conectada") }
                             }
+
+
+                            // Navegar a la pestaña de Rutas respetando los espacios
+                            navController.navigate("delivery?screen=  Ruta  ") {
+                                popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                                launchSingleTop = true
+                            }
+
+
+
                         }
                     }
                 },
@@ -391,8 +441,21 @@ fun PantallaVentas2(
             )
         }
 
+        // 7️⃣ Overlay de cargando
+        if (procesandoVenta) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = Color.Red)
+            }
+        }
     }
-}
+
+    }
+
 
 // ---------------- Componentes de UI (Renombrados con '2' para evitar colisiones) ----------------
 

@@ -305,6 +305,7 @@ fun DetalleClienteScreen(
                 // ===============================
                 // 🔘 BOTÓN PRINCIPAL
                 // ===============================
+                val context = LocalContext.current
                 Button(
                     onClick = {
                         if (editandoUbicacion) {
@@ -316,7 +317,10 @@ fun DetalleClienteScreen(
                                     lat = nuevaPosicion.latitude,
                                     lon = nuevaPosicion.longitude
                                 )
-                                repository?.sincronizarConFirebase()
+                                scope.launch(Dispatchers.IO) {
+                                    repository?.sincronizarConFirebase(context)
+                                }
+
 
                                 // 🔄 Recargar el cliente actualizado
                                 val clienteActualizado = repository?.obtenerClientesLocalPorId(c.id)

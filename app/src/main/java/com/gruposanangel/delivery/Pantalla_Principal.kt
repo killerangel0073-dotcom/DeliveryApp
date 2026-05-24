@@ -182,7 +182,11 @@ fun Pantalla_Principal(
 
             Box(modifier = Modifier.fillMaxSize()) {
                 when (selectedScreen) {
-                    Screen.Inicio -> Pantalla_Inicio(onImpresoraSeleccionada)
+                    Screen.Inicio -> Pantalla_Inicio(
+                        navController = navController,
+                        onImpresoraSeleccionada = onImpresoraSeleccionada
+                    )
+
                     Screen.Clientes -> repository?.let { PantallaClientes(navController, it) }
                     Screen.Inventario -> PantallaInventario(navController, inventarioRepo)
                     Screen.Ruta -> PaginaVentaScreen(navController, ventaRepository)

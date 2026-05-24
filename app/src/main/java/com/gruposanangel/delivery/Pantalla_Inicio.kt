@@ -33,6 +33,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Addchart
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Battery2Bar
 import androidx.compose.material.icons.filled.Battery4Bar
 import androidx.compose.material.icons.filled.Battery6Bar
@@ -79,6 +81,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import com.gruposanangel.delivery.SegundoPlano.LocationState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavController
+import androidx.navigation.compose.rememberNavController
 import com.gruposanangel.delivery.SegundoPlano.BatteryState
 import kotlinx.coroutines.delay
 
@@ -102,8 +106,11 @@ data class ProductoTicket(
 
 @Composable
 fun Pantalla_Inicio(
+    navController: NavController, // <-- agregado
     onImpresoraSeleccionada: (BluetoothDevice) -> Unit = {}
 ) {
+
+
 
 
 
@@ -219,34 +226,111 @@ fun Pantalla_Inicio(
 
 
 
+
+
+
+
+    var puestoTrabajo by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(uid)
+                .get()
+                .addOnSuccessListener { doc ->
+                    puestoTrabajo = doc.getString("puestoTrabajo")
+                }
+        }
+    }
+
+
+
     Scaffold(
-
         floatingActionButton = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp), // agrega espacio desde los bordes
-                horizontalArrangement = Arrangement.SpaceBetween
-
-            ) {
+            if (puedeVerFABInicio(puestoTrabajo)) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
 
 
 
 
 
 
+                // 🖨️ IMPRESORA
+                FloatingActionButton(
+                    onClick = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasBluetoothPermission) {
+                            bluetoothPermissionLauncher.launch(bluetoothPermissions)
+                            return@FloatingActionButton
+                        }
+                        pairedDevices =
+                            BluetoothAdapter.getDefaultAdapter()?.bondedDevices?.toList() ?: emptyList()
+                        showPrinterDialog = true
+                    },
+                    containerColor = Color(0xFFFF0000),
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.Print, contentDescription = "Impresora")
+                }
+
+                // 📊 INFO VENTAS VENDEDOR (NUEVO)
+                FloatingActionButton(
+                    onClick = {
+                        navController.navigate("VENDEDOR_INFO_VENTAS")
+                    },
+                    containerColor = Color(0xFFFF0000), // mismo rojo premium
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.BarChart, contentDescription = "Ventas del vendedor")
+                }
 
 
 
+                // 📊 INFO VENTAS VENDEDOR (NUEVO)
+                FloatingActionButton(
+                    onClick = {
+                        navController.navigate("ventas_room")
+                    },
+                    containerColor = Color(0xFFFF0000), // mismo rojo premium
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.Addchart, contentDescription = "Ventas del vendedor")
+                }
 
-
-
+                // 🔔 NOTIFICACIONES / VENTAS FILTRADAS
+                FloatingActionButton(
+                    onClick = {
+                        navController.navigate("ventas_filtradas")
+                        // navController.navigate("ventas_room")
+                    },
+                    containerColor = Color(0xFFFF0000), // mismo rojo premium
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.Message, contentDescription = "Notificación")
+                }
+                }
             }
         },
-        floatingActionButtonPosition = FabPosition.Center // Usamos Center porque ahora tenemos botones en ambos lados
-
-
+        floatingActionButtonPosition = FabPosition.End
     )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -329,10 +413,29 @@ fun Pantalla_Inicio(
 
 
 
+
+            if (showPrinterDialog) {
+                PantallaSeleccionImpresora(
+                    pairedDevices = pairedDevices,
+                    onImpresoraSeleccionada = { device ->
+                        selectedPrinter = device
+                        prefs.edit().putString("impresora_bluetooth", device.address).apply()
+                        onImpresoraSeleccionada(device)
+                        showPrinterDialog = false
+                    },
+                    onCancelar = { showPrinterDialog = false }
+                )
+            }
+
+
+
+
         }
 
 
+
             Spacer(modifier = Modifier.height(30.dp))
+
 
 
 
@@ -347,6 +450,62 @@ fun Pantalla_Inicio(
 
 
 
+
+fun puedeVerFABInicio(puestoTrabajo: String?): Boolean {
+    return puestoTrabajo == "CEO1.1" ||
+            puestoTrabajo == "Gerente General" ||
+            puestoTrabajo == "Supervisor"
+}
+
+
+
+
+@Composable
+fun PantallaSeleccionImpresora(
+    pairedDevices: List<BluetoothDevice>,
+    onImpresoraSeleccionada: (BluetoothDevice) -> Unit,
+    onCancelar: () -> Unit
+) {
+    var showDialog by remember { mutableStateOf(true) }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false; onCancelar() },
+            title = { Text("Seleccionar impresora") },
+            text = {
+                if (pairedDevices.isEmpty()) {
+                    Text("No hay impresoras emparejadas")
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 300.dp)
+                    ) {
+                        items(pairedDevices) { device ->
+                            Text(
+                                text = device.name ?: "Desconocido",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onImpresoraSeleccionada(device)
+                                        showDialog = false
+                                    }
+                                    .padding(12.dp),
+                                color = Color.Black
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showDialog = false; onCancelar() }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+}
 
 
 
@@ -475,9 +634,9 @@ fun enviarNotificacionprueba(token: String, titulo: String, mensaje: String, ima
 
 
 
-
 @Preview(showBackground = true)
 @Composable
 fun PantallaInicioPreview() {
-    Pantalla_Inicio()
+    val navController = rememberNavController()
+    Pantalla_Inicio(navController = navController)
 }

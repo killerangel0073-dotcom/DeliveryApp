@@ -2,16 +2,21 @@ package com.gruposanangel.delivery.data
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 
 @Dao
 interface VentaDao {
 
-    @Insert
+    // Cambiamos a REPLACE para que si la venta ya existe (por localId),
+    // simplemente actualice los datos con lo que viene de Firebase.
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertarVenta(venta: VentaEntity): Long
 
-    @Insert
+    // Lo mismo para los detalles: si se descarga la venta de nuevo,
+    // reemplazamos los productos para asegurar que la lista sea la correcta.
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertarDetalle(detalle: VentaDetalleEntity): Long
 
     @Query("SELECT * FROM ventas WHERE sincronizado = 0")
@@ -22,7 +27,6 @@ interface VentaDao {
 
     @Query("UPDATE ventas SET sincronizado = 1 WHERE id = :ventaId")
     suspend fun marcarComoSincronizada(ventaId: Long)
-
 
     @Update
     suspend fun actualizarVenta(venta: VentaEntity)
@@ -39,10 +43,7 @@ interface VentaDao {
     @Query("SELECT firestoreId FROM ventas WHERE id = :ventaLocalId LIMIT 1")
     fun obtenerFirestoreIdDeVenta(ventaLocalId: Long): String?
 
-
-
-
-
-
-
+    // Opcional: Útil para limpiar detalles antes de re-insertar en una descarga fresca
+    @Query("DELETE FROM detalle_ventas WHERE ventaId = :ventaId")
+    suspend fun eliminarDetallesPorVenta(ventaId: Long)
 }

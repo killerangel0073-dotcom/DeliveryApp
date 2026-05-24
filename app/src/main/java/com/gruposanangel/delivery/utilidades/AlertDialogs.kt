@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -81,3 +82,16 @@ fun DialogoConfirmacion(
     )
 }
 
+@Preview(showBackground = true)
+@Composable
+fun DialogoConfirmacionPreview() {
+    MaterialTheme {
+        // Envolvemos en un Box para visualizarlo centrado
+        DialogoConfirmacion(
+            titulo = "¡AVISO!",
+            mensaje = "¿Estás seguro de que deseas eliminar este registro? Esta acción no se puede deshacer.",
+            onConfirmar = { /* Acción de prueba */ },
+            onCancelar = { /* Acción de prueba */ }
+        )
+    }
+}

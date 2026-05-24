@@ -16,7 +16,7 @@ class SincronizarClientesWorker(
         val clienteRepo = RepositoryCliente(db.clienteDao())
 
         return try {
-            clienteRepo.sincronizarConFirebase()
+            clienteRepo.sincronizarConFirebase(applicationContext) // ✅ pasar context
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()

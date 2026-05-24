@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
@@ -294,12 +295,32 @@ fun PantallaInventarioContent(
     plantillaProductos: List<Plantilla_Producto>,
     listaDeNotificaciones: List<Notificacion> = emptyList(),
     rutaAsignada: String? = null,
-    rutaCargada: Boolean = true
+    rutaCargada: Boolean = true,
+
 ) {
 
     val categorias = listOf("Cacahuates", "Semillas", "Gomitas", "Chocolates", "Dulces")
     val totalProductos by remember(plantillaProductos) { mutableStateOf(plantillaProductos.sumOf { it.cantidad }) }
     val valorTotal by remember(plantillaProductos) { mutableStateOf(plantillaProductos.sumOf { it.cantidad * it.precio }) }
+
+
+
+
+    var puestoTrabajo by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        // Aquí obtienes el puesto del usuario de Firestore
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            db.collection("users").document(uid).get()
+                .addOnSuccessListener { doc ->
+                    puestoTrabajo = doc.getString("puestoTrabajo")
+                }
+        }
+    }
+
+
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -416,33 +437,46 @@ fun PantallaInventarioContent(
             }
         }
 
-        // Botón flotante
-        FloatingActionButton(
-            onClick = { navController.navigate("LISTA PRODUCTOS") },
-            containerColor = Color(0xFFFF0000),
-            contentColor = Color.White,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp)
-        ) {
-            Icon(Icons.Default.ShoppingCart, contentDescription = "Agregar Producto")
+
+
+
+
+        // Botón flotante solo si el usuario es CEO1.1 o Gerente General
+        if (puedeVerBotones(puestoTrabajo)) {
+            FloatingActionButton(
+                onClick = { navController.navigate("LISTA PRODUCTOS") },
+                containerColor = Color(0xFFFF0000),
+                contentColor = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(Icons.Default.ShoppingCart, contentDescription = "Agregar Producto")
+            }
+
+            FloatingActionButton(
+                onClick = { navController.navigate("PRODUCTOS") },
+                containerColor = Color(0xFF00AAFF),
+                contentColor = Color.White,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 90.dp)
+            ) {
+                Icon(Icons.Default.Inventory, contentDescription = "Nuevo Producto")
+            }
         }
 
 
 
-        // NUEVO FAB para CrearProductoScreen
-        FloatingActionButton(
-            onClick = { navController.navigate("CREAR_PRODUCTO") }, // nueva pantalla
-            containerColor = Color(0xFF00AAFF),
-            contentColor = Color.White,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 90.dp) // separarlo del otro FAB
-        ) {
-            Icon(Icons.Default.Notifications, contentDescription = "Nuevo Producto") // Cambia icono si quieres
-        }
+
     }
 }
+
+
+fun puedeVerBotones(puestoTrabajo: String?): Boolean {
+    return puestoTrabajo == "CEO1.1" || puestoTrabajo == "Gerente General"
+}
+
 
 fun ProductoEntity.toModel(): Plantilla_Producto {
     return Plantilla_Producto(
@@ -580,7 +614,7 @@ fun PantallaInventario(
     }
 
     // Siempre renderizamos la pantalla completa (el contenido decide qué mostrar en el área de productos)
-    PantallaInventarioContent(navController, productos, notificaciones, rutaAsignada, rutaCargada)
+    PantallaInventarioContent(navController, productos, notificaciones, rutaAsignada, rutaCargada,)
 }
 
 // ---------- INTERFAZ DE REPO ----------

@@ -7,7 +7,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.RepositoryInventario
+import com.gruposanangel.delivery.data.VentaEntity
 import com.gruposanangel.delivery.data.VentaRepository
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import kotlinx.coroutines.Dispatchers
@@ -28,8 +30,14 @@ import java.io.IOException
 
 class VentaViewModel(
     private val repositoryInventario: RepositoryInventario,
-    private val ventaRepository: VentaRepository
+    private val ventaRepository: VentaRepository,
+    private val repositoryUsuario: RepositoryUsuario // <- nuevo
 ) : ViewModel() {
+
+
+
+    private val _ventasHoy = MutableStateFlow<List<VentaEntity>>(emptyList())
+    val ventasHoy: StateFlow<List<VentaEntity>> = _ventasHoy.asStateFlow()
 
     // --- Estado de la UI ---
 
@@ -50,6 +58,59 @@ class VentaViewModel(
             _productosEnCarrito.addAll(listaBase.map { it.copy(cantidad = 0) })
         }
     }
+
+    fun cargarVentasHoy() {
+        viewModelScope.launch {
+            val tz = java.util.TimeZone.getDefault()
+            val calendar = java.util.Calendar.getInstance(tz)
+            calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            calendar.set(java.util.Calendar.MINUTE, 0)
+            calendar.set(java.util.Calendar.SECOND, 0)
+            calendar.set(java.util.Calendar.MILLISECOND, 0)
+            val inicio = calendar.timeInMillis
+
+            calendar.set(java.util.Calendar.HOUR_OF_DAY, 23)
+            calendar.set(java.util.Calendar.MINUTE, 59)
+            calendar.set(java.util.Calendar.SECOND, 59)
+            calendar.set(java.util.Calendar.MILLISECOND, 999)
+            val fin = calendar.timeInMillis
+
+            val ventas = ventaRepository.obtenerVentasPorPeriodo(inicio, fin)
+            _ventasHoy.value = ventas
+        }
+    }
+
+    fun sincronizarVentasDia(vendedorId: String) {
+        viewModelScope.launch {
+            ventaRepository.descargarVentasDia(vendedorId)
+            cargarVentasHoy()
+        }
+    }
+
+
+
+
+
+
+    fun verificarRutaAsignadaLocal(uid: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val usuario = repositoryUsuario.obtenerUsuarioLocal(uid) // ahora sí
+                if (usuario?.ultimaRutaId != null && usuario.ultimoAlmacenId != null) {
+                    _estadoRuta.value = EstadoRuta.ConRuta(
+                        nombreAlmacen = usuario.ultimoAlmacenNombre ?: "Almacén",
+                        almacenId = usuario.ultimoAlmacenId
+                    )
+                } else {
+                    _estadoRuta.value = EstadoRuta.SinRuta
+                }
+            } catch (e: Exception) {
+                _estadoRuta.value = EstadoRuta.Error(e.message ?: "Error desconocido")
+            }
+        }
+    }
+
+
 
     fun verificarRutaAsignada() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -417,17 +478,23 @@ sealed class EstadoRuta {
 // Factory
 class VentaViewModelFactory(
     private val repositoryInventario: RepositoryInventario,
-    private val ventaRepository: VentaRepository
+    private val ventaRepository: VentaRepository,
+    private val repositoryUsuario: RepositoryUsuario // <- agregado
 ) : ViewModelProvider.Factory {
 
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(VentaViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return VentaViewModel(repositoryInventario, ventaRepository) as T
+            return VentaViewModel(
+                repositoryInventario,
+                ventaRepository,
+                repositoryUsuario // <- pasado al ViewModel
+            ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
 }
+
 
 
 

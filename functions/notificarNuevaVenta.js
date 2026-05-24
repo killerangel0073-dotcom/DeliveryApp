@@ -1,0 +1,118 @@
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { getFirestore } = require("firebase-admin/firestore");
+const { getMessaging } = require("firebase-admin/messaging");
+
+const db = getFirestore();
+
+exports.notificarNuevaVenta = onDocumentCreated("ventas/{ventaId}", async (event) => {
+    const ventaIdFirestore = event.params.ventaId;
+    const nuevaVenta = event.data.data();
+
+    if (!nuevaVenta) {
+        console.error(`[Venta ${ventaIdFirestore}] Error: No se encontraron datos en el documento.`);
+        return null;
+    }
+
+    const { clienteId, vendedorId, total, clienteNombre } = nuevaVenta;
+    const montoTotal = total || 0;
+
+    const montoFormateado = new Intl.NumberFormat('es-MX', {
+        style: 'currency',
+        currency: 'MXN',
+        minimumFractionDigits: 2
+    }).format(montoTotal);
+
+    try {
+        // 1. OBTENER DATOS DEL VENDEDOR Y RUTA (Con Timeout de 5 segundos)
+        let nombreRuta = "Ruta General";
+        let nombreVendedor = "Vendedor";
+
+        if (vendedorId) {
+            const vendedorDoc = await db.collection("users").doc(vendedorId).get();
+            if (vendedorDoc.exists) {
+                const vData = vendedorDoc.data();
+                nombreVendedor = vData.nombre || "Vendedor";
+
+                const rutaRef = vData.rutaAsignada;
+                if (rutaRef && typeof rutaRef.get === 'function') {
+                    // Verificación de integridad: Solo consultamos si la referencia es válida
+                    const rutaDoc = await rutaRef.get();
+                    if (rutaDoc.exists && rutaDoc.data().activo !== false) {
+                        nombreRuta = rutaDoc.data().nombre || "Ruta General";
+                    }
+                }
+            }
+        }
+
+        // 2. OBTENER FOTO DEL CLIENTE
+        let urlImagenCliente = "";
+        if (clienteId) {
+            const clienteDoc = await db.collection("clientes").doc(clienteId).get();
+            if (clienteDoc.exists) {
+                urlImagenCliente = clienteDoc.data().FotografiaCliente || "";
+            }
+        }
+
+        // 3. BUSCAR DIRECTIVOS
+        const usuariosSnapshot = await db.collection("users")
+            .where("puestoTrabajo", "in", ["CEO1.1", "Gerente General"])
+            .where("activo", "==", true)
+            .get();
+
+        if (usuariosSnapshot.empty) {
+            console.warn(`[Venta ${ventaIdFirestore}] No hay directivos activos para notificar.`);
+            return null;
+        }
+
+        let tokens = [];
+        usuariosSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (Array.isArray(data.fcmTokens)) {
+                data.fcmTokens.forEach(t => {
+                    if (typeof t === 'string') tokens.push(t);
+                    else if (t && t.token) tokens.push(t.token);
+                });
+            }
+        });
+
+        const tokensUnicos = [...new Set(tokens)].filter(t => t);
+        if (tokensUnicos.length === 0) return null;
+
+        // 4. CONSTRUCCIÓN DEL MENSAJE
+        const message = {
+            notification: {
+                title: `💰 Venta en ${nombreRuta}`,
+                body: `${clienteNombre}: ${montoFormateado} (${nombreVendedor})`,
+            },
+            data: {
+                tipo: "VENTA_NUEVA",
+                ventaIdFirestore: ventaIdFirestore,
+                ventaIdLocal: nuevaVenta.localId ? nuevaVenta.localId.toString() : "0",
+                monto: montoTotal.toString(),
+                nombreRuta: nombreRuta,
+                vendedor: nombreVendedor,
+                imagen: urlImagenCliente,
+                click_action: "FLUTTER_NOTIFICATION_CLICK"
+            },
+            android: {
+                priority: "high",
+                notification: {
+                    sound: "default",
+                    channelId: "ventas_channel",
+                    ...(urlImagenCliente ? { image: urlImagenCliente } : {})
+                }
+            },
+            tokens: tokensUnicos,
+        };
+
+        const response = await getMessaging().sendEachForMulticast(message);
+        console.log(`[Venta ${ventaIdFirestore}] Notificación enviada. Éxito: ${response.successCount}, Fallos: ${response.failureCount}`);
+
+        return null;
+
+    } catch (error) {
+        // Log descriptivo para depuración rápida
+        console.error(`[Venta ${ventaIdFirestore}] Error crítico en la ejecución:`, error);
+        return null;
+    }
+});

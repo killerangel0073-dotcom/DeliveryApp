@@ -1,10 +1,11 @@
 package com.gruposanangel.delivery
 
-import android.Manifest
+
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,13 +13,12 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
+
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.*
+
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,19 +38,17 @@ import com.gruposanangel.delivery.SegundoPlano.LocationService
 import com.gruposanangel.delivery.SegundoPlano.scheduleSyncWorkers
 import com.gruposanangel.delivery.ui.screens.*
 import com.gruposanangel.delivery.utilidades.FcmUtils
-import com.gruposanangel.delivery.utilidades.PermisosManager
+
 import kotlinx.coroutines.*
 import org.json.JSONObject
 
-private val bluetoothPermissions = arrayOf(
-    Manifest.permission.BLUETOOTH_CONNECT,
-    Manifest.permission.BLUETOOTH_SCAN
-)
-
-private val ALL_REQUIRED_PERMISSIONS: Array<String> =
-    (PermisosManager.PERMISOS_REQUERIDOS + bluetoothPermissions).toSet().toTypedArray()
 
 class MainActivity : ComponentActivity() {
+
+
+
+
+
 
     private lateinit var usuarioDao: UsuarioDao
     private lateinit var repositoryUsuario: RepositoryUsuario
@@ -61,7 +59,7 @@ class MainActivity : ComponentActivity() {
 
     private var syncJob: Job? = null
     private var locationServiceStarted = false
-    private lateinit var requestPermissionLauncher: ActivityResultLauncher<Array<String>>
+
 
     private val ventaIdToOpenMapaState = mutableStateOf<Long?>(null)
     private val openMapaState = mutableStateOf(false)
@@ -80,14 +78,17 @@ class MainActivity : ComponentActivity() {
         val clienteDao = db.clienteDao()
         usuarioDao = db.usuarioDao()
 
-        repositoryUsuario = RepositoryUsuario()
+        repositoryUsuario = RepositoryUsuario(usuarioDao)  // <-- pasamos dao aquí
         repository = RepositoryCliente(clienteDao)
         inventarioRepo = RepositoryInventario(db.productoDao())
         ventaRepository = VentaRepository(db.VentaDao())
         vistaModeloVenta = VistaModeloVenta(inventarioRepo, ventaRepository)
 
-        requestPermissionLauncher =
-            registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+
+
+
+
+
 
         syncJob?.cancel()
         syncJob = startForegroundSyncLoop()
@@ -95,8 +96,12 @@ class MainActivity : ComponentActivity() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid
         if (uid != null) {
             lifecycleScope.launch(Dispatchers.IO) {
-                repositoryUsuario.sincronizarVendedorLocal(usuarioDao, uid)
-                repository.escucharCambiosFirebase()
+                repositoryUsuario.sincronizarVendedorLocal(uid)  // <-- solo uid
+                lifecycleScope.launch(Dispatchers.IO) {
+                    repository.escucharCambiosFirebase(this@MainActivity) // ✅ esto funciona
+                }
+
+
                 inventarioRepo.escucharCambiosFirebase(uid)
             }
         }
@@ -108,7 +113,7 @@ class MainActivity : ComponentActivity() {
             var loggedIn by remember { mutableStateOf(currentUser != null) }
             val context = LocalContext.current
             val navController = rememberNavController()
-            var batterySettingsHandled by remember { mutableStateOf(false) }
+
 
             val systemUiController = rememberSystemUiController()
             SideEffect {
@@ -117,15 +122,15 @@ class MainActivity : ComponentActivity() {
             }
 
             Box(modifier = Modifier.fillMaxSize().background(Color.Red)) {
+
+
                 PermissionGate(
-                    permissionLauncher = requestPermissionLauncher,
-                    permissionsToRequest = ALL_REQUIRED_PERMISSIONS,
                     onAllRequiredChecksPassed = {
-                        if (!locationServiceStarted) startLocationService()
-                        if (!batterySettingsHandled) {
-                            openManufacturerBatterySettings()
-                            batterySettingsHandled = true
+
+                        if (!locationServiceStarted) {
+                            startLocationService()
                         }
+
 
                         if (loggedIn) {
                             Navegador(
@@ -134,13 +139,35 @@ class MainActivity : ComponentActivity() {
                                 autoOpenTicketId = ventaIdToOpenMapaState.value
                             )
                         } else {
-                            PantallaLoginPro(onLoginSuccess = { loggedIn = true })
+                            PantallaLoginPro(
+                                onLoginSuccess = { loggedIn = true }
+                            )
                         }
                     }
                 )
+
+
+
             }
         }
     }
+
+
+    override fun onResume() {
+        super.onResume()
+
+        if (
+            LocationService.isRunning.not() &&
+            ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            locationServiceStarted = false
+        }
+    }
+
+
 
     private fun startForegroundSyncLoop(): Job = lifecycleScope.launch(Dispatchers.IO) {
         Log.d("SYNC", "Loop de sincronización iniciado")
@@ -148,7 +175,11 @@ class MainActivity : ComponentActivity() {
             val user = FirebaseAuth.getInstance().currentUser
             if (user != null && isNetworkAvailable(this@MainActivity)) {
                 try {
-                    repository.sincronizarConFirebase()
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        //repository.escucharCambiosFirebase(this@MainActivity) // ✅ esto funciona
+                    }
+
+
 
                     val pendientes = ventaRepository.obtenerVentasPendientes()
                     val uid = user.uid
@@ -195,72 +226,8 @@ class MainActivity : ComponentActivity() {
         locationServiceStarted = true
     }
 
-    private fun openManufacturerBatterySettings() {
-        when (Build.MANUFACTURER.lowercase()) {
-            "xiaomi", "redmi", "poco" -> openXiaomiBatterySettings()
-            "samsung" -> openSamsungBatterySettings()
-            "huawei", "honor" -> openHuaweiBatterySettings()
-            else -> requestIgnoreBatteryOptimizations()
-        }
-    }
 
-    private fun requestIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            val packageName = packageName
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                try {
-                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
-                } catch (e: Exception) {
-                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                }
-            }
-        }
-    }
 
-    private fun openXiaomiBatterySettings() {
-        try {
-            val intent = Intent().apply {
-                component = ComponentName(
-                    "com.miui.powerkeeper",
-                    "com.miui.powerkeeper.ui.HiddenAppsConfigActivity"
-                )
-                putExtra("package_name", packageName)
-                putExtra("package_label", getString(R.string.app_name))
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            try {
-                val intent = Intent("miui.intent.action.POWER_HIDE_MODE_APP_LIST")
-                startActivity(intent)
-            } catch (ex: Exception) {
-                startActivity(Intent(Settings.ACTION_SETTINGS))
-            }
-        }
-    }
-
-    private fun openSamsungBatterySettings() {
-        try {
-            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-            startActivity(intent)
-        } catch (e: Exception) {
-            startActivity(Intent(Settings.ACTION_SETTINGS))
-        }
-    }
-
-    private fun openHuaweiBatterySettings() {
-        try {
-            val intent = Intent().apply {
-                component = ComponentName(
-                    "com.huawei.systemmanager",
-                    "com.huawei.systemmanager.optimize.process.ProtectActivity"
-                )
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            startActivity(Intent(Settings.ACTION_SETTINGS))
-        }
-    }
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == "OPEN_MAPA") {

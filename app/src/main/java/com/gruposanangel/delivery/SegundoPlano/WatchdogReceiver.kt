@@ -13,49 +13,64 @@ class WatchdogReceiver : BroadcastReceiver() {
 
     companion object {
         private const val WATCHDOG_REQUEST_CODE = 1001
-        private const val WATCHDOG_INTERVAL_MS = 15 * 60 * 1000L
+        // ⏱ Intervalo más sano: suficiente protección sin molestar al GPS
+        private const val WATCHDOG_INTERVAL_MS = 20 * 60 * 1000L
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        Log.d("Watchdog", "🐶 Verificación de rutina iniciada")
+        Log.d("Watchdog", "🐶 Watchdog check...")
 
+        // 🔹 Reinicia el servicio de ubicación
         val serviceIntent = Intent(context, LocationService::class.java).apply {
             action = LocationService.ACTION_START
         }
+        ContextCompat.startForegroundService(context, serviceIntent)
+
+        // 🔹 Preparamos alarma del Watchdog
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val alarmIntent = Intent(context, WatchdogReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            WATCHDOG_REQUEST_CODE,
+            alarmIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val triggerAt = System.currentTimeMillis() + WATCHDOG_INTERVAL_MS
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ContextCompat.startForegroundService(context, serviceIntent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (alarmManager.canScheduleExactAlarms()) {
+                    val alarmClockInfo = AlarmManager.AlarmClockInfo(triggerAt, pendingIntent)
+                    alarmManager.setAlarmClock(alarmClockInfo, pendingIntent)
+                    Log.d("Watchdog", "⏰ Watchdog exact alarm programada")
+                } else {
+                    Log.w("Watchdog", "Permiso exact alarm no concedido, degradando...")
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAt,
+                        pendingIntent
+                    )
+                    Log.d("Watchdog", "⏰ Watchdog degradada con setExactAndAllowWhileIdle")
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAt,
+                    pendingIntent
+                )
+                Log.d("Watchdog", "⏰ Watchdog programada con setExactAndAllowWhileIdle (M+)")
             } else {
-                context.startService(serviceIntent)
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAt,
+                    pendingIntent
+                )
+                Log.d("Watchdog", "⏰ Watchdog programada con setExact (<M)")
             }
         } catch (e: Exception) {
-            Log.e("Watchdog", "⚠️ Error al despertar el servicio")
-        }
-
-        reprogramarWatchdog(context)
-    }
-
-    private fun reprogramarWatchdog(context: Context) {
-        try {
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-            val alarmIntent = Intent(context, WatchdogReceiver::class.java)
-            val pending = PendingIntent.getBroadcast(
-                context,
-                WATCHDOG_REQUEST_CODE,
-                alarmIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val nextTrigger = System.currentTimeMillis() + WATCHDOG_INTERVAL_MS
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextTrigger, pending)
-            } else {
-                alarmManager.setExact(AlarmManager.RTC_WAKEUP, nextTrigger, pending)
-            }
-        } catch (e: Exception) {
-            Log.e("Watchdog", "❌ Error de reprogramación", e)
+            Log.e("Watchdog", "❌ Error al reactivar Watchdog", e)
         }
     }
+
+
 }

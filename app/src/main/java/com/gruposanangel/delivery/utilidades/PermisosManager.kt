@@ -13,34 +13,51 @@ import androidx.core.content.ContextCompat
 /**
  * Clase de utilidad para gestionar todos los chequeos de permisos y requisitos del sistema.
  */
+
+ /* PermisosManager:
+ * - Verifica si los permisos necesarios, GPS y batería están correctamente configurados.
+ * - Proporciona Intents para abrir ajustes del sistema si algo falta.
+ * - No muestra UI, solo chequea estados y devuelve información.
+ */
 object PermisosManager {
+
+
+    fun tieneUbicacionSegundoPlano(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
 
     // Permisos base que casi siempre se requieren, independientemente de la versión de Android.
     // NOTA: Se ha eliminado Manifest.permission.WRITE_EXTERNAL_STORAGE para evitar conflictos con Scoped Storage (Android 10+).
-    private val BASE_PERMISSIONS: Array<String> = arrayOf(
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.ACCESS_COARSE_LOCATION,
-        Manifest.permission.CAMERA,
-        Manifest.permission.BLUETOOTH_CONNECT,
-        Manifest.permission.BLUETOOTH_SCAN,
-    )
+    // ❌ NO incluyas background aquí
+    private val BASE_PERMISSIONS: Array<String> = buildList {
+        add(Manifest.permission.ACCESS_FINE_LOCATION)
+        add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        add(Manifest.permission.CAMERA)
 
-    // Lista final de permisos que se requerirán en el PermissionGate
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            add(Manifest.permission.BLUETOOTH_CONNECT)
+            add(Manifest.permission.BLUETOOTH_SCAN)
+        }
+    }.toTypedArray()
+
+
     val PERMISOS_REQUERIDOS: Array<String> = BASE_PERMISSIONS.let {
         val mutableList = it.toMutableList()
 
-        // Permisos condicionales por versión de Android
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Permiso de Ubicación en Segundo Plano (se pide por separado, pero debe chequearse)
-            mutableList.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Permiso de Notificaciones (Android 13+)
             mutableList.add(Manifest.permission.POST_NOTIFICATIONS)
         }
 
         mutableList.toTypedArray()
     }
+
 
     /**
      * Chequea si todos los permisos definidos en PERMISOS_REQUERIDOS han sido concedidos.
@@ -50,6 +67,20 @@ object PermisosManager {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
     }
+
+    fun isUbicacionActivada(context: Context): Boolean {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            // Android 9+ detecta si el switch de ubicación está activado (cualquier proveedor)
+            locationManager.isLocationEnabled
+        } else {
+            // Android <9: chequea GPS o Network Provider
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }
+    }
+
 
     /**
      * Chequea si el GPS (servicios de localización) está activo.

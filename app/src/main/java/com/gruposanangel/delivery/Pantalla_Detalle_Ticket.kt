@@ -40,6 +40,9 @@ import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
+import android.net.Uri
+import java.io.File
+
 
 // --------------------------
 // DetalleTicketScreen (modificado para reconsultar venta desde DB antes de imprimir)
@@ -51,6 +54,7 @@ fun DetalleTicketScreen(
     ventaRepository: VentaRepository,
     impresoraBluetooth: BluetoothDevice? = null
 ) {
+
     val context = LocalContext.current
     val db = AppDatabase.getDatabase(context)
     val inventarioRepo = RepositoryInventario(db.productoDao())
@@ -60,6 +64,8 @@ fun DetalleTicketScreen(
             ventaRepository = ventaRepository
         )
     )
+
+
 
     val ticketCompletoState = remember { mutableStateOf<TicketVentaCompleto?>(null) }
     val scope = rememberCoroutineScope()
@@ -100,9 +106,33 @@ fun PantallaDetalleTicketCompleto(
     viewModel: VistaModeloVenta? = null, // opcional para preview; en uso normal se pasa el viewModel real
     ticketId: Long? = null // opcional para preview; en uso normal se pasa el id real
 ) {
-    val contexto = LocalContext.current
+    val context = LocalContext.current
+    val clienteDao = AppDatabase.getDatabase(context).clienteDao()
+
+    val fotoClienteReal by produceState<String?>(initialValue = null, ticketId) {
+
+        if (ticketId == null || viewModel == null) {
+            value = null
+            return@produceState
+        }
+
+        val ventaEntity = viewModel.obtenerVentaEntityPorId(ticketId)
+        val clienteId = ventaEntity?.clienteId
+
+        value = clienteId?.let {
+            clienteDao.getClientePorId(it)?.fotografiaUrl
+        }
+    }
+
+
+
+
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
     val formatoFecha = SimpleDateFormat("EEEE d 'de' MMMM hh:mm a", Locale("es", "MX"))
+
+
+
+
 
     Scaffold(
         topBar = {
@@ -131,14 +161,30 @@ fun PantallaDetalleTicketCompleto(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            val imageModel = remember(fotoClienteReal) {
+                val path = fotoClienteReal
+                if (!path.isNullOrBlank()) {
+                    val file = File(path)
+                    if (file.exists()) {
+                        Uri.fromFile(file)   // 📁 local
+                    } else {
+                        path                // 🌐 remoto
+                    }
+                } else null
+            }
+
+
             AsyncImage(
-                model = ticket.fotoCliente,
+                model = imageModel,
                 contentDescription = ticket.cliente,
                 contentScale = ContentScale.Crop,
                 placeholder = painterResource(R.drawable.repartidor),
                 error = painterResource(R.drawable.repartidor),
-                modifier = Modifier.size(120.dp).clip(RoundedCornerShape(16.dp))
+                modifier = Modifier
+                    .size(120.dp)
+                    .clip(RoundedCornerShape(16.dp))
             )
+
 
             Spacer(Modifier.height(16.dp))
             Text(ticket.cliente, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -170,7 +216,10 @@ fun PantallaDetalleTicketCompleto(
                     .background(Color(0xFFF5F5F5), RoundedCornerShape(12.dp))
                     .padding(12.dp)
             ) {
+
+
                 ticket.productos.forEach { producto ->
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -214,14 +263,16 @@ fun PantallaDetalleTicketCompleto(
 
                                 // 4️⃣ Consultar Room para obtener nombre real del vendedor
                                 val vendedorUid = ventaEntity?.vendedorId ?: ""
-                                val usuarioDao = AppDatabase.getDatabase(contexto).usuarioDao()
+                                val usuarioDao = AppDatabase.getDatabase(context
+                                ).usuarioDao()
                                 val usuario = usuarioDao.obtenerPorId(vendedorUid) // UsuarioEntity?
                                 val nombreVendedor = usuario?.nombre ?: vendedorUid
 
                                 // 5️⃣ Llamar a la función de impresión
                                 ImprimirTicket58mmCompleto(
                                     device = impresoraBluetooth,
-                                    context = contexto,
+                                    context = context
+                                    ,
                                     logoDrawableId = R.drawable.logo,
                                     cliente = ventaEntity?.clienteNombre ?: ticket.cliente,
                                     productos = productosParaImprimir,
@@ -238,12 +289,14 @@ fun PantallaDetalleTicketCompleto(
 
 
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(contexto, "Ticket impreso correctamente", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context
+                                        , "Ticket impreso correctamente", Toast.LENGTH_SHORT).show()
                                 }
                             } catch (e: Exception) {
                                 e.printStackTrace()
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(contexto, "Error imprimiendo: ${e.message}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context
+                                        , "Error imprimiendo: ${e.message}", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }
@@ -254,7 +307,8 @@ fun PantallaDetalleTicketCompleto(
 
 
                     } else {
-                        Toast.makeText(contexto, "No hay impresora seleccionada", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context
+                            , "No hay impresora seleccionada", Toast.LENGTH_SHORT).show()
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White),

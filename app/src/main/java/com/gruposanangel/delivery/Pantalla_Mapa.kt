@@ -1,4 +1,4 @@
- package com.gruposanangel.delivery.ui.screens
+package com.gruposanangel.delivery.ui.screens
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -64,7 +64,7 @@ import com.gruposanangel.delivery.utilidades.VendorSpeedIndicator
 import com.gruposanangel.delivery.utilidades.VendorSpeedIndicator2
 
 
- // -----------------------------
+// -----------------------------
 // MODELOS
 // -----------------------------
 data class Cliente(
@@ -195,17 +195,15 @@ fun MapaScreen(navController: NavController) {
     var vendedorSeleccionadoRuta by remember { mutableStateOf<String?>(null) }
 
 
-
     // Botones de vendedor
     var seguirVendedor by remember { mutableStateOf<String?>(null) }
 
 
     // Mantener animatables y MarkerState por vendedor (persistente)
-    val vendedorStates: SnapshotStateMap<String, AnimatableMarker> = remember { mutableStateMapOf() }
-    val vendedorMarkerStates: SnapshotStateMap<String, MarkerState> = remember { mutableStateMapOf() }
-
-
-
+    val vendedorStates: SnapshotStateMap<String, AnimatableMarker> =
+        remember { mutableStateMapOf() }
+    val vendedorMarkerStates: SnapshotStateMap<String, MarkerState> =
+        remember { mutableStateMapOf() }
 
 
     // Íconos: se recuerdan para no crearlos en cada recomposición
@@ -236,11 +234,6 @@ fun MapaScreen(navController: NavController) {
             bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo)
         else null
     }
-
-
-
-
-
 
 
     // -----------------------------
@@ -320,7 +313,11 @@ fun MapaScreen(navController: NavController) {
             properties = MapProperties(
                 isMyLocationEnabled = true,
                 mapType = mapType,
-                mapStyleOptions = mapStyleJson?.let { com.google.android.gms.maps.model.MapStyleOptions(it) }
+                mapStyleOptions = mapStyleJson?.let {
+                    com.google.android.gms.maps.model.MapStyleOptions(
+                        it
+                    )
+                }
             ),
             uiSettings = MapUiSettings(
                 zoomControlsEnabled = false,
@@ -354,14 +351,6 @@ fun MapaScreen(navController: NavController) {
             vendedores.forEach { vendedor ->
 
 
-
-
-
-
-
-
-
-
                 // Obtener o crear estado animado por vendedor
                 val state = vendedorStates.getOrPut(vendedor.ruta) {
                     AnimatableMarker(
@@ -374,17 +363,24 @@ fun MapaScreen(navController: NavController) {
 
                 // Obtener o crear MarkerState persistente por vendedor
                 val markerState = vendedorMarkerStates.getOrPut(vendedor.ruta) {
-                    MarkerState(position = LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble()))
+                    MarkerState(
+                        position = LatLng(
+                            state.animLat.value.toDouble(),
+                            state.animLng.value.toDouble()
+                        )
+                    )
                 }
 
                 // Actualizamos la posición del MarkerState a la posición animada
-                markerState.position = LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
+                markerState.position =
+                    LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
 
 
                 // Si este vendedor es el que estamos siguiendo, mover cámara automáticamente
                 LaunchedEffect(state.animLat.value, state.animLng.value, seguirVendedor) {
                     if (seguirVendedor == vendedor.ruta) {
-                        val newPos = LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
+                        val newPos =
+                            LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
 
                         cameraPositionState.animate(
                             update = CameraUpdateFactory.newLatLngZoom(newPos, 18f),
@@ -398,23 +394,34 @@ fun MapaScreen(navController: NavController) {
                 }
 
 
-
-
-
-
-
                 // Lanzar animación de lat/lng cuando cambien las coordenadas del vendedor
                 LaunchedEffect(vendedor.ruta, vendedor.timestamp.seconds) {
                     // animar lat y lng en paralelo
                     val animSpec = tween<Float>(durationMillis = 800)
-                    launch { state.animLat.animateTo(vendedor.lat.toFloat(), animationSpec = animSpec) }
-                    launch { state.animLng.animateTo(vendedor.lng.toFloat(), animationSpec = animSpec) }
+                    launch {
+                        state.animLat.animateTo(
+                            vendedor.lat.toFloat(),
+                            animationSpec = animSpec
+                        )
+                    }
+                    launch {
+                        state.animLng.animateTo(
+                            vendedor.lng.toFloat(),
+                            animationSpec = animSpec
+                        )
+                    }
 
                     // actualizar rotation aproximada (ángulo entre puntos)
-                    val rot = calcularAngulo(state.animLat.value.toDouble(), state.animLng.value.toDouble(), vendedor.lat, vendedor.lng)
+                    val rot = calcularAngulo(
+                        state.animLat.value.toDouble(),
+                        state.animLng.value.toDouble(),
+                        vendedor.lat,
+                        vendedor.lng
+                    )
                     state.animRotation.animateTo(rot, animationSpec = tween(500))
                     // actualizamos marker position inmediatamente al valor animado final
-                    markerState.position = LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
+                    markerState.position =
+                        LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
                 }
 
                 // Pulsación del halo: iniciar solo una vez por vendedor
@@ -435,7 +442,8 @@ fun MapaScreen(navController: NavController) {
                 }
 
                 // Posición y color animado para dibujar halo y marker
-                val position = LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
+                val position =
+                    LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
 
                 val haloColor = lerp(
                     Color(0xFFB0B0B0).copy(alpha = 0.35f),   // gris claro (buena precisión)
@@ -446,7 +454,6 @@ fun MapaScreen(navController: NavController) {
                 // 🔥 RADIO VISUAL (exagerado para que se vea)
                 val visualRadius = (state.animRadius.value * 5f)
                     .coerceIn(30f, 180f)
-
 
 
                 // Dibujar círculo (halo)
@@ -497,7 +504,11 @@ fun MapaScreen(navController: NavController) {
                     }
 
                     // Usamos MarkerState simple, no es costoso para pocos clientes
-                    val markerState = remember(cliente.nombreNegocio, cliente.ubicacionLat, cliente.ubicacionLng) {
+                    val markerState = remember(
+                        cliente.nombreNegocio,
+                        cliente.ubicacionLat,
+                        cliente.ubicacionLng
+                    ) {
                         MarkerState(LatLng(cliente.ubicacionLat, cliente.ubicacionLng))
                     }
 
@@ -510,7 +521,12 @@ fun MapaScreen(navController: NavController) {
                             vendedorSeleccionadoRuta = null // 👈 OCULTAMOS la tarjeta del vendedor
                             scope.launch {
                                 cameraPositionState.animate(
-                                    update = CameraUpdateFactory.newLatLng(LatLng(cliente.ubicacionLat, cliente.ubicacionLng)),
+                                    update = CameraUpdateFactory.newLatLng(
+                                        LatLng(
+                                            cliente.ubicacionLat,
+                                            cliente.ubicacionLng
+                                        )
+                                    ),
                                     durationMs = 500
                                 )
                             }
@@ -531,7 +547,11 @@ fun MapaScreen(navController: NavController) {
                         .target(userLocation)
                         .zoom(18f)
                         .build()
-                    cameraPositionState.animate(update = CameraUpdateFactory.newCameraPosition(cameraPosition), durationMs = 1000)
+                    cameraPositionState.animate(
+                        update = CameraUpdateFactory.newCameraPosition(
+                            cameraPosition
+                        ), durationMs = 1000
+                    )
                 }
             },
             containerColor = Color(0xFFFF0000),
@@ -646,11 +666,6 @@ fun MapaScreen(navController: NavController) {
         }
 
 
-
-
-
-
-
         // -----------------------------
         // Botón para cargar clientes y centrar cámara
         // -----------------------------
@@ -660,7 +675,6 @@ fun MapaScreen(navController: NavController) {
                 .padding(top = 16.dp),
             horizontalArrangement = Arrangement.Center
         ) {
-
 
 
             Button(
@@ -695,7 +709,8 @@ fun MapaScreen(navController: NavController) {
                                 geo?.let {
                                     Cliente(
                                         id = doc.id,
-                                        nombreNegocio = doc.getString("nombreNegocio") ?: "Sin nombre",
+                                        nombreNegocio = doc.getString("nombreNegocio")
+                                            ?: "Sin nombre",
                                         ubicacionLat = it.latitude,
                                         ubicacionLng = it.longitude,
                                         valor = valor,
@@ -718,7 +733,8 @@ fun MapaScreen(navController: NavController) {
 
                             // Centrar cámara
                             if (clientes.isNotEmpty()) {
-                                val bounds = com.google.android.gms.maps.model.LatLngBounds.builder()
+                                val bounds =
+                                    com.google.android.gms.maps.model.LatLngBounds.builder()
                                 clientes.forEach {
                                     bounds.include(LatLng(it.ubicacionLat, it.ubicacionLng))
                                 }
@@ -732,7 +748,8 @@ fun MapaScreen(navController: NavController) {
                             }
                         }
                         .addOnFailureListener {
-                            Toast.makeText(context, "Error al cargar clientes", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "Error al cargar clientes", Toast.LENGTH_LONG)
+                                .show()
                         }
                 },
                 colors = ButtonDefaults.buttonColors(
@@ -758,10 +775,6 @@ fun MapaScreen(navController: NavController) {
         }
 
 
-
-
-
-
         // -----------------------------
         // Botón para mostrar info del vendedor seleccionado
         val vendedorSeleccionadoActual =
@@ -773,24 +786,57 @@ fun MapaScreen(navController: NavController) {
 
         vendedorSeleccionadoActual?.let { vendedor ->
 
-            // 1. CÁLCULO DE ESTADO VITAL
             val ahora = System.currentTimeMillis()
             val reporteMs = vendedor.timestamp.toDate().time
-            val minutosSinReportar = (ahora - reporteMs) / 60000
+            val minutosSinReportar = ((ahora - reporteMs) / 60000).toInt()
 
-            val estadoVital = when {
-                minutosSinReportar > 5 -> "ALERTA"
-                vendedor.speed > 1.5   -> "MOVING"
-                else                   -> "STANDBY"
+            // ----------------------
+            // CONFIGURACIÓN
+            // ----------------------
+            val UM_BRAL_MOVING = 1.5f       // m/s, igual que en LocationService
+            val ALERTA_MINUTOS = 5          // minutos sin reporte
+            val PROMEDIO_SEGUNDOS = 10      // promedio de los últimos N segundos
+
+            // ----------------------
+            // Lista temporal de velocidades (puedes mantenerla en ViewModel o Compose state)
+            // ----------------------
+            val velocidadesRecientes = remember { mutableStateListOf<Float>() }
+
+           // Añadir la velocidad actual del vendedor (la que viene de Firestore)
+            velocidadesRecientes.add(vendedor.speed.toFloat())
+
+           // Mantener solo las últimas N lecturas
+            while (velocidadesRecientes.size > PROMEDIO_SEGUNDOS) {
+                velocidadesRecientes.removeAt(0)
             }
 
-            // Corregido: Se agrega 'else' para exhaustividad
-            val colorEstado = when(estadoVital) {
+           // Calcular promedio
+            val velocidadPromedio = if (velocidadesRecientes.isNotEmpty())
+                velocidadesRecientes.average().toFloat()
+            else
+                0f
+
+           // ----------------------
+           // Determinar estadoVital
+            // ----------------------
+            val estadoVital = when {
+                minutosSinReportar > ALERTA_MINUTOS -> "ALERTA"
+                velocidadPromedio > UM_BRAL_MOVING -> "MOVING"
+                else -> "STANDBY"
+            }
+
+
+            val colorEstado = when (estadoVital) {
                 "MOVING" -> Color(0xFF00C853)
                 "STANDBY" -> Color(0xFFFFA000)
                 "ALERTA" -> Color(0xFFD32F2F)
-                else -> Color.Gray // Rama de seguridad
+                else -> Color.Gray
             }
+
+            // Nuevo: calcular tiempo detenido
+            val tiempoDetenido = if (estadoVital == "STANDBY") {
+                "Detenido ${tiempoLegibleDesdeMinutos(minutosSinReportar)}"
+            } else null
 
             Card(
                 modifier = Modifier
@@ -824,13 +870,16 @@ fun MapaScreen(navController: NavController) {
                                 modifier = Modifier.align(Alignment.CenterEnd)
                             ) {
                                 Text(
-                                    text = when(estadoVital) {
+                                    text = when (estadoVital) {
                                         "MOVING" -> "CONDUCIENDO"
                                         "STANDBY" -> "DETENIDO"
                                         "ALERTA" -> "ALERTA"
-                                        else -> "DESCONOCIDO" // Rama de seguridad
+                                        else -> "DESCONOCIDO"
                                     },
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.padding(
+                                        horizontal = 12.dp,
+                                        vertical = 4.dp
+                                    ),
                                     color = colorEstado,
                                     style = MaterialTheme.typography.labelSmall
                                 )
@@ -839,11 +888,16 @@ fun MapaScreen(navController: NavController) {
 
                         Spacer(modifier = Modifier.height(2.dp))
 
-                        val subtextoColor = if (estadoVital == "ALERTA") Color(0xFFD32F2F) else Color.Gray
+                        // --- Texto de actualización / tiempo detenido ---
+                        val subtextoColor =
+                            if (estadoVital == "ALERTA") Color(0xFFD32F2F) else Color.Gray
                         Text(
-                            text = if (estadoVital == "ALERTA")
-                                "⚠️ Sin señal desde hace $minutosSinReportar min"
-                            else "Actualizado ${tiempoTranscurrido(vendedor.timestamp)}",
+                            text = when (estadoVital) {
+                                "ALERTA" -> "⚠️ Sin señal desde hace $minutosSinReportar min"
+                                "STANDBY" -> tiempoDetenido ?: ""
+                                "MOVING" -> "Actualizado ${tiempoTranscurrido(vendedor.timestamp)}"
+                                else -> ""
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = subtextoColor,
                             modifier = Modifier.fillMaxWidth(),
@@ -861,19 +915,13 @@ fun MapaScreen(navController: NavController) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-
                         VendorGpsIndicator(accuracy = vendedor.accuracy)
                         VendorSpeedIndicator2(speed = vendedor.speed)
                         VendorBatteryIndicator(batteryLevel = vendedor.battery)
-
-
                     }
                 }
             }
         }
-
-
-
 
 
         // -----------------------------
@@ -924,47 +972,63 @@ fun MapaScreen(navController: NavController) {
 }
 
 
- @Composable
- fun InfoItemUber(
-     label: String,
-     value: String,
-     icon: ImageVector
- ) {
-     Column(
-         horizontalAlignment = Alignment.CenterHorizontally,
-         modifier = Modifier.width(90.dp)
-     ) {
-         Box(
-             modifier = Modifier
-                 .size(32.dp)
-                 .background(Color(0xFFF5F5F5), shape = CircleShape),
-             contentAlignment = Alignment.Center
-         ) {
-             Icon(
-                 imageVector = icon,
-                 contentDescription = label,
-                 tint = Color(0xFF212121),
-                 modifier = Modifier.size(18.dp)
-             )
-         }
+fun tiempoLegibleDesdeMinutos(minutosTotales: Int): String {
+    if (minutosTotales < 1) return "justo ahora"
 
-         Spacer(Modifier.height(4.dp))
+    val dias = minutosTotales / 1440
+    val horas = (minutosTotales % 1440) / 60
+    val minutos = minutosTotales % 60
 
-         Text(
-             text = value,
-             style = MaterialTheme.typography.bodyMedium,
-             color = Color(0xFF212121)
-         )
+    val partes = mutableListOf<String>()
+    if (dias > 0) partes.add("$dias d")
+    if (horas > 0) partes.add("$horas h")
+    if (minutos > 0 && dias == 0) partes.add("$minutos min") // Mostrar minutos solo si no hay días
 
-         Text(
-             text = label,
-             style = MaterialTheme.typography.labelSmall,
-             color = Color.Gray
-         )
-     }
- }
+    return "hace " + partes.joinToString(" ")
+}
 
- // -----------------------------
+
+@Composable
+fun InfoItemUber(
+    label: String,
+    value: String,
+    icon: ImageVector
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.width(90.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(Color(0xFFF5F5F5), shape = CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = Color(0xFF212121),
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color(0xFF212121)
+        )
+
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray
+        )
+    }
+}
+
+// -----------------------------
 // ESTILO MAPA OSCURO (igual que antes)
 // -----------------------------
 val darkMapStyleJson = """
@@ -984,9 +1048,6 @@ val darkMapStyleJson = """
   {"featureType": "water","elementType": "geometry","stylers":[{"color":"#191919"}]}
 ]
 """.trimIndent()
-
-
-
 
 
 @Preview(showBackground = true)
