@@ -1,24 +1,15 @@
 package com.gruposanangel.delivery
 
-
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
-import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
-
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -26,7 +17,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
-import androidx.navigation.compose.rememberNavController
 import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
@@ -38,30 +28,22 @@ import com.gruposanangel.delivery.SegundoPlano.LocationService
 import com.gruposanangel.delivery.SegundoPlano.scheduleSyncWorkers
 import com.gruposanangel.delivery.ui.screens.*
 import com.gruposanangel.delivery.utilidades.FcmUtils
-
+import com.gruposanangel.delivery.utilidades.hayInternet
 import kotlinx.coroutines.*
 import org.json.JSONObject
 
-
 class MainActivity : ComponentActivity() {
-
-
-
-
-
 
     private lateinit var usuarioDao: UsuarioDao
     private lateinit var repositoryUsuario: RepositoryUsuario
     private lateinit var inventarioRepo: RepositoryInventario
     private lateinit var ventaRepository: VentaRepository
-    private lateinit var vistaModeloVenta: VistaModeloVenta
     private lateinit var repository: RepositoryCliente
 
     private var syncJob: Job? = null
     private var locationServiceStarted = false
 
-
-    private val ventaIdToOpenMapaState = mutableStateOf<Long?>(null)
+    private val ventaIdToOpenMapaState = mutableStateOf<String?>(null)
     private val openMapaState = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,17 +60,11 @@ class MainActivity : ComponentActivity() {
         val clienteDao = db.clienteDao()
         usuarioDao = db.usuarioDao()
 
-        repositoryUsuario = RepositoryUsuario(usuarioDao)  // <-- pasamos dao aquí
+        val firebaseDataSource = FirebaseDataSource()
+        repositoryUsuario = RepositoryUsuario(firebaseDataSource, usuarioDao)
         repository = RepositoryCliente(clienteDao)
-        inventarioRepo = RepositoryInventario(db.productoDao())
+        inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
         ventaRepository = VentaRepository(db.VentaDao())
-        vistaModeloVenta = VistaModeloVenta(inventarioRepo, ventaRepository)
-
-
-
-
-
-
 
         syncJob?.cancel()
         syncJob = startForegroundSyncLoop()
@@ -96,12 +72,10 @@ class MainActivity : ComponentActivity() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid
         if (uid != null) {
             lifecycleScope.launch(Dispatchers.IO) {
-                repositoryUsuario.sincronizarVendedorLocal(uid)  // <-- solo uid
+                repositoryUsuario.sincronizarVendedorLocal(uid)
                 lifecycleScope.launch(Dispatchers.IO) {
-                    repository.escucharCambiosFirebase(this@MainActivity) // ✅ esto funciona
+                    repository.escucharCambiosFirebase(this@MainActivity)
                 }
-
-
                 inventarioRepo.escucharCambiosFirebase(uid)
             }
         }
@@ -112,8 +86,6 @@ class MainActivity : ComponentActivity() {
             val currentUser = FirebaseAuth.getInstance().currentUser
             var loggedIn by remember { mutableStateOf(currentUser != null) }
             val context = LocalContext.current
-            val navController = rememberNavController()
-
 
             val systemUiController = rememberSystemUiController()
             SideEffect {
@@ -122,15 +94,11 @@ class MainActivity : ComponentActivity() {
             }
 
             Box(modifier = Modifier.fillMaxSize().background(Color.Red)) {
-
-
                 PermissionGate(
                     onAllRequiredChecksPassed = {
-
                         if (!locationServiceStarted) {
                             startLocationService()
                         }
-
 
                         if (loggedIn) {
                             Navegador(
@@ -145,13 +113,9 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 )
-
-
-
             }
         }
     }
-
 
     override fun onResume() {
         super.onResume()
@@ -167,20 +131,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-
-
     private fun startForegroundSyncLoop(): Job = lifecycleScope.launch(Dispatchers.IO) {
         Log.d("SYNC", "Loop de sincronización iniciado")
+
+        // 🔥 CARGA INICIAL: Asegurar clientes 100% Offline al arrancar
+        val currentUser = FirebaseAuth.getInstance().currentUser
+        if (currentUser != null && hayInternet(this@MainActivity)) {
+            Log.d("SYNC", "Ejecutando carga inicial de clientes...")
+            repository.descargarClientesFirebase(this@MainActivity)
+        }
+
         while (isActive) {
             val user = FirebaseAuth.getInstance().currentUser
-            if (user != null && isNetworkAvailable(this@MainActivity)) {
+            if (user != null && hayInternet(this@MainActivity)) {
                 try {
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        //repository.escucharCambiosFirebase(this@MainActivity) // ✅ esto funciona
-                    }
-
-
-
                     val pendientes = ventaRepository.obtenerVentasPendientes()
                     val uid = user.uid
                     val almacenId = inventarioRepo.getAlmacenVendedor(uid)
@@ -195,7 +159,7 @@ class MainActivity : ComponentActivity() {
                             Plantilla_Producto(it.productoId, it.nombre, it.precio, it.cantidad)
                         }
 
-                        val (exito, mensaje) = vistaModeloVenta.guardarVentaEnServidorSuspend(
+                        val (exito, mensaje) = ventaRepository.sincronizarConServidor(
                             venta.id,
                             venta.clienteId,
                             venta.clienteNombre,
@@ -205,7 +169,7 @@ class MainActivity : ComponentActivity() {
                             almacenId
                         )
                         if (exito) {
-                            val firestoreId = try { JSONObject(mensaje).optString("ventaId") } catch (e: Exception) { null }
+                            val firestoreId = try { JSONObject(mensaje).optString("ventaId") } catch (_: Exception) { null }
                             if (!firestoreId.isNullOrEmpty())
                                 ventaRepository.marcarVentaConFirestoreId(venta.id, firestoreId)
                         }
@@ -225,9 +189,6 @@ class MainActivity : ComponentActivity() {
         ContextCompat.startForegroundService(this, intent)
         locationServiceStarted = true
     }
-
-
-
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == "OPEN_MAPA") {

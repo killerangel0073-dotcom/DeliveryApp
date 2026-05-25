@@ -1,13 +1,10 @@
 // PermissionGate.kt
 package com.gruposanangel.delivery.ui.screens
 
-import android.Manifest
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.location.LocationListener
-import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -17,7 +14,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -51,53 +47,34 @@ fun PermissionGate(
     onAllRequiredChecksPassed: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     val lifecycleOwner = LocalLifecycleOwner.current
 
     // Estado local para permisos, ubicación y batería
-    var areAllManifestPermissionsGranted by remember {
-        mutableStateOf(PermisosManager.todosLosPermisosConcedidos(context))
-    }
-
     var isLocationEnabled by remember { mutableStateOf(PermisosManager.isUbicacionActivada(context)) }
     var isGpsEnabled by remember { mutableStateOf(PermisosManager.isGpsActivado(context)) }
     var isIgnoringBattery by remember { mutableStateOf(PermisosManager.ignoraOptimizacionBateria(context)) }
-    var batteryDialogOpened by rememberSaveable { mutableStateOf(false) }
-
     var isBackgroundLocationGranted by remember {
         mutableStateOf(PermisosManager.tieneUbicacionSegundoPlano(context))
     }
 
-    // ------------------------------
-    // Launchers para permisos y ubicación en segundo plano
-    // ------------------------------
+    // Launcher para permisos base
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
-        areAllManifestPermissionsGranted = PermisosManager.todosLosPermisosConcedidos(context)
         isGpsEnabled = PermisosManager.isGpsActivado(context)
-        isIgnoringBattery = PermisosManager.ignoraOptimizacionBateria(context)
-    }
-
-    val backgroundLocationLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) {
+        // Forzamos re-chequeo de ubicación en segundo plano tras otorgar permisos base
         isBackgroundLocationGranted = PermisosManager.tieneUbicacionSegundoPlano(context)
     }
 
-    // ------------------------------
-    // Observador onResume para re-chequear permisos, ubicación y batería
-    // ------------------------------
+    // Observador onResume: Es la forma más limpia y eficiente de detectar cambios
+    // cuando el usuario regresa de la pantalla de Ajustes del Sistema.
     DisposableEffect(lifecycleOwner) {
         val observer = object : DefaultLifecycleObserver {
             override fun onResume(owner: LifecycleOwner) {
-                areAllManifestPermissionsGranted = PermisosManager.todosLosPermisosConcedidos(context)
                 isLocationEnabled = PermisosManager.isUbicacionActivada(context)
                 isGpsEnabled = PermisosManager.isGpsActivado(context)
                 isIgnoringBattery = PermisosManager.ignoraOptimizacionBateria(context)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    isBackgroundLocationGranted = PermisosManager.tieneUbicacionSegundoPlano(context)
-                }
+                isBackgroundLocationGranted = PermisosManager.tieneUbicacionSegundoPlano(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -105,144 +82,71 @@ fun PermissionGate(
     }
 
     // ------------------------------
-    // Listener para cambios de estado de ubicación en tiempo real
-    // ------------------------------
-    // Listener para cambios de estado de ubicación en tiempo real
-    DisposableEffect(locationManager) {
-        val listener = object : LocationListener {
-            override fun onLocationChanged(location: android.location.Location) {}
-            override fun onProviderEnabled(provider: String) {
-                isLocationEnabled = PermisosManager.isUbicacionActivada(context)
-            }
-            override fun onProviderDisabled(provider: String) {
-                isLocationEnabled = PermisosManager.isUbicacionActivada(context)
-            }
-            override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
-        }
-
-        // ✅ SOLO registrar listener si tenemos permisos
-        val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-        if (hasFine || hasCoarse) {
-            try {
-                locationManager.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    0L,
-                    0f,
-                    listener
-                )
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    locationManager.requestLocationUpdates(
-                        LocationManager.NETWORK_PROVIDER,
-                        0L,
-                        0f,
-                        listener
-                    )
-                }
-            } catch (e: SecurityException) {
-                // Esto nunca debería pasar porque chequeamos permisos, pero lo capturamos por seguridad
-                e.printStackTrace()
-            }
-        }
-
-        onDispose {
-            locationManager.removeUpdates(listener)
-        }
-    }
-
-    // ------------------------------
-    // Control de diálogo de batería
-    // ------------------------------
-    val shouldShowBatteryDialog = !isIgnoringBattery && !batteryDialogOpened
-    LaunchedEffect(shouldShowBatteryDialog) {
-        if (shouldShowBatteryDialog) batteryDialogOpened = true
-    }
-
-    // ------------------------------
-    // Evaluar qué acción mostrar
+    // Lógica de Evaluación de Bloqueo
     // ------------------------------
     val currentAction: PermissionMessage? = run {
         val activity = context.findActivity()
 
-        // 1️⃣ Permisos faltantes
-        val requiredButNotGranted = if (!areAllManifestPermissionsGranted) {
-            PermisosManager.PERMISOS_REQUERIDOS.firstOrNull { permission ->
-                ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED
-            }
-        } else null
+        // 1️⃣ Permisos base en el Manifiesto (Ubicación Precisa, Cámara, etc.)
+        val missingPermission = PermisosManager.PERMISOS_REQUERIDOS.firstOrNull { permission ->
+            ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED
+        }
 
-        if (requiredButNotGranted != null) {
-            val needsManualSettings = !activity.shouldShowRequestPermissionRationale(requiredButNotGranted)
-            val permissionName = when (requiredButNotGranted) {
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION -> "Ubicación"
-                Manifest.permission.POST_NOTIFICATIONS -> "Notificaciones"
-                Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.BLUETOOTH_SCAN -> "Dispositivos Cercanos (Bluetooth)"
-                Manifest.permission.CAMERA -> "Cámara"
-                else -> requiredButNotGranted.split(".").last()
+        if (missingPermission != null) {
+            val needsManualSettings = !activity.shouldShowRequestPermissionRationale(missingPermission)
+
+            val (title, body) = when (missingPermission) {
+                android.Manifest.permission.ACCESS_FINE_LOCATION -> 
+                    "📍 Ubicación Precisa Obligatoria" to "Para rastrear tu ruta con exactitud, es indispensable permitir la ubicación 'Precisa'. La ubicación 'Aproximada' no es suficiente."
+                android.Manifest.permission.POST_NOTIFICATIONS ->
+                    "🔔 Notificaciones Requeridas" to "Necesitamos mostrarte alertas de velocidad y mensajes del supervisor en tiempo real."
+                else -> "⚠️ Permiso Requerido" to "El permiso de ${missingPermission.split(".").last()} es vital para continuar."
             }
 
-            return@run if (needsManualSettings) {
-                PermissionMessage(
-                    "⚠️ Permiso de $permissionName Denegado",
-                    "El permiso de $permissionName es crucial para el funcionamiento de la app. Por favor, actívelo manualmente desde Ajustes.",
-                    "Abrir Configuración App"
-                ) {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            return@run PermissionMessage(
+                title, body, if (needsManualSettings) "Abrir Ajustes" else "Conceder Permiso"
+            ) {
+                if (needsManualSettings) {
+                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                         data = Uri.fromParts("package", context.packageName, null)
-                    }
-                    context.startActivity(intent)
-                }
-            } else {
-                PermissionMessage(
-                    "⚠️ Permiso Requerido: $permissionName",
-                    "Necesitamos el permiso de $permissionName para poder continuar con el rastreo y la funcionalidad del sistema.",
-                    "Conceder $permissionName"
-                ) {
+                    })
+                } else {
                     permissionLauncher.launch(PermisosManager.PERMISOS_REQUERIDOS)
                 }
             }
         }
 
-        // 2️⃣ Ubicación desactivada (detecta instantáneamente)
-        if (!isLocationEnabled) {
+        // 2️⃣ Ubicación del sistema (GPS) desactivada
+        if (!isLocationEnabled || !isGpsEnabled) {
             return@run PermissionMessage(
-                "📍 Ubicación Desactivada",
-                "El servicio de rastreo requiere que la ubicación del dispositivo esté activa.",
-                "Abrir Configuración"
+                "📍 GPS Desactivado",
+                "El sistema de rastreo no puede funcionar si el sensor GPS está apagado. Por favor, actívalo.",
+                "Activar GPS"
             ) {
                 context.startActivity(PermisosManager.getIntentParaActivarGps())
             }
         }
 
         // 3️⃣ Ubicación en segundo plano (Android 10+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            areAllManifestPermissionsGranted &&
-            isGpsEnabled &&
-            !isBackgroundLocationGranted
-        ) {
+        // Obligatorio para que el rastro no se corte al bloquear el teléfono
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !isBackgroundLocationGranted) {
             return@run PermissionMessage(
-                "📍 Ubicación en segundo plano",
-                "Para que el rastreo funcione correctamente incluso con la app cerrada, debes permitir la ubicación en segundo plano.\n\n" +
-                        "En la siguiente pantalla selecciona:\n\"Permitir todo el tiempo\"",
-                "Abrir Configuración"
+                "🏃 Ubicación en Segundo Plano",
+                "Para que tu rastro siga activo aunque guardes el teléfono, debes seleccionar:\n\n\"Permitir todo el tiempo\" \nen los ajustes de ubicación.",
+                "Configurar Todo el Tiempo"
             ) {
-                backgroundLocationLauncher.launch(
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", context.packageName, null)
-                    }
-                )
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                })
             }
         }
 
         // 4️⃣ Optimización de batería
-        if (!isIgnoringBattery && !batteryDialogOpened) {
+        if (!isIgnoringBattery) {
             return@run PermissionMessage(
                 "🔋 Optimización de Batería",
-                "Para evitar que el sistema detenga el servicio de rastreo, debes desactivar la optimización de batería para esta aplicación.",
-                "Desactivar Optimización"
+                "El sistema de Android podría detener tu rastro para ahorrar batería. Debes desactivar la optimización para esta app.",
+                "Desactivar Restricción"
             ) {
                 context.startActivity(PermisosManager.getIntentParaIgnorarOptimizacion(context))
             }
@@ -251,10 +155,15 @@ fun PermissionGate(
         null
     }
 
+    // ------------------------------
+    // Renderizado: Gatekeeper
+    // ------------------------------
     if (currentAction == null) {
+        // Solo si todo está perfecto se renderiza el contenido de la app
         onAllRequiredChecksPassed()
     } else {
-        FullScreenPermissionDialog(currentAction, modifier = Modifier.fillMaxSize())
+        // Bloqueo total de la interfaz
+        FullScreenPermissionDialog(currentAction)
     }
 }
 

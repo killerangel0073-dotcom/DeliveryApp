@@ -269,7 +269,7 @@ fun PantallaVentaPeriodoContent(
 @Composable
 fun PantallaVentaPeriodo(
     navController: NavController,
-    vistaModelo: VistaModeloVenta
+    vistaModelo: VentaViewModel
 ) {
     var fechaInicio by remember { mutableStateOf(Date()) }
     var fechaFin by remember { mutableStateOf(Date()) }

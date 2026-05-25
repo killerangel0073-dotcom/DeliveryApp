@@ -15,6 +15,12 @@ interface   UsuarioDao {
     @Query("SELECT * FROM usuarios WHERE uid = :uid LIMIT 1")
     suspend fun obtenerPorId(uid: String): UsuarioEntity?
 
+    @Query("SELECT * FROM usuarios LIMIT 1")
+    suspend fun obtenerUsuarioActual(): UsuarioEntity?
+
+    @Query("SELECT * FROM usuarios LIMIT 1")
+    fun obtenerUsuarioActualFlow(): Flow<UsuarioEntity?>
+
     @Query("DELETE FROM usuarios")
     suspend fun limpiarTabla()
 

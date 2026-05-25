@@ -3,12 +3,13 @@ package com.gruposanangel.delivery.ui.screens
 import ProductoTicketDetalle
 import TicketVentaCompleto
 import android.bluetooth.BluetoothDevice
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AltRoute
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,57 +27,49 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.gruposanangel.delivery.R
+import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.VentaEntity
 import com.gruposanangel.delivery.data.VentaRepository
 import com.gruposanangel.delivery.model.Plantilla_Producto
-import com.gruposanangel.delivery.utilidades.ImprimirTicket58mm
 import com.gruposanangel.delivery.utilidades.ImprimirTicket58mmCompleto
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.gruposanangel.delivery.data.FirebaseDataSource
+import kotlinx.coroutines.*
+import java.io.File
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
-import android.net.Uri
-import java.io.File
 
-
-// --------------------------
-// DetalleTicketScreen (modificado para reconsultar venta desde DB antes de imprimir)
-// --------------------------
 @Composable
 fun DetalleTicketScreen(
     navController: NavController? = null,
-    ticketId: Long,
+    ticketId: String,
     ventaRepository: VentaRepository,
     impresoraBluetooth: BluetoothDevice? = null
 ) {
-
     val context = LocalContext.current
     val db = AppDatabase.getDatabase(context)
-    val inventarioRepo = RepositoryInventario(db.productoDao())
-    val viewModel: VistaModeloVenta = viewModel(
-        factory = VistaModeloVentaFactory(
+    val firebaseDataSource = FirebaseDataSource()
+    val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+    val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
+
+    val viewModel: VentaViewModel = viewModel(
+        factory = VentaViewModelFactory(
             repositoryInventario = inventarioRepo,
-            ventaRepository = ventaRepository
+            ventaRepository = ventaRepository,
+            repositoryUsuario = repoUsuario
         )
     )
-
-
 
     val ticketCompletoState = remember { mutableStateOf<TicketVentaCompleto?>(null) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(ticketId) {
-        // carga inicial para mostrar en UI
-        ticketCompletoState.value = viewModel.obtenerTicketDirecto(ticketId)
+        ticketCompletoState.value = viewModel.obtenerTicketCompleto(ticketId)
     }
 
     ticketCompletoState.value?.let { ticket ->
-        // PASAR viewModel y ticketId a la pantalla de detalle para que pueda reconsultar antes de imprimir
         PantallaDetalleTicketCompleto(
             navController = navController,
             ticket = ticket,
@@ -103,36 +96,27 @@ fun PantallaDetalleTicketCompleto(
     ticket: TicketVentaCompleto,
     impresoraBluetooth: BluetoothDevice? = null,
     coroutineScope: CoroutineScope,
-    viewModel: VistaModeloVenta? = null, // opcional para preview; en uso normal se pasa el viewModel real
-    ticketId: Long? = null // opcional para preview; en uso normal se pasa el id real
+    viewModel: VentaViewModel? = null,
+    ticketId: String? = null
 ) {
     val context = LocalContext.current
     val clienteDao = AppDatabase.getDatabase(context).clienteDao()
 
     val fotoClienteReal by produceState<String?>(initialValue = null, ticketId) {
-
         if (ticketId == null || viewModel == null) {
             value = null
             return@produceState
         }
-
-        val ventaEntity = viewModel.obtenerVentaEntityPorId(ticketId)
+        val ventaEntity = viewModel.obtenerVentaPorId(ticketId)
         val clienteId = ventaEntity?.clienteId
-
         value = clienteId?.let {
             clienteDao.getClientePorId(it)?.fotografiaUrl
         }
     }
 
-
-
-
-    val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
-    val formatoFecha = SimpleDateFormat("EEEE d 'de' MMMM hh:mm a", Locale("es", "MX"))
-
-
-
-
+    val localeMX = Locale("es", "MX")
+    val formatoMoneda = NumberFormat.getCurrencyInstance(localeMX)
+    val formatoFecha = SimpleDateFormat("EEEE d 'de' MMMM hh:mm a", localeMX)
 
     Scaffold(
         topBar = {
@@ -146,7 +130,7 @@ fun PantallaDetalleTicketCompleto(
                                 popUpTo(0) { inclusive = true }
                             }
                         }) {
-                            Icon(Icons.Default.AltRoute, contentDescription = "Ir a Ruta")
+                            Icon(Icons.AutoMirrored.Filled.AltRoute, contentDescription = "Ir a Ruta")
                         }
                     }
                 }
@@ -162,17 +146,11 @@ fun PantallaDetalleTicketCompleto(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             val imageModel = remember(fotoClienteReal) {
-                val path = fotoClienteReal
-                if (!path.isNullOrBlank()) {
+                fotoClienteReal?.let { path ->
                     val file = File(path)
-                    if (file.exists()) {
-                        Uri.fromFile(file)   // 📁 local
-                    } else {
-                        path                // 🌐 remoto
-                    }
-                } else null
+                    if (file.exists()) Uri.fromFile(file) else path
+                }
             }
-
 
             AsyncImage(
                 model = imageModel,
@@ -184,7 +162,6 @@ fun PantallaDetalleTicketCompleto(
                     .size(120.dp)
                     .clip(RoundedCornerShape(16.dp))
             )
-
 
             Spacer(Modifier.height(16.dp))
             Text(ticket.cliente, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -216,10 +193,7 @@ fun PantallaDetalleTicketCompleto(
                     .background(Color(0xFFF5F5F5), RoundedCornerShape(12.dp))
                     .padding(12.dp)
             ) {
-
-
                 ticket.productos.forEach { producto ->
-
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -227,88 +201,57 @@ fun PantallaDetalleTicketCompleto(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("${producto.nombre} x${producto.cantidad}")
-                        Text(
-                            NumberFormat.getCurrencyInstance(Locale("es", "MX"))
-                                .format(producto.precio * producto.cantidad)
-                        )
+                        Text(formatoMoneda.format(producto.precio * producto.cantidad))
                     }
                 }
             }
 
             Spacer(Modifier.height(30.dp))
 
-
             Button(
                 onClick = {
                     if (impresoraBluetooth != null) {
-
-
                         coroutineScope.launch(Dispatchers.IO) {
                             try {
-                                // 1️⃣ Re-consulta la venta completa desde DB usando ViewModel
-                                val ventaEntity: VentaEntity? = ticketId?.let { viewModel?.obtenerVentaEntityPorId(it) }
-
-                                // 2️⃣ Obtener detalles de la venta
-                                val detalles = ticketId?.let { viewModel?.obtenerDetallesDeVentaSuspend(it) } ?: emptyList()
-
-                                // 3️⃣ Mapear los detalles a Plantilla_Producto
+                                val ventaEntity: VentaEntity? = ticketId?.let { viewModel?.obtenerVentaPorId(it) }
+                                val detalles = ticketId?.let { viewModel?.obtenerDetallesDeVenta(it) } ?: emptyList()
                                 val productosParaImprimir = detalles.map { d ->
-                                    Plantilla_Producto(
-                                        id = d.productoId,
-                                        nombre = d.nombre,
-                                        precio = d.precio,
-                                        cantidad = d.cantidad
-                                    )
+                                    Plantilla_Producto(d.productoId, d.nombre, d.precio, d.cantidad)
                                 }
 
-                                // 4️⃣ Consultar Room para obtener nombre real del vendedor
                                 val vendedorUid = ventaEntity?.vendedorId ?: ""
-                                val usuarioDao = AppDatabase.getDatabase(context
-                                ).usuarioDao()
-                                val usuario = usuarioDao.obtenerPorId(vendedorUid) // UsuarioEntity?
+                                val usuarioDao = AppDatabase.getDatabase(context).usuarioDao()
+                                val usuario = usuarioDao.obtenerPorId(vendedorUid)
                                 val nombreVendedor = usuario?.nombre ?: vendedorUid
 
-                                // 5️⃣ Llamar a la función de impresión
                                 ImprimirTicket58mmCompleto(
                                     device = impresoraBluetooth,
-                                    context = context
-                                    ,
+                                    context = context,
                                     logoDrawableId = R.drawable.logo,
                                     cliente = ventaEntity?.clienteNombre ?: ticket.cliente,
                                     productos = productosParaImprimir,
                                     ventaId = ventaEntity?.id,
                                     fechaVenta = ventaEntity?.fecha?.let { Date(it) } ?: ticket.fecha,
                                     totalVenta = ventaEntity?.total ?: ticket.total,
-                                    vendedorNombre = nombreVendedor, // <-- aquí usamos el nombre real
+                                    vendedorNombre = nombreVendedor,
                                     metodoPago = ventaEntity?.metodoPago ?: "",
                                     sincronizado = ventaEntity?.sincronizado,
                                     firestoreId = ventaEntity?.firestoreId ?: "",
                                     clienteId = ventaEntity?.clienteId ?: ""
                                 )
 
-
-
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(context
-                                        , "Ticket impreso correctamente", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Ticket impreso correctamente", Toast.LENGTH_SHORT).show()
                                 }
                             } catch (e: Exception) {
                                 e.printStackTrace()
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(context
-                                        , "Error imprimiendo: ${e.message}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Error imprimiendo: ${e.message}", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }
-
-
-
-
-
-
                     } else {
-                        Toast.makeText(context
-                            , "No hay impresora seleccionada", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "No hay impresora seleccionada", Toast.LENGTH_SHORT).show()
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White),
@@ -317,9 +260,6 @@ fun PantallaDetalleTicketCompleto(
             ) {
                 Text("Imprimir Ticket", fontSize = 16.sp)
             }
-
-
-
         }
     }
 }
@@ -345,6 +285,5 @@ fun PreviewPantallaDetalleTicketCompleto() {
         ticket = ticketEjemplo,
         impresoraBluetooth = null,
         coroutineScope = rememberCoroutineScope()
-        // en preview no pasamos viewModel ni ticketId; la pantalla usará el 'ticket' de ejemplo
     )
 }

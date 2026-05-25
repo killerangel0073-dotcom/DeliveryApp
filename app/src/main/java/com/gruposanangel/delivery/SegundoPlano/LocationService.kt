@@ -124,70 +124,92 @@ class LocationService : Service() {
         isRunning = true
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
-
         if (!tienePermisosUbicacion()) {
             Log.e(TAG, "❌ Sin permisos de ubicación. Cerrando servicio.")
             stopSelf()
             return
         }
 
+        // 1. Centralizamos la creación de canales de una sola vez
+        createLocationChannelIfNeeded()
+        createAlertsChannelIfNeeded()
 
         startForeground(1, buildNotification())
         adquirirWakeLock()
         requestLocationUpdates()
         registrarBatteryReceiver()
-        iniciarWatchdog() // <--- AGREGA ESTA LÍNEA AQUÍ
+        iniciarWatchdog()
 
-
-        // LANZAMIENTO ÚNICO DE MOTORES
         serviceScope.launch {
             precargarRutaSuspend()
-            startHeartbeat() // 🔥 ACTIVAR: Es el que mantiene el "pulso" constante en Firestore
+            // Iniciamos el motor único de sincronización
+            iniciarLoopDeSincronizacionUnificado()
         }
-
-        iniciarLoopDeSubida() // Sigue funcionando para reportes rápidos por movimiento
     }
 
     // ==========================================
-// HEARTBEAT LIMPIO Y SUSPENDIDO
-// ==========================================
-    private suspend fun startHeartbeat() {
+    // MOTOR ÚNICO DE SINCRONIZACIÓN (OPTIMIZADO)
+    // ==========================================
+    private suspend fun iniciarLoopDeSincronizacionUnificado() {
         while (coroutineContext.isActive) {
-            delay(30_000)
+            delay(1000) // Tick de revisión cada segundo
 
-            val user = firebaseUser
-            val ruta = rutaNombreCache
+            val loc = lastLocation ?: continue
+            val user = firebaseUser ?: continue
+            val ruta = rutaNombreCache ?: cargarRutaSuspend(user.uid) ?: continue
+
+            val now = System.currentTimeMillis()
+            val tiempoSinSubir = now - lastUploadTimestamp
+            
+            // Calculamos distancia desde el último punto sincronizado
+            val distanciaDesdeUltimaSubida = lastUploadedLocation?.distanceTo(loc) ?: Float.MAX_VALUE
+            
             val velocidad = velocidadActual.value
+            val statusActual = if (velocidad > 1.5f) "MOVING" else "ONLINE"
 
-            if (user != null && !ruta.isNullOrEmpty()) {
-                // Decidimos el status según la velocidad filtrada
-                val statusActual = if (velocidad > 1.5f) "MOVING" else "ONLINE"
+            // 1. Condición de MOVIMIENTO: > 7 metros y han pasado al menos 5 segundos
+            val debeSubirPorMovimiento = distanciaDesdeUltimaSubida >= DISTANCIA_MINIMA && 
+                                        tiempoSinSubir >= INTERVALO_SUBIDA_MOVIMIENTO_MS
 
-                // 🔥 AJUSTE: Solo enviamos pulso de tiempo y estado.
-                // La ubicación solo la escribe 'subirUbicacion' cuando el GPS es real.
-                val data = mapOf(
-                    "timestamp" to Timestamp.now(),
-                    "status" to statusActual
-                )
+            // 2. Condición de TIEMPO (HEARTBEAT): > 30 segundos (esté quieto o no)
+            val debeSubirPorTiempo = tiempoSinSubir >= INTERVALO_MAX_QUIETO_MS
 
-                firestore.collection("locations")
-                    .document(ruta)
-                    .set(data, SetOptions.merge())
-                    .addOnSuccessListener {
-                        Log.d(TAG, "Heartbeat OK ($ruta) - Status: $statusActual")
-                    }
+            if (debeSubirPorMovimiento || debeSubirPorTiempo) {
+                subirUbicacionCompleta(loc, ruta, velocidad, statusActual)
+                
+                lastUploadTimestamp = now
+                lastUploadedLocation = Location(loc) // Guardamos copia para la siguiente comparación
+                
+                Log.d(TAG, "📡 Sincronización exitosa ($ruta). Motivo: ${if(debeSubirPorMovimiento) "Movimiento" else "Heartbeat/Tiempo"}")
             }
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    private fun subirUbicacionCompleta(location: Location, ruta: String, speedKmh: Float, status: String) {
+        val data = mapOf(
+            "latitude" to location.latitude,
+            "longitude" to location.longitude,
+            "accuracy" to location.accuracy,
+            "provider" to location.provider,
+            "speed" to speedKmh,
+            "battery" to BatteryState.state.value.level,
+            "timestamp" to Timestamp.now(),
+            "status" to status
+        )
 
+        firestore.collection("locations")
+            .document(ruta)
+            .set(data, SetOptions.merge())
+            .addOnFailureListener { e -> Log.e(TAG, "Error subiendo datos", e) }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!tienePermisosUbicacion()) {
             Log.e(TAG, "❌ Sin permisos en onStartCommand")
             stopSelf()
             return START_NOT_STICKY
         }
-        // 1. REPORTE INMEDIATO AL SISTEMA (Evita ANR/Crashes)
+        
         startForeground(1, buildNotification())
         isRunning = true
 
@@ -195,7 +217,7 @@ class LocationService : Service() {
             Log.d(TAG, "Reinicio por el sistema detectado (Sticky)")
             adquirirWakeLock()
             requestLocationUpdates()
-            iniciarWatchdog() // 2. RE-PROGRAMAR EL SEGURO
+            iniciarWatchdog()
         } else {
             when (intent.action) {
                 ACTION_START -> {
@@ -204,7 +226,7 @@ class LocationService : Service() {
                 }
                 ACTION_STOP -> {
                     detenerTodo()
-                    stopForeground(STOP_FOREGROUND_REMOVE) // Usar constante moderna
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
             }
@@ -454,73 +476,6 @@ class LocationService : Service() {
     }
 
 
-
-    private fun iniciarLoopDeSubida() {
-        serviceScope.launch {
-            while (isActive) {
-                delay(1000) // Tick de revisión cada segundo
-
-                // 🔥 AJUSTE: Usamos lastLocation como única fuente de verdad filtrada
-                val loc = lastLocation ?: continue
-                val user = firebaseUser ?: continue
-                val ruta = rutaNombreCache ?: cargarRutaSuspend(user.uid) ?: continue
-
-                val now = System.currentTimeMillis()
-                val tiempoSinSubir = now - lastUploadTimestamp
-
-                // Calculamos distancia desde el último punto que SI subimos a Firestore
-                val distanciaDesdeUltimaSubida = lastUploadedLocation?.distanceTo(loc) ?: Float.MAX_VALUE
-
-                // Decisión de subida
-                val debeSubirPorMovimiento = distanciaDesdeUltimaSubida >= DISTANCIA_MINIMA &&
-                        tiempoSinSubir >= INTERVALO_SUBIDA_MOVIMIENTO_MS
-
-                val debeSubirPorTiempo = tiempoSinSubir >= INTERVALO_MAX_QUIETO_MS
-
-                if (debeSubirPorMovimiento || debeSubirPorTiempo) {
-                    subirUbicacion(loc, ruta, velocidadActual.value)
-
-                    lastUploadTimestamp = now
-                    lastUploadedLocation = Location(loc) // 🔥 CLON
-
-
-                    Log.d(TAG, "✅ Enviado a Firestore ($ruta). Motivo: ${if(debeSubirPorMovimiento) "Movimiento" else "Tiempo"}")
-                }
-            }
-        }
-    }
-
-
-
-
-    private fun subirUbicacion(location: Location, ruta: String, speedKmh: Float) {
-        val statusActual = if (speedKmh > 1.5f) "MOVING" else "ONLINE"
-        val data = mapOf(
-            "latitude" to location.latitude,
-            "longitude" to location.longitude,
-            "accuracy" to location.accuracy,
-            "provider" to location.provider, // 🧠 Auditoría: "gps" o "network"
-            "speed" to speedKmh,
-            "battery" to BatteryState.state.value.level,
-            "timestamp" to Timestamp.now(),
-            "status" to statusActual
-        )
-
-        firestore.collection("locations")
-            .document(ruta)
-            .set(data, SetOptions.merge())
-            .addOnFailureListener { e -> Log.e(TAG, "Error subiendo", e) }
-    }
-
-
-
-
-
-
-
-    // ==========================================
-    // NOTIFICACIONES AL SUPERVISOR (RESTAURADA)
-    // ==========================================
 
     private fun lanzarAlertaExceso(velocidad: Float) {
         alertaVelocidad.value = velocidad

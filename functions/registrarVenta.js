@@ -1,19 +1,9 @@
 const functions = require('firebase-functions');
-const admin = require('firebase-admin'); // NO initializeApp aquí
+const admin = require('firebase-admin');
 const db = admin.firestore();
+
 /**
- * Cloud Function HTTP para registrar una venta completa en Firestore.
- *
- * Request body (JSON):
- * {
- *   "ventaLocalId": number,
- *   "clienteId": string,
- *   "clienteNombre": string,
- *   "productos": [{ id: string, nombre: string, precio: number, cantidad: number, imagenUrl?: string }],
- *   "metodoPago": string,
- *   "vendedorId": string,
- *   "almacenVendedorId": string
- * }
+ * Cloud Function HTTP para registrar una venta completa en Firestore con Idempotencia.
  */
 exports.registrarVenta = functions.https.onRequest(async (req, res) => {
   try {
@@ -22,7 +12,7 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
     }
 
     const {
-      ventaLocalId,
+      ventaLocalId, // Este ahora es el UUID generado por el móvil
       clienteId,
       clienteNombre,
       productos,
@@ -36,13 +26,24 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
     }
 
     const almacenIdLimpio = almacenVendedorId.trim();
-    const ventaRef = db.collection('ventas').doc();
-    console.log(`🚀 Iniciando transacción ventaId=${ventaRef.id}`);
+
+    // 🔥 BLINDAJE DE IDEMPOTENCIA: Usamos el ID local como ID de documento en Firestore.
+    // Si la función se reintenta con el mismo UUID, Firestore simplemente sobrescribirá (o fallará la transacción si el stock cambió),
+    // pero JAMÁS creará un ticket duplicado con distinto ID.
+    const ventaRef = db.collection('ventas').doc(ventaLocalId);
+    console.log(`🚀 Iniciando registro de venta con ID Idempotente=${ventaLocalId}`);
 
     const ventaId = await db.runTransaction(async (transaction) => {
+      // 1. Verificar si la venta ya existe (para no descontar stock dos veces)
+      const ventaExistente = await transaction.get(ventaRef);
+      if (ventaExistente.exists) {
+        console.log(`⚠️ La venta ${ventaLocalId} ya fue registrada anteriormente. Retornando ID existente.`);
+        return ventaLocalId;
+      }
+
       const ahora = admin.firestore.FieldValue.serverTimestamp();
 
-      // 🔹 Leer todos los stocks
+      // 🔹 Leer stocks y productos
       const lecturas = productos.map(p => {
         const productIdLimpio = p.id.split('_')[0];
         const stockRef = db.collection('inventarioStock').doc(`${productIdLimpio}_${almacenIdLimpio}`);
@@ -61,15 +62,12 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
       // 🔹 Validar stocks
       resultados.forEach(r => {
         if (!r.stockSnap.exists) {
-          console.error(`❌ Stock no existe para ${r.producto.nombre} en ${almacenIdLimpio}`);
-          throw new Error(`Stock no existe para ${r.producto.nombre} en el almacén del vendedor`);
+          throw new Error(`Stock no existe para ${r.producto.nombre}`);
         }
         const stockActual = r.stockSnap.data().cantidad || 0;
         if (stockActual < r.producto.cantidad) {
-          console.error(`⚠️ Stock insuficiente para ${r.producto.nombre}: actual=${stockActual}, requerido=${r.producto.cantidad}`);
           throw new Error(`Stock insuficiente para ${r.producto.nombre}`);
         }
-        console.log(`🔍 Stock ok para ${r.producto.nombre}: ${stockActual} disponibles`);
       });
 
       // 🔹 Crear venta
@@ -87,9 +85,8 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
         vendedorId,
         sincronizado: true,
         estado: 'pagada',
-        comentarios: ''
+        comentarios: 'Registro Idempotente'
       });
-      console.log(`✅ Venta creada en ${ventaRef.id}`);
 
       // 🔹 Agregar productos y actualizar stock
       resultados.forEach(r => {
@@ -101,14 +98,12 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
           cantidad: producto.cantidad,
           imagenUrl: producto.imagenUrl || ''
         });
-        console.log(`📦 Producto agregado a venta: ${producto.nombre} x${producto.cantidad}`);
 
         const stockActual = r.stockSnap.data().cantidad;
         transaction.update(stockRef, {
           cantidad: stockActual - producto.cantidad,
           ultimaActualizacion: ahora
         });
-        console.log(`✅ Stock actualizado: ${producto.nombre} ${stockActual} → ${stockActual - producto.cantidad}`);
 
         transaction.set(db.collection('movimientosStock').doc(), {
           tipoMovimiento: 'VENTA',
@@ -123,13 +118,11 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
           clienteId,
           ventaId: ventaRef.id
         });
-        console.log(`📝 Movimiento creado para ${producto.nombre}`);
       });
 
       return ventaRef.id;
     });
 
-    console.log(`🎉 Transacción completada con éxito, ventaId=${ventaId}`);
     res.status(200).send({ success: true, ventaId });
 
   } catch (error) {

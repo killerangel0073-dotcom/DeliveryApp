@@ -3,6 +3,7 @@ package com.gruposanangel.delivery.SegundoPlano
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import android.util.Log
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
 
@@ -16,10 +17,10 @@ class SincronizarClientesWorker(
         val clienteRepo = RepositoryCliente(db.clienteDao())
 
         return try {
-            clienteRepo.sincronizarConFirebase(applicationContext) // ✅ pasar context
-            Result.success()
+            val exito = clienteRepo.sincronizarConFirebase(applicationContext)
+            if (exito) Result.success() else Result.retry()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("SyncWorker", "Error fatal en sincronización", e)
             Result.retry()
         }
     }

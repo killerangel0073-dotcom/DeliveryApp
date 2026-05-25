@@ -38,12 +38,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.VentaRepository
+import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.data.FirebaseDataSource
 import kotlinx.coroutines.tasks.await
 
 // ------------------------------------------------------------
@@ -71,13 +72,18 @@ fun Pantalla_Principal(
     onImpresoraSeleccionada: (BluetoothDevice) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val ventaDao = AppDatabase.getDatabase(context).VentaDao()
+    val db = AppDatabase.getDatabase(context)
+    val ventaDao = db.VentaDao()
     val ventaRepository = VentaRepository(ventaDao)
+    val usuarioDao = db.usuarioDao()
+    val firebaseDataSource = FirebaseDataSource()
+    val repoUsuario = RepositoryUsuario(firebaseDataSource, usuarioDao)
 
-    val viewModel: VistaModeloVenta = viewModel(
-        factory = VistaModeloVentaFactory(
+    val viewModel: VentaViewModel = viewModel(
+        factory = VentaViewModelFactory(
             repositoryInventario = inventarioRepo,
-            ventaRepository = ventaRepository
+            ventaRepository = ventaRepository,
+            repositoryUsuario = repoUsuario
         )
     )
 
@@ -87,29 +93,13 @@ fun Pantalla_Principal(
     var displayName by remember { mutableStateOf(if (isPreview) "Usuario de Prueba" else "Cargando...") }
     var photoUrl by remember { mutableStateOf("") }
 
-    // Cargar datos Firebase
-    LaunchedEffect(Unit) {
-        if (!isPreview) {
-            try {
-                val currentUser = FirebaseAuth.getInstance().currentUser
-                val uid = currentUser?.uid ?: return@LaunchedEffect
+    // OFFLINE-FIRST: Observamos el usuario desde Room de forma reactiva
+    val usuarioActual by repoUsuario.getUsuarioActual().collectAsState(initial = null)
 
-                val docs = FirebaseFirestore.getInstance()
-                    .collection("users")
-                    .whereEqualTo("uid", uid)
-                    .get()
-                    .await()
-
-                if (docs.isEmpty) {
-                    displayName = "Usuario no encontrado"
-                } else {
-                    val userDoc = docs.documents.first()
-                    displayName = userDoc.getString("nombre") ?: "Usuario"
-                    photoUrl = userDoc.getString("photo_url") ?: ""
-                }
-            } catch (_: Exception) {
-                displayName = "Error al cargar usuario"
-            }
+    LaunchedEffect(usuarioActual) {
+        usuarioActual?.let {
+            displayName = it.nombre
+            photoUrl = it.photoUrl ?: ""
         }
     }
 

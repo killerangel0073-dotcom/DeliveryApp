@@ -5,14 +5,13 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.google.firebase.auth.FirebaseAuth
+import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.VentaRepository
+import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.model.Plantilla_Producto
-import com.gruposanangel.delivery.ui.screens.VistaModeloVenta
-import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
-import kotlin.coroutines.resume
 
 class SincronizarVentasWorker(
     context: Context,
@@ -22,20 +21,32 @@ class SincronizarVentasWorker(
     override suspend fun doWork(): Result {
         val db = AppDatabase.getDatabase(applicationContext)
         val ventaRepo = VentaRepository(db.VentaDao())
-        val inventarioRepo = RepositoryInventario(db.productoDao())
-        val vistaModelo = VistaModeloVenta(inventarioRepo, ventaRepo)
+        val firebaseDataSource = FirebaseDataSource()
+        val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+        val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
 
         return try {
-            val uidVendedor = FirebaseAuth.getInstance().currentUser?.uid
-            if (uidVendedor.isNullOrEmpty()) return Result.retry()
+            // 🔥 1. Obtener UID de forma segura (Prioridad Room para modo Offline)
+            val usuarioActual = repoUsuario.obtenerUsuarioActual()
+            val uidVendedor = usuarioActual?.uid ?: FirebaseAuth.getInstance().currentUser?.uid
 
+            if (uidVendedor.isNullOrEmpty()) {
+                Log.w("SyncWorker", "No se encontró UID del vendedor")
+                return Result.failure() // No reintentar si no hay usuario (error fatal de sesión)
+            }
+
+            // 🔥 2. Consulta Eficiente en Lote (Batch)
             val pendientes = ventaRepo.obtenerVentasPendientes()
             if (pendientes.isEmpty()) return Result.success()
 
             val almacenId = inventarioRepo.getAlmacenVendedor(uidVendedor)
-                ?: return Result.retry()
+                ?: return Result.retry() // Reintentar si el almacén no está cargado aún
 
-            pendientes.forEach { venta ->
+            // 🔥 3. Subida en Ráfaga con Manejo de Intermitencia
+            for (venta in pendientes) {
+                // Detener si el Worker ha sido cancelado (p.ej. por pérdida de red si se configuró así)
+                if (isStopped) return Result.retry()
+
                 val detalles = ventaRepo.obtenerDetallesDeVenta(venta.id)
                 val productos = detalles.map {
                     Plantilla_Producto(
@@ -46,9 +57,8 @@ class SincronizarVentasWorker(
                     )
                 }
 
-                // Llamada suspend al servidor de manera segura
                 val (exitoServidor, mensaje) = try {
-                    vistaModelo.guardarVentaEnServidorSuspend(
+                    ventaRepo.sincronizarConServidor(
                         ventaLocalId = venta.id,
                         clienteId = venta.clienteId,
                         clienteNombre = venta.clienteNombre,
@@ -58,26 +68,32 @@ class SincronizarVentasWorker(
                         almacenVendedorId = almacenId
                     )
                 } catch (e: Exception) {
-                    e.printStackTrace()
-                    Pair(false, e.message ?: "Error desconocido")
+                    Log.e("SyncWorker", "Error de red al sincronizar ticket ${venta.id}", e)
+                    // Si hay un error de red o excepción inesperada, detenemos la ráfaga
+                    // y pedimos reintento para las que faltan.
+                    return Result.retry()
                 }
 
                 if (exitoServidor) {
-                    val firestoreId = try { JSONObject(mensaje).optString("ventaId", null) } catch (e: Exception) { null }
-                    if (!firestoreId.isNullOrEmpty()) {
+                    val firestoreId = try {
+                        val json = JSONObject(mensaje)
+                        json.optString("ventaId", "")
+                    } catch (e: Exception) { "" }
+
+                    if (firestoreId.isNotEmpty()) {
                         ventaRepo.marcarVentaConFirestoreId(venta.id, firestoreId)
-                        Log.d("SincronizarVentas", "Venta ${venta.id} sincronizada con ID $firestoreId")
-                    } else {
-                        Log.e("SincronizarVentas", "Venta ${venta.id} sincronizada pero no se recibió FirestoreId")
+                        Log.d("SyncWorker", "Ticket ${venta.id} sincronizado OK")
                     }
                 } else {
-                    Log.e("SincronizarVentas", "Error sincronizando venta ${venta.id}: $mensaje")
+                    Log.e("SyncWorker", "Servidor rechazó ticket ${venta.id}: $mensaje")
+                    // Si el servidor responde con error (p.ej. 400), continuamos con la siguiente
+                    // para no bloquear toda la cola por un ticket corrupto.
                 }
             }
 
             Result.success()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("SyncWorker", "Falla general en Worker", e)
             Result.retry()
         }
     }

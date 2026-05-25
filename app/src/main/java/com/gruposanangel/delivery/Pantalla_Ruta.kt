@@ -26,20 +26,22 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.gruposanangel.delivery.R
+import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.VentaRepository
+import com.gruposanangel.delivery.data.FirebaseDataSource
 // 👇 IMPORTANTE: Asegúrate que estos nombres coincidan con tu paquete de utilidades
 import com.gruposanangel.delivery.utilidades.MedidorDeMetaPremium
 import com.gruposanangel.delivery.utilidades.PreferenciasMetas
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import java.io.File
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
 data class TicketVenta(
-    val id: Long,
+    val id: String,
     val cliente: String,
     val total: Double,
     val fecha: Date,
@@ -54,13 +56,16 @@ fun PaginaVentaScreen(
 ) {
     val context = LocalContext.current
     val db = AppDatabase.getDatabase(context)
-    val inventarioRepo = RepositoryInventario(db.productoDao())
+    val firebaseDataSource = FirebaseDataSource()
+    val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
     val clienteDao = db.clienteDao()
+    val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
 
-    val viewModel: VistaModeloVenta = viewModel(
-        factory = VistaModeloVentaFactory(
+    val viewModel: VentaViewModel = viewModel(
+        factory = VentaViewModelFactory(
             repositoryInventario = inventarioRepo,
-            ventaRepository = ventaRepository
+            ventaRepository = ventaRepository,
+            repositoryUsuario = repoUsuario
         )
     )
 
@@ -69,22 +74,30 @@ fun PaginaVentaScreen(
     LaunchedEffect(Unit) {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@LaunchedEffect
         viewModel.cargarVentasHoy()
-        viewModel.descargarVentasDiaYRefrescar(uid)
+        viewModel.sincronizarVentasDia(uid)
     }
 
-    // Mapeo de datos (Room -> UI)
-    val ticketsHoy = ventasHoy.map { venta ->
-        // Nota: El runBlocking aquí puede ralentizar la UI.
-        // Idealmente el clienteId debería traer el objeto Cliente mediante un JOIN en el DAO.
-        val cliente = runBlocking { clienteDao.getClientePorId(venta.clienteId) }
-        TicketVenta(
-            id = venta.id,
-            cliente = venta.clienteNombre,
-            total = venta.total,
-            fecha = Date(venta.fecha),
-            sincronizado = venta.sincronizado,
-            fotoCliente = cliente?.fotografiaUrl ?: ""
-        )
+    // --- CORRECCIÓN: Mapeo asíncrono para evitar lag en el hilo principal ---
+    var ticketsHoy by remember { mutableStateOf<List<TicketVenta>>(emptyList()) }
+
+    LaunchedEffect(ventasHoy) {
+        val listaMapeada = withContext(Dispatchers.IO) {
+            ventasHoy.map { venta ->
+                // Usamos async para procesar cada ticket en paralelo de forma eficiente
+                async {
+                    val cliente = clienteDao.getClientePorId(venta.clienteId)
+                    TicketVenta(
+                        id = venta.id,
+                        cliente = venta.clienteNombre,
+                        total = venta.total,
+                        fecha = Date(venta.fecha),
+                        sincronizado = venta.sincronizado,
+                        fotoCliente = cliente?.fotografiaUrl ?: ""
+                    )
+                }
+            }.awaitAll()
+        }
+        ticketsHoy = listaMapeada
     }
 
     PaginaVentaContent(navController, ticketsHoy, viewModel)
@@ -94,7 +107,7 @@ fun PaginaVentaScreen(
 fun PaginaVentaContent(
     navController: NavController?,
     ticketsHoy: List<TicketVenta>,
-    viewModel: VistaModeloVenta? = null
+    viewModel: VentaViewModel? = null
 ) {
     val context = LocalContext.current
     val formatoMoneda = remember { NumberFormat.getCurrencyInstance(Locale("es", "MX")) }
@@ -227,7 +240,7 @@ fun PaginaVentaPreview() {
     // Datos de ejemplo para la vista previa
     val ticketsPreview = listOf(
         TicketVenta(
-            id = 101L,
+            id = "101",
             cliente = "Abarrotes La Pasadita",
             total = 1250.50,
             fecha = Date(),
@@ -235,7 +248,7 @@ fun PaginaVentaPreview() {
             fotoCliente = ""
         ),
         TicketVenta(
-            id = 102L,
+            id = "102",
             cliente = "Miscelánea Doña Mary",
             total = 450.00,
             fecha = Date(),
@@ -243,7 +256,7 @@ fun PaginaVentaPreview() {
             fotoCliente = ""
         ),
         TicketVenta(
-            id = 103L,
+            id = "103",
             cliente = "Carnicería El Torito",
             total = 2800.00,
             fecha = Date(),

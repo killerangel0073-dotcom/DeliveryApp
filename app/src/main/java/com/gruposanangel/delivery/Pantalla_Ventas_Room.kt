@@ -74,7 +74,7 @@ class VentasRoomViewModel(
         }
     }
 
-    suspend fun obtenerProductosVenta(ventaId: Long): List<Plantilla_Producto> {
+    suspend fun obtenerProductosVenta(ventaId: String): List<Plantilla_Producto> {
         val detalles = ventaRepository.obtenerDetallesDeVenta(ventaId)
         return detalles.map {
             Plantilla_Producto(id = it.productoId, nombre = it.nombre, precio = it.precio, cantidad = it.cantidad)

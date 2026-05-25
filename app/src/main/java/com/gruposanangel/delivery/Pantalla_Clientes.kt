@@ -14,9 +14,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,32 +27,27 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.gruposanangel.delivery.Plantilla_Cliente
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.RepositoryCliente
 import kotlinx.coroutines.launch
 import java.io.File
 
-
-
-
-
 @Composable
 fun CarritoAnimado(onClick: () -> Unit) {
     val infiniteTransition = rememberInfiniteTransition()
 
-    // Animación de pulso infinito
+    // Animación de pulso infinito original que a ti te gusta
     val scaleBase by infiniteTransition.animateFloat(
         initialValue = 1f,
         targetValue = 1.2f,
         animationSpec = infiniteRepeatable(
-
             animation = tween(1200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         )
@@ -60,13 +55,12 @@ fun CarritoAnimado(onClick: () -> Unit) {
 
     var scaleExtra by remember { mutableStateOf(1f) }
     val scale = scaleBase * scaleExtra
-
-    val scope = rememberCoroutineScope() // <--- coroutine scope para clicks
+    val scope = rememberCoroutineScope()
 
     Icon(
         imageVector = Icons.Default.ShoppingCart,
         contentDescription = "Ver ventas",
-        tint = Color(0xFFFF0000),
+        tint = Color(0xFFFF0000), // Tu rojo brillante original
         modifier = Modifier
             .size(32.dp)
             .graphicsLayer {
@@ -74,7 +68,6 @@ fun CarritoAnimado(onClick: () -> Unit) {
                 scaleY = scale
             }
             .clickable {
-                // Animación de click llamativa
                 scaleExtra = 1.5f
                 onClick()
                 scope.launch {
@@ -84,42 +77,26 @@ fun CarritoAnimado(onClick: () -> Unit) {
             }
     )
 }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaClientes(navController: NavController, repository: RepositoryCliente) {
-    // Guardamos la búsqueda (rememberSaveable si quieres persistir en rotaciones)
-    var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
-    var buscando by remember { mutableStateOf(false) }
-
-    // Carga los clientes desde la base de datos local (Flow -> State)
-    val clientesLocal by repository.obtenerClientesLocal().collectAsState(initial = emptyList())
-
-    // Lista filtrada memorizada: se recalcula sólo cuando cambia la búsqueda o la lista local
-    val listaFiltradaState = remember(textFieldValue.text, clientesLocal) {
-        derivedStateOf {
-            val lista = if (buscando && textFieldValue.text.isNotBlank()) {
-                clientesLocal.filter { it.nombreNegocio.contains(textFieldValue.text, ignoreCase = true) }
-            } else {
-                clientesLocal
-            }
-            // Mapear a Plantilla_Cliente
-            lista.map { dbItem ->
-                Plantilla_Cliente(
-                    id = dbItem.id,
-                    nombreNegocio = dbItem.nombreNegocio,
-                    nombreDueno = dbItem.nombreDueno,
-                    fotografiaCliente = dbItem.fotografiaUrl ?: "",
-                    activo = dbItem.activo
-                )
+    val viewModel: ClienteViewModel = viewModel(
+        factory = object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return ClienteViewModel(repository) as T
             }
         }
-    }
-    val listaFiltrada by listaFiltradaState
+    )
 
+    val uiState by viewModel.uiState.collectAsState()
+
+    // Regresamos al fondo Blanco Puro original de tu diseño
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // BUSCADOR
+            // BUSCADOR (Tu estilo original con la lupa añadida para guiar al ojo)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -127,12 +104,12 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextField(
-                    value = textFieldValue,
-                    onValueChange = {
-                        textFieldValue = it
-                        buscando = it.text.isNotEmpty()
-                    },
+                    value = uiState.searchQuery,
+                    onValueChange = { viewModel.onSearchQueryChanged(it) },
                     placeholder = { Text("Buscar Cliente", color = Color(0xFF888888)) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF888888))
+                    },
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color(0xFFF5F5F5),
                         unfocusedContainerColor = Color(0xFFF5F5F5),
@@ -141,43 +118,39 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
                         unfocusedIndicatorColor = Color.Transparent
                     ),
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .height(52.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .padding(horizontal = 12.dp)
                 )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Si no hay clientes -> mensaje vacío
-            if (listaFiltrada.isEmpty()) {
+            if (uiState.isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color.Red)
+                }
+            } else if (uiState.clientes.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = if (clientesLocal.isEmpty()) "No hay clientes registrados" else "No se encontraron coincidencias",
+                        text = "No se encontraron clientes",
                         color = Color(0xFF666666),
                         fontSize = 16.sp
                     )
                 }
             } else {
-                // LISTA DE CLIENTES
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(listaFiltrada, key = { it.id }) { cliente ->
+                    items(uiState.clientes, key = { it.id }) { cliente ->
+                        // Tus tarjetas con sombra pesada de 8.dp original
                         Card(
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 6.dp)
                                 .clickable {
-                                    // Navegar a pantalla de ventas con el cliente seleccionado
-                                   // navController.navigate("pantalla_ventas2/${cliente.id}")
-
                                     navController.navigate("detalle_cliente/${cliente.id}?origen=Clientes") {
                                         launchSingleTop = true
                                     }
-
-
-
                                 },
                             colors = CardDefaults.cardColors(containerColor = Color.White),
                             elevation = CardDefaults.cardElevation(8.dp)
@@ -186,21 +159,6 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
                                 modifier = Modifier.padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-
-
-                                //IMAGEN LA TOMABA DE FIREBASE
-                                // Construir modelo de imagen robusto: si es ruta local, usar Uri.fromFile
-                                val imageModel2 = remember(cliente.fotografiaCliente) {
-                                    val path = cliente.fotografiaCliente
-                                    if (path.isNotBlank()) {
-                                        val f = File(path)
-                                        if (f.exists()) Uri.fromFile(f) else path
-                                    } else null
-                                }
-
-
-                                //USA LA IMAGEN DE LA BASE DE DATOS LOCAL DE DISPOSITIVO
-                                // Construir modelo de imagen robusto: si es ruta local, usar Uri.fromFile
                                 val imageModel = remember(cliente.fotografiaCliente) {
                                     val path = cliente.fotografiaCliente
                                     if (path.isBlank()) {
@@ -208,14 +166,12 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
                                     } else {
                                         val file = File(path)
                                         if (file.exists()) {
-                                            Uri.fromFile(file) // ✅ SOLO almacenamiento local
+                                            Uri.fromFile(file)
                                         } else {
-                                            null               // ❌ NUNCA remoto
+                                            null
                                         }
                                     }
                                 }
-
-
 
                                 AsyncImage(
                                     model = imageModel,
@@ -244,19 +200,10 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
                                     )
                                 }
 
-
-
-
+                                // Tu carrito parpadeante original
                                 CarritoAnimado {
-                                    navController.navigate("pantalla_ventas2/${cliente.id}")
+                                    navController.navigate("pantalla_ventas/${cliente.id}")
                                 }
-
-
-
-
-
-
-
                             }
                         }
                     }
@@ -264,140 +211,8 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
             }
         }
 
-
-
-
-
-
-        // BOTÓN FLOTANTE que navega a CrearClienteScreen
         FloatingActionButton(
             onClick = { navController.navigate("crear_cliente") },
-            containerColor = Color(0xFFFF0000),
-            contentColor = Color.White,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp)
-        ) {
-            Icon(Icons.Default.PersonAdd, contentDescription = "Agregar Cliente")
-        }
-    }
-}
-
-
-
-
-
-@Preview(showBackground = true)
-@Composable
-fun PantallaClientesPreview() {
-    val clientesPreview = listOf(
-        Plantilla_Cliente("1", "Negocio 1", "Dueño 1", "", true),
-        Plantilla_Cliente("2", "Negocio 2", "Dueño 2", "", false),
-        Plantilla_Cliente("3", "Negocio 3", "Dueño 3", "", true)
-    )
-
-    Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
-        Column(modifier = Modifier.fillMaxSize()) {
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextField(
-                    value = TextFieldValue(""),
-                    onValueChange = {},
-                    placeholder = { Text("Buscar Cliente", color = Color(0xFF888888)) },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFFF5F5F5),
-                        unfocusedContainerColor = Color(0xFFF5F5F5),
-                        cursorColor = Color(0xFFB71C1C),
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .padding(horizontal = 12.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(clientesPreview) { cliente ->
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        elevation = CardDefaults.cardElevation(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AsyncImage(
-                                model = cliente.fotografiaCliente,
-                                contentDescription = cliente.nombreNegocio,
-                                placeholder = painterResource(R.drawable.repartidor),
-                                error = painterResource(R.drawable.repartidor),
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(80.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                            )
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    cliente.nombreNegocio,
-                                    color = Color.Black,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp
-                                )
-                                Text(
-                                    cliente.nombreDueno,
-                                    color = Color(0xFF555555),
-                                    fontSize = 14.sp
-                                )
-                            }
-
-
-
-
-
-
-                            Icon(
-                                imageVector = Icons.Default.ShoppingCart, // o el icono que quieras
-                                contentDescription = "Ver ventas",
-                                tint = Color(0xFFFF0000), // rojo
-
-                                modifier = Modifier
-                                    .size(32.dp)
-
-                            )
-
-
-
-
-
-
-                        }
-
-
-
-                    }
-                }
-            }
-        }
-
-        FloatingActionButton(
-            onClick = {},
             containerColor = Color(0xFFFF0000),
             contentColor = Color.White,
             modifier = Modifier

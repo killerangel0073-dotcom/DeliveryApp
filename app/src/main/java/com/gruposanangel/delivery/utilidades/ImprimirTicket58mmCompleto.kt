@@ -20,7 +20,7 @@ fun ImprimirTicket58mmCompleto(
     cliente: String,
     productos: List<com.gruposanangel.delivery.model.Plantilla_Producto>,
     // parámetros opcionales extra (para imprimir exactamente lo guardado en DB)
-    ventaId: Long? = null,
+    ventaId: String? = null,
     fechaVenta: java.util.Date? = null,
     totalVenta: Double? = null,
     vendedorNombre: String? = null,

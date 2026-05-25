@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -29,7 +30,10 @@ import com.gruposanangel.delivery.model.Plantila_carga
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import java.util.Locale
 import com.gruposanangel.delivery.utilidades.DialogoConfirmacion
-
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.gruposanangel.delivery.data.AppDatabase
+import com.gruposanangel.delivery.data.FirebaseDataSource
+import com.gruposanangel.delivery.data.RepositoryInventario
 
 @Composable
 fun PantallaDetalleCarga(
@@ -37,6 +41,14 @@ fun PantallaDetalleCarga(
     plantilacarga: Plantila_carga? = null
 ) {
     val isPreview = LocalInspectionMode.current
+    val context = LocalContext.current
+    val db = AppDatabase.getDatabase(context)
+    val firebaseDataSource = FirebaseDataSource()
+    val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+
+    val viewModel: DetalleCargaViewModel = viewModel(
+        factory = DetalleCargaViewModelFactory(inventarioRepo)
+    )
 
     // 🔹 CORRECCIÓN AQUÍ: Buscamos en 'previousBackStackEntry' porque ahí lo guardó Notificaciones
     val cargaBase = remember {
@@ -263,10 +275,16 @@ fun PantallaDetalleCarga(
             onConfirmar = {
                 mostrarDialog = false
                 if (!isPreview) {
-                    FirebaseFirestore.getInstance().collection("ordenesTransferencia")
-                        .document(cargaBase?.id ?: "")
-                        .update("estado", "ACEPTADA")
-                        .addOnSuccessListener { navController.popBackStack() }
+                    // 🔥 ACTUALIZACIÓN: Aplicar carga localmente PRIMERO (Room)
+                    viewModel.aceptarCargaLocal(listaCompletaProductos) {
+                        // Luego informar a la nube (Firestore)
+                        FirebaseFirestore.getInstance().collection("ordenesTransferencia")
+                            .document(cargaBase?.id ?: "")
+                            .update("estado", "ACEPTADA")
+                            .addOnSuccessListener {
+                                navController.popBackStack()
+                            }
+                    }
                 }
             },
             onCancelar = { mostrarDialog = false }

@@ -2,52 +2,56 @@ package com.gruposanangel.delivery
 
 import android.util.Log
 import com.google.firebase.firestore.DocumentReference
-import com.google.firebase.firestore.FirebaseFirestore
+import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.data.UsuarioDao
 import com.gruposanangel.delivery.data.UsuarioEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.tasks.await
 
+/**
+ * Repositorio de Usuarios refactorizado para Delisa Botanas.
+ * Centraliza la lógica de negocio del perfil con un enfoque Offline-First.
+ */
+class RepositoryUsuario(
+    private val firebaseDataSource: FirebaseDataSource,
+    private val usuarioDao: UsuarioDao
+) {
 
-class RepositoryUsuario(private val usuarioDao: UsuarioDao) {
+    /**
+     * Realiza el login en Firebase.
+     */
+    suspend fun login(email: String, password: String): String {
+        return firebaseDataSource.login(email, password)
+    }
 
-    suspend fun sincronizarVendedorLocal(uid: String) {
+    /**
+     * Sincroniza los datos del usuario desde Firebase a la base de datos local (Room).
+     */
+    suspend fun syncUsuario(uid: String) {
         try {
-            val doc = FirebaseFirestore.getInstance().collection("users").document(uid).get().await()
+            val userData = firebaseDataSource.descargarPerfilUsuario(uid) ?: return
 
-            // Campos básicos
-            val nombre = doc.getString("nombre") ?: "Desconocido"
-            val email = doc.getString("email")
-            val photoUrl = doc.getString("photo_url")
-            val puestoTrabajo = doc.getString("puestoTrabajo")
-            val licencia = doc.getString("licenciaConducir")
+            val nombre = userData["nombre"] as? String ?: "Desconocido"
+            val email = userData["email"] as? String
+            val photoUrl = userData["photo_url"] as? String
+            val puestoTrabajo = userData["puestoTrabajo"] as? String
+            val licencia = userData["licenciaConducir"] as? String
+            val activo = userData["activo"] as? Boolean
+            val createdTime = (userData["created_time"] as? com.google.firebase.Timestamp)?.toDate()?.time
+            val credencialElector = userData["credencialElector"] as? String
 
-            // Campos nuevos desde Firestore
-            val activo = doc.getBoolean("activo")
-            val createdTime = doc.getTimestamp("created_time")?.toDate()?.time
-            val credencialElector = doc.getString("credencialElector")
-
-            // fcmTokens -> List<String>
-            val fcmRaw = doc.get("fcmTokens") as? List<*>
-            val fcmTokens = fcmRaw?.mapNotNull { it?.toString() } ?: emptyList()
-
-
-            // jefeDirecto -> guardar id o path y obtener nombre
-            val jefeDirectoRef = doc.get("jefeDirecto") as? DocumentReference
+            // jefeDirecto
+            val jefeDirectoRef = userData["jefeDirecto"] as? DocumentReference
             var jefeDirectoId: String? = null
             var jefeDirectoNombre: String? = null
-
             if (jefeDirectoRef != null) {
                 jefeDirectoId = jefeDirectoRef.id
-                // Obtener documento del jefe
                 val jefeSnap = jefeDirectoRef.get().await()
-                jefeDirectoNombre = jefeSnap.getString("nombre") ?: jefeDirectoRef.id
+                jefeDirectoNombre = jefeSnap.getString("nombre") ?: jefeDirectoId
             }
 
-
-
-            // Ruta asignada (DocumentReference) -> extraer id y nombre (fallback a id)
-            val rutaRef = doc.get("rutaAsignada") as? DocumentReference
+            // Ruta y Almacen asignado
+            val rutaRef = userData["rutaAsignada"] as? DocumentReference
             var ultimaRutaId: String? = null
             var ultimaRutaNombre: String? = null
             var ultimoAlmacenId: String? = null
@@ -66,8 +70,7 @@ class RepositoryUsuario(private val usuarioDao: UsuarioDao) {
                 }
             }
 
-            // Crear la entidad completa
-            val vendedor = UsuarioEntity(
+            val entity = UsuarioEntity(
                 uid = uid,
                 nombre = nombre,
                 email = email,
@@ -78,29 +81,58 @@ class RepositoryUsuario(private val usuarioDao: UsuarioDao) {
                 createdTime = createdTime,
                 credencialElector = credencialElector,
                 jefeDirectoId = jefeDirectoId,
-                jefeDirectoNombre = jefeDirectoNombre, // <-- NUEVO
+                jefeDirectoNombre = jefeDirectoNombre,
                 ultimaRutaId = ultimaRutaId,
                 ultimaRutaNombre = ultimaRutaNombre,
                 ultimoAlmacenId = ultimoAlmacenId,
                 ultimoAlmacenNombre = ultimoAlmacenNombre
             )
 
-            // Guardar en Room (REPLACE)
+            // Guardar en Room (reemplazando cualquier sesión anterior)
             usuarioDao.limpiarTabla()
-            usuarioDao.insertar(vendedor)
+            usuarioDao.insertar(entity)
+            Log.d("RepositoryUsuario", "Usuario sincronizado y guardado en local: $uid")
 
         } catch (e: Exception) {
-            Log.e("RepoUsuario", "Error sincronizando vendedor local: ${e.message}", e)
+            Log.e("RepositoryUsuario", "Error al sincronizar usuario: ${e.message}", e)
         }
     }
 
-    // --- Lectura local ---
+    /**
+     * Devuelve un Flow del usuario actual directamente desde Room para reactividad en la UI.
+     */
+    fun getUsuarioActual(): Flow<UsuarioEntity?> {
+        return usuarioDao.obtenerUsuarioActualFlow()
+    }
+
+    /**
+     * Obtiene el UID actual (si existe sesión activa en Firebase).
+     */
+    fun getUidActual(): String? = firebaseDataSource.getUidActual()
+
+    /**
+     * Cierra la sesión en Firebase y limpia los datos locales en Room.
+     */
+    suspend fun cerrarSesion() {
+        firebaseDataSource.cerrarSesion()
+        usuarioDao.limpiarTabla()
+    }
+
+    suspend fun obtenerTokenSupervisor(): String? {
+        return firebaseDataSource.obtenerTokenSupervisor()
+    }
+
+    // --- MÉTODOS DE COMPATIBILIDAD ---
+
+    suspend fun obtenerUsuarioActual(): UsuarioEntity? {
+        return usuarioDao.obtenerUsuarioActual()
+    }
+
+    suspend fun sincronizarVendedorLocal(uid: String) {
+        syncUsuario(uid)
+    }
+
     suspend fun obtenerUsuarioLocal(uid: String): UsuarioEntity? {
         return usuarioDao.obtenerPorId(uid)
     }
-
-    fun obtenerUsuarioLocalFlow(uid: String): Flow<UsuarioEntity?> {
-        return usuarioDao.obtenerPorIdFlow(uid)
-    }
 }
-

@@ -3,6 +3,7 @@ package com.gruposanangel.delivery.utilidades
 import android.content.Context
 import android.graphics.pdf.PdfDocument
 import android.os.Environment
+import com.google.firebase.auth.FirebaseAuth
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import java.io.File
@@ -86,7 +87,8 @@ fun GeneraPDFdeVenta(
     canvas.drawText("Grupo Corporativo San Angel", (pageWidth / 2).toFloat(), y.toFloat(), paintCenter)
     y += 35
 
-    canvas.drawText("Vendedor: Lizeth Vanessa Flores Corona", 0f, y.toFloat(), paintLeft)
+    val nombreVendedor = FirebaseAuth.getInstance().currentUser?.displayName ?: "Vendedor"
+    canvas.drawText("Vendedor: $nombreVendedor", 0f, y.toFloat(), paintLeft)
     y += lineHeight
     canvas.drawText("Cliente: $nombreCliente", 0f, y.toFloat(), paintLeft)
     y += lineHeight

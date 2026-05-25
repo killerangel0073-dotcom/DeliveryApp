@@ -23,21 +23,33 @@ import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.tooling.preview.Preview
-import com.google.firebase.auth.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.data.AppDatabase
+import com.gruposanangel.delivery.data.FirebaseDataSource
+import com.gruposanangel.delivery.ui.screens.LoginViewModel
+import com.gruposanangel.delivery.ui.screens.LoginViewModelFactory
 import kotlinx.coroutines.delay
 import com.gruposanangel.delivery.R
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
 fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
+    val context = LocalContext.current
+    val db = AppDatabase.getDatabase(context)
+    val firebaseDataSource = FirebaseDataSource()
+    val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
 
-    // -------------------- STATE --------------------
+    val viewModel: LoginViewModel = viewModel(
+        factory = LoginViewModelFactory(repoUsuario)
+    )
+    val uiState by viewModel.uiState.collectAsState()
+
+    // -------------------- STATE LOCAL (Solo UI) --------------------
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var loginSuccess by remember { mutableStateOf(false) }
 
     // Entrada escalonada
     var showEmail by remember { mutableStateOf(false) }
@@ -53,8 +65,8 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
         showButton = true
     }
 
-    LaunchedEffect(loginSuccess) {
-        if (loginSuccess) {
+    LaunchedEffect(uiState.loginSuccess) {
+        if (uiState.loginSuccess) {
             delay(200)
             onLoginSuccess()
         }
@@ -67,12 +79,12 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
     )
 
     val buttonWidth by animateDpAsState(
-        targetValue = if (loading) 52.dp else 200.dp,
+        targetValue = if (uiState.isLoading) 52.dp else 200.dp,
         animationSpec = tween(300)
     )
 
     val buttonCorner by animateDpAsState(
-        targetValue = if (loading) 50.dp else 14.dp,
+        targetValue = if (uiState.isLoading) 50.dp else 14.dp,
         animationSpec = tween(300)
     )
 
@@ -80,13 +92,27 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
     Box(
         modifier = Modifier.fillMaxSize()
     ) {
-        // 🔹 Fondo
-        Image(
-            painter = painterResource(R.drawable.fondologin),
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+
+            // 🔹 IMAGEN ARRIBA
+            Image(
+                painter = painterResource(R.drawable.fondo_mapa),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f), // ocupa casi toda la pantalla
+                contentScale = ContentScale.Crop
+            )
+
+
+        }
+
+
+
+
 
         // 🔹 Overlay oscuro para contraste
         Box(
@@ -107,6 +133,32 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
+
+
+                Image(
+                    painter = painterResource(id = R.drawable.logotipo),
+                    contentDescription = "Logo",
+                    modifier = Modifier
+                        .size(180.dp)
+                        .padding(bottom = 20.dp),
+                    contentScale = ContentScale.Fit
+                )
+
+                Text(
+                    text = "Grupo San Ángel",
+                    color = Color.White,
+                    fontSize = 30.sp
+                )
+
+                // 🔹 TEXTO ABAJO
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+
+                }
                 // EMAIL
                 AnimatedVisibility(visible = showEmail, enter = enterAnim) {
                     OutlinedTextField(
@@ -127,6 +179,7 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
                         )
                     )
                 }
+
 
                 // PASSWORD
                 AnimatedVisibility(visible = showPassword, enter = enterAnim) {
@@ -160,7 +213,7 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
 
                 // ERROR ANIMADO
                 AnimatedVisibility(
-                    visible = errorMessage != null,
+                    visible = uiState.errorMessage != null,
                     enter = slideInVertically { -it } + fadeIn(),
                     exit = slideOutVertically { -it } + fadeOut()
                 ) {
@@ -171,7 +224,7 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
                             .padding(12.dp)
                     ) {
                         Text(
-                            errorMessage.orEmpty(),
+                            uiState.errorMessage.orEmpty(),
                             color = Color(0xFFD32F2F),
                             fontSize = 14.sp
                         )
@@ -183,46 +236,22 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
                 // BUTTON MORPH → LOADING
                 AnimatedVisibility(visible = showButton, enter = enterAnim) {
                     Button(
-                        onClick = {
-                            if (email.isBlank() || password.isBlank()) {
-                                errorMessage = "Por favor, llena todos los campos"
-                                return@Button
-                            }
-
-                            loading = true
-                            errorMessage = null
-
-                            FirebaseAuth.getInstance()
-                                .signInWithEmailAndPassword(email.trim(), password.trim())
-                                .addOnCompleteListener { task ->
-                                    loading = false
-                                    if (task.isSuccessful) {
-                                        loginSuccess = true
-                                    } else {
-                                        errorMessage = when (task.exception) {
-                                            is FirebaseAuthInvalidUserException,
-                                            is FirebaseAuthInvalidCredentialsException ->
-                                                "Usuario o contraseña incorrectos"
-                                            else -> "Error al iniciar sesión"
-                                        }
-                                    }
-                                }
-                        },
+                        onClick = { viewModel.login(email, password) },
                         modifier = Modifier
-                            .height(52.dp)
+                            .height(70.dp)
                             .width(buttonWidth),
                         shape = RoundedCornerShape(buttonCorner),
-                        enabled = !loading,
+                        enabled = !uiState.isLoading,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000))
                     ) {
-                        if (loading) {
+                        if (uiState.isLoading) {
                             CircularProgressIndicator(
                                 color = Color.White,
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(24.dp)
                             )
                         } else {
-                            Text("Iniciar sesión", color = Color.White, fontSize = 16.sp)
+                            Text("Iniciar sesión", color = Color.White, fontSize = 20.sp)
                         }
                     }
                 }
@@ -233,6 +262,51 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
 
 @Preview(showBackground = true)
 @Composable
-fun PantallaLoginProPreview() {
-    PantallaLoginPro {}
+fun PreviewLogin() {
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF2F2F2))
+    ) {
+
+        Column(
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+        ) {
+
+            Image(
+                painter = painterResource(id = R.drawable.logotipo),
+                contentDescription = null,
+                modifier = Modifier.size(140.dp)
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            OutlinedTextField(
+                value = "",
+                onValueChange = {},
+                label = { Text("Email") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = "",
+                onValueChange = {},
+                label = { Text("Password") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Button(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+                Text("Login")
+            }
+        }
+    }
 }

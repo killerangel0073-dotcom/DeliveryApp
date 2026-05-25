@@ -23,6 +23,14 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.data.AppDatabase
+import com.gruposanangel.delivery.data.FirebaseDataSource
+import com.gruposanangel.delivery.ui.screens.InventarioViewModel
+import com.gruposanangel.delivery.ui.screens.InventarioViewModelFactory
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +39,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -288,7 +297,7 @@ fun AnimatedNotificationButton(
     }
 }
 
-// ---------- UI PRINCIPAL PURA (para preview y pruebas) ----------
+
 @Composable
 fun PantallaInventarioContent(
     navController: NavController,
@@ -296,31 +305,12 @@ fun PantallaInventarioContent(
     listaDeNotificaciones: List<Notificacion> = emptyList(),
     rutaAsignada: String? = null,
     rutaCargada: Boolean = true,
-
+    puestoTrabajo: String? = null
 ) {
 
     val categorias = listOf("Cacahuates", "Semillas", "Gomitas", "Chocolates", "Dulces")
     val totalProductos by remember(plantillaProductos) { mutableStateOf(plantillaProductos.sumOf { it.cantidad }) }
     val valorTotal by remember(plantillaProductos) { mutableStateOf(plantillaProductos.sumOf { it.cantidad * it.precio }) }
-
-
-
-
-    var puestoTrabajo by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        // Aquí obtienes el puesto del usuario de Firestore
-        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
-        if (uid != null) {
-            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-            db.collection("users").document(uid).get()
-                .addOnSuccessListener { doc ->
-                    puestoTrabajo = doc.getString("puestoTrabajo")
-                }
-        }
-    }
-
-
 
     Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -494,127 +484,26 @@ fun PantallaInventario(
     navController: NavController,
     inventarioRepo: RepositoryInventario
 ) {
-    val productosEntityState = inventarioRepo
-        .obtenerProductosLocal()
-        .collectAsState(initial = emptyList())
+    val context = LocalContext.current
+    val db = AppDatabase.getDatabase(context)
+    val firebaseDataSource = FirebaseDataSource()
+    val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
 
-    val productos = remember(productosEntityState.value) {
-        productosEntityState.value.map { it.toModel() }
-    }
+    // Usamos el nuevo ViewModel para centralizar la lógica con el factory correcto
+    val viewModel: InventarioViewModel = viewModel(
+        factory = InventarioViewModelFactory(inventarioRepo, repoUsuario)
+    )
 
-    val notificaciones = remember { mutableStateListOf<Notificacion>() }
+    val uiState by viewModel.uiState.collectAsState()
 
-    val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
-
-    // Estado de la ruta
-    var rutaAsignada by remember { mutableStateOf<String?>(null) }
-    var rutaCargada by remember { mutableStateOf(false) } // saber si ya intentamos cargar
-
-    val formatoFecha = remember {
-        java.text.SimpleDateFormat("EEEE, dd 'de' MMMM 'de' yyyy, hh:mm a", java.util.Locale("es", "MX"))
-    }
-
-    // ListenerRegistration guardado para evitar fugas
-    val listenerReg = remember { mutableStateOf<ListenerRegistration?>(null) }
-
-    LaunchedEffect(uid) {
-        if (uid == null) {
-            rutaAsignada = null
-            rutaCargada = true
-            return@LaunchedEffect
-        }
-        val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-
-        db.collection("users")
-            .whereEqualTo("uid", uid)
-            .get()
-            .addOnSuccessListener { querySnapshot ->
-                val userDoc = querySnapshot.documents.firstOrNull()
-                if (userDoc == null) {
-                    rutaAsignada = null
-                    rutaCargada = true
-                    return@addOnSuccessListener
-                }
-
-                val rutaAsignadaRef = userDoc.getDocumentReference("rutaAsignada")
-
-                if (rutaAsignadaRef == null) {
-                    rutaAsignada = null
-                    rutaCargada = true
-                } else {
-                    rutaAsignadaRef.get().addOnSuccessListener { rutaSnap ->
-                        val almacenRef = rutaSnap.getDocumentReference("almacenAsignado")
-                        if (almacenRef == null) {
-                            rutaAsignada = null
-                            rutaCargada = true
-                            return@addOnSuccessListener
-                        }
-
-                        almacenRef.get().addOnSuccessListener { almacenSnap ->
-                            val nombreAlmacen = almacenSnap.getString("nombre")
-                            if (!nombreAlmacen.isNullOrEmpty()) {
-                                rutaAsignada = nombreAlmacen
-
-                                // 👇 Aquí escuchamos las notificaciones en tiempo real
-                                // Guardamos la ListenerRegistration para luego removerla y evitar fugas
-                                listenerReg.value = db.collection("ordenesTransferencia")
-                                    .whereEqualTo("destino", nombreAlmacen)
-                                    .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                                    .addSnapshotListener { snapshots, error ->
-                                        if (error != null) return@addSnapshotListener
-                                        if (snapshots != null) {
-                                            val nuevas = snapshots.documents.mapNotNull { doc ->
-                                                val estado = doc.getString("estado")
-                                                if (estado == "PENDIENTE") {
-                                                    val fecha = doc.getTimestamp("timestamp")?.toDate()
-                                                    val fechaFormateada = fecha?.let { formatoFecha.format(it) } ?: ""
-                                                    Notificacion(
-                                                        id = doc.id,
-                                                        titulo = "Carga de Almacén",
-                                                        mensaje = "Nueva carga pendiente",
-                                                        fecha = fechaFormateada,
-                                                        esCarga = true,
-                                                        aceptada = false
-                                                    )
-                                                } else {
-                                                    null
-                                                }
-                                            }
-                                            notificaciones.clear()
-                                            notificaciones.addAll(nuevas)
-                                        }
-                                    }
-
-                            } else {
-                                rutaAsignada = null
-                            }
-                            rutaCargada = true
-                        }.addOnFailureListener {
-                            rutaAsignada = null
-                            rutaCargada = true
-                        }
-                    }.addOnFailureListener {
-                        rutaAsignada = null
-                        rutaCargada = true
-                    }
-                }
-            }
-            .addOnFailureListener {
-                rutaAsignada = null
-                rutaCargada = true
-            }
-    }
-
-    // Remover listener cuando uid cambie o composable se dispose
-    DisposableEffect(key1 = uid) {
-        onDispose {
-            listenerReg.value?.remove()
-            listenerReg.value = null
-        }
-    }
-
-    // Siempre renderizamos la pantalla completa (el contenido decide qué mostrar en el área de productos)
-    PantallaInventarioContent(navController, productos, notificaciones, rutaAsignada, rutaCargada,)
+    PantallaInventarioContent(
+        navController = navController,
+        plantillaProductos = uiState.productos,
+        listaDeNotificaciones = uiState.notificaciones,
+        rutaAsignada = uiState.rutaAsignada,
+        rutaCargada = !uiState.isLoading,
+        puestoTrabajo = uiState.puestoTrabajo
+    )
 }
 
 // ---------- INTERFAZ DE REPO ----------

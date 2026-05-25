@@ -8,25 +8,33 @@ fun scheduleSyncWorkers(context: Context) {
         .setRequiredNetworkType(NetworkType.CONNECTED) // Solo con internet
         .build()
 
-    val syncClientesRequest = PeriodicWorkRequestBuilder<SincronizarClientesWorker>(
-        15, java.util.concurrent.TimeUnit.MINUTES
-    ).setConstraints(constraints)
+    // 1. Worker de Clientes (Base de la cadena)
+    val syncClientesRequest = OneTimeWorkRequestBuilder<SincronizarClientesWorker>()
+        .setConstraints(constraints)
+        .addTag("SyncChain")
         .build()
 
-    val syncVentasRequest = PeriodicWorkRequestBuilder<SincronizarVentasWorker>(
-        15, java.util.concurrent.TimeUnit.MINUTES
-    ).setConstraints(constraints)
+    // 2. Worker de Ventas (Dependiente de Clientes)
+    val syncVentasRequest = OneTimeWorkRequestBuilder<SincronizarVentasWorker>()
+        .setConstraints(constraints)
+        .addTag("SyncChain")
         .build()
 
-    WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-        "SincronizarClientes",
-        ExistingPeriodicWorkPolicy.KEEP,
-        syncClientesRequest
-    )
+    // Encadenamiento: Primero Clientes, luego Ventas
+    WorkManager.getInstance(context)
+        .beginUniqueWork("SincronizacionTotal", ExistingWorkPolicy.KEEP, syncClientesRequest)
+        .then(syncVentasRequest)
+        .enqueue()
 
-    WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-        "SincronizarVentas",
-        ExistingPeriodicWorkPolicy.KEEP,
-        syncVentasRequest
-    )
+    // Mantener la programación periódica para mantenimiento de fondo
+    val periodicClientes = PeriodicWorkRequestBuilder<SincronizarClientesWorker>(15, java.util.concurrent.TimeUnit.MINUTES)
+        .setConstraints(constraints)
+        .build()
+
+    val periodicVentas = PeriodicWorkRequestBuilder<SincronizarVentasWorker>(15, java.util.concurrent.TimeUnit.MINUTES)
+        .setConstraints(constraints)
+        .build()
+
+    WorkManager.getInstance(context).enqueueUniquePeriodicWork("PeriodicClientes", ExistingPeriodicWorkPolicy.KEEP, periodicClientes)
+    WorkManager.getInstance(context).enqueueUniquePeriodicWork("PeriodicVentas", ExistingPeriodicWorkPolicy.KEEP, periodicVentas)
 }

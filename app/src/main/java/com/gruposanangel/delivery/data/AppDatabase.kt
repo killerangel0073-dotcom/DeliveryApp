@@ -6,8 +6,15 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [ClienteEntity::class, ProductoEntity::class, VentaEntity::class, VentaDetalleEntity::class, UsuarioEntity::class],
-    version = 9 // subimos la versión
+    entities = [
+        ClienteEntity::class,
+        ProductoEntity::class,
+        VentaEntity::class,
+        VentaDetalleEntity::class,
+        UsuarioEntity::class
+    ],
+    version = 11,
+    exportSchema = true // Habilitado para soportar migraciones automáticas
 )
 abstract class AppDatabase : RoomDatabase() {
 
@@ -15,10 +22,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun productoDao(): ProductoDao
     abstract fun VentaDao(): VentaDao
     abstract fun usuarioDao(): UsuarioDao
-
-
-
-
 
     companion object {
         @Volatile
@@ -31,7 +34,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "mi_base_de_datos"
                 )
-                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigration() // 🔥 REHABILITADO: Permite recrear la DB si el esquema cambia
                     .build()
                 INSTANCE = instance
                 instance

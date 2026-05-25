@@ -4,28 +4,15 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothSocket
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -35,36 +22,22 @@ import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Addchart
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Battery2Bar
-import androidx.compose.material.icons.filled.Battery4Bar
-import androidx.compose.material.icons.filled.Battery6Bar
-import androidx.compose.material.icons.filled.BatteryAlert
-import androidx.compose.material.icons.filled.BatteryChargingFull
-import androidx.compose.material.icons.filled.BatteryFull
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.CancelPresentation
-import androidx.compose.material.icons.filled.GppMaybe
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PaintingStyle.Companion.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.messaging.FirebaseMessaging
-import com.gruposanangel.delivery.SegundoPlano.LocationService
+import com.gruposanangel.delivery.SegundoPlano.LocationState
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -73,64 +46,42 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
-import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import com.gruposanangel.delivery.utilidades.hayInternet
-import kotlin.math.cos
-import kotlin.math.sin
-import com.gruposanangel.delivery.SegundoPlano.LocationState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
-import com.gruposanangel.delivery.SegundoPlano.BatteryState
+import com.gruposanangel.delivery.utilidades.BatteryIndicator
 import kotlinx.coroutines.delay
 
-import com.gruposanangel.delivery.utilidades.BatteryIndicator
-
-
-
-
-
-private val bluetoothPermissions = arrayOf(
-    Manifest.permission.BLUETOOTH_CONNECT,
-    Manifest.permission.BLUETOOTH_SCAN
-)
+private val bluetoothPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
+} else {
+    arrayOf(Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN)
+}
 
 data class ProductoTicket(
     val nombre: String,
-    val cantidad: Int,
-    val precio: Double
+    val precio: Double,
+    val cantidad: Int
 )
 
-
+@SuppressLint("MissingPermission")
 @Composable
 fun Pantalla_Inicio(
-    navController: NavController, // <-- agregado
+    navController: NavController,
     onImpresoraSeleccionada: (BluetoothDevice) -> Unit = {}
 ) {
-
-
-
-
-
-// 1. Obtenemos el estado bruto (con kmh y timestamp)
-// 1. Suscripción limpia al estado global
     val estadoVelocidad by LocationState.velocidad.collectAsStateWithLifecycle()
+    var ticker by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-
-
-    // 2. El "Reloj" de la UI: Actualiza cada 500ms para reevaluar la frescura
-    var ticker by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
             delay(500)
             ticker = System.currentTimeMillis()
         }
     }
-
-    // 3. Lógica de Negocio Visual: Solo se recalcula si cambia el GPS o el Ticker
-
 
     val velocidadParaUI by remember(estadoVelocidad, ticker) {
         derivedStateOf {
@@ -139,41 +90,20 @@ fun Pantalla_Inicio(
         }
     }
 
-
-
-
-
-    var mostrarDialogo by remember { mutableStateOf(false) }
-
     val context = LocalContext.current
-    val estadoInternet = remember { mutableStateOf(hayInternet(context)) }
-    val fechaHora = remember { mutableStateOf("") }
+    var estadoInternet by remember { mutableStateOf(hayInternet(context)) }
+    var fechaHora by remember { mutableStateOf("") }
     val prefs = context.getSharedPreferences("impresora_prefs", Context.MODE_PRIVATE)
 
-
-
-
     LaunchedEffect(Unit) {
+        val formato = SimpleDateFormat("dd 'de' MMMM 'del' yyyy     hh:mm:ss a", Locale("es", "ES"))
         while (true) {
-            // Actualizamos la fecha/hora
-            val formato = SimpleDateFormat(
-                "dd 'de' MMMM 'del' yyyy     hh:mm:ss a",
-                Locale("es", "ES")
-            )
-            fechaHora.value = formato.format(Date())
-
-            // Actualizamos el estado de internet
-            estadoInternet.value = hayInternet(context)
-
-            kotlinx.coroutines.delay(1000) // cada segundo
+            fechaHora = formato.format(Date())
+            estadoInternet = hayInternet(context)
+            delay(1000)
         }
     }
 
-
-
-    val isPreview = LocalInspectionMode.current
-
-    // Estado para lista de dispositivos emparejados
     var pairedDevices by remember { mutableStateOf<List<BluetoothDevice>>(emptyList()) }
     var showPrinterDialog by remember { mutableStateOf(false) }
     var selectedPrinter by remember { mutableStateOf<BluetoothDevice?>(null) }
@@ -183,52 +113,33 @@ fun Pantalla_Inicio(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         hasBluetoothPermission = permissions.values.all { it }
-
-
         if (hasBluetoothPermission) {
             val adapter = BluetoothAdapter.getDefaultAdapter()
-            val dispositivos = adapter?.bondedDevices?.toList() ?: emptyList()
-            pairedDevices = dispositivos
-
-            if (dispositivos.isEmpty()) {
+            pairedDevices = adapter?.bondedDevices?.toList() ?: emptyList()
+            if (pairedDevices.isEmpty()) {
                 Toast.makeText(context, "No hay impresoras emparejadas", Toast.LENGTH_SHORT).show()
-                Log.d("Bluetooth", "Bonded devices vacíos")
-            } else {
-                Toast.makeText(context, "Se cargaron ${dispositivos.size} dispositivos emparejados", Toast.LENGTH_SHORT).show()
-                Log.d("Bluetooth", "Dispositivos: ${dispositivos.map { it.name }}")
             }
         } else {
             Toast.makeText(context, "Permisos de Bluetooth no otorgados", Toast.LENGTH_SHORT).show()
         }
-
     }
 
     LaunchedEffect(Unit) {
-        // Verificamos permisos
         hasBluetoothPermission = bluetoothPermissions.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
 
         if (hasBluetoothPermission) {
-            // Cargamos los dispositivos emparejados primero
             val adapter = BluetoothAdapter.getDefaultAdapter()
             pairedDevices = adapter?.bondedDevices?.toList() ?: emptyList()
         }
 
-        // Ahora buscamos la impresora guardada
         val savedAddress = prefs.getString("impresora_bluetooth", null)
         if (!savedAddress.isNullOrEmpty()) {
             selectedPrinter = pairedDevices.find { it.address == savedAddress }
             selectedPrinter?.let { onImpresoraSeleccionada(it) }
         }
     }
-
-
-
-
-
-
-
 
     var puestoTrabajo by remember { mutableStateOf<String?>(null) }
 
@@ -245,8 +156,6 @@ fun Pantalla_Inicio(
         }
     }
 
-
-
     Scaffold(
         floatingActionButton = {
             if (puedeVerFABInicio(puestoTrabajo)) {
@@ -254,202 +163,106 @@ fun Pantalla_Inicio(
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    FloatingActionButton(
+                        onClick = {
+                            if (!hasBluetoothPermission) {
+                                bluetoothPermissionLauncher.launch(bluetoothPermissions)
+                                return@FloatingActionButton
+                            }
+                            val adapter = BluetoothAdapter.getDefaultAdapter()
+                            pairedDevices = adapter?.bondedDevices?.toList() ?: emptyList()
+                            showPrinterDialog = true
+                        },
+                        containerColor = Color(0xFFFF0000),
+                        contentColor = Color.White
+                    ) {
+                        Icon(Icons.Default.Print, contentDescription = "Impresora")
+                    }
 
+                    FloatingActionButton(
+                        onClick = { navController.navigate("VENDEDOR_INFO_VENTAS") },
+                        containerColor = Color(0xFFFF0000),
+                        contentColor = Color.White
+                    ) {
+                        Icon(Icons.Default.BarChart, contentDescription = "Ventas del vendedor")
+                    }
 
+                    FloatingActionButton(
+                        onClick = { navController.navigate("ventas_room") },
+                        containerColor = Color(0xFFFF0000),
+                        contentColor = Color.White
+                    ) {
+                        Icon(Icons.Default.Addchart, contentDescription = "Ventas del vendedor")
+                    }
 
-
-
-
-                // 🖨️ IMPRESORA
-                FloatingActionButton(
-                    onClick = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasBluetoothPermission) {
-                            bluetoothPermissionLauncher.launch(bluetoothPermissions)
-                            return@FloatingActionButton
-                        }
-                        pairedDevices =
-                            BluetoothAdapter.getDefaultAdapter()?.bondedDevices?.toList() ?: emptyList()
-                        showPrinterDialog = true
-                    },
-                    containerColor = Color(0xFFFF0000),
-                    contentColor = Color.White
-                ) {
-                    Icon(Icons.Default.Print, contentDescription = "Impresora")
-                }
-
-                // 📊 INFO VENTAS VENDEDOR (NUEVO)
-                FloatingActionButton(
-                    onClick = {
-                        navController.navigate("VENDEDOR_INFO_VENTAS")
-                    },
-                    containerColor = Color(0xFFFF0000), // mismo rojo premium
-                    contentColor = Color.White
-                ) {
-                    Icon(Icons.Default.BarChart, contentDescription = "Ventas del vendedor")
-                }
-
-
-
-                // 📊 INFO VENTAS VENDEDOR (NUEVO)
-                FloatingActionButton(
-                    onClick = {
-                        navController.navigate("ventas_room")
-                    },
-                    containerColor = Color(0xFFFF0000), // mismo rojo premium
-                    contentColor = Color.White
-                ) {
-                    Icon(Icons.Default.Addchart, contentDescription = "Ventas del vendedor")
-                }
-
-                // 🔔 NOTIFICACIONES / VENTAS FILTRADAS
-                FloatingActionButton(
-                    onClick = {
-                        navController.navigate("ventas_filtradas")
-                        // navController.navigate("ventas_room")
-                    },
-                    containerColor = Color(0xFFFF0000), // mismo rojo premium
-                    contentColor = Color.White
-                ) {
-                    Icon(Icons.Default.Message, contentDescription = "Notificación")
-                }
+                    FloatingActionButton(
+                        onClick = { navController.navigate("NOTIFICACIONES") },
+                        containerColor = Color(0xFFFF0000),
+                        contentColor = Color.White
+                    ) {
+                        Icon(Icons.Default.Message, contentDescription = "Notificación")
+                    }
                 }
             }
         },
         floatingActionButtonPosition = FabPosition.End
-    )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    { paddingValues ->
-
+    ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-
-        // 🔹 Zona superior: Estado de internet y fecha/hora
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(6.dp)
             ) {
-
                 Spacer(modifier = Modifier.height(10.dp))
-
-                // 🔝 FILA SUPERIOR
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-
-                    // 🌐 Internet a la izquierda
                     Text(
-                        text = if (estadoInternet.value)
-                            "Conectado a Internet"
-                        else
-                            "Sin conexión a Internet",
+                        text = if (estadoInternet) "Conectado a Internet" else "Sin conexión a Internet",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = if (estadoInternet.value)
-                            Color(0xFF2E7D32)
-                        else
-                            Color(0xFFC62828)
+                        color = if (estadoInternet) Color(0xFF2E7D32) else Color(0xFFC62828)
                     )
-
-                    // ⬅️ Empuja la batería al extremo derecho
                     Spacer(modifier = Modifier.weight(1f))
-
-                    // 🔋 Batería a la derecha
                     BatteryIndicator()
                 }
-
-                // 🕒 Fecha abajo
                 Text(
-                    text = fechaHora.value,
+                    text = fechaHora,
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color.Gray
                 )
             }
 
-
             Spacer(modifier = Modifier.height(96.dp))
 
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                VelocimetroTeslaRojo(velocidad = velocidadParaUI)
+                Spacer(modifier = Modifier.height(16.dp))
 
-            //Velocimetro(velocidad = LocationService.velocidadActual.value)
-            VelocimetroTeslaRojo(velocidad = velocidadParaUI)
-
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-
-
-
-
-
-
-            if (showPrinterDialog) {
-                PantallaSeleccionImpresora(
-                    pairedDevices = pairedDevices,
-                    onImpresoraSeleccionada = { device ->
-                        selectedPrinter = device
-                        prefs.edit().putString("impresora_bluetooth", device.address).apply()
-                        onImpresoraSeleccionada(device)
-                        showPrinterDialog = false
-                    },
-                    onCancelar = { showPrinterDialog = false }
-                )
+                if (showPrinterDialog) {
+                    PantallaSeleccionImpresora(
+                        pairedDevices = pairedDevices,
+                        onImpresoraSeleccionada = { device ->
+                            selectedPrinter = device
+                            prefs.edit().putString("impresora_bluetooth", device.address).apply()
+                            onImpresoraSeleccionada(device)
+                            showPrinterDialog = false
+                        },
+                        onCancelar = { showPrinterDialog = false }
+                    )
+                }
             }
-
-
-
-
-        }
-
-
-
             Spacer(modifier = Modifier.height(30.dp))
-
-
-
-
         }
     }
-
-
-
-
-
 }
-
-
-
 
 fun puedeVerFABInicio(puestoTrabajo: String?): Boolean {
     return puestoTrabajo == "CEO1.1" ||
@@ -457,76 +270,49 @@ fun puedeVerFABInicio(puestoTrabajo: String?): Boolean {
             puestoTrabajo == "Supervisor"
 }
 
-
-
-
+@SuppressLint("MissingPermission")
 @Composable
 fun PantallaSeleccionImpresora(
     pairedDevices: List<BluetoothDevice>,
     onImpresoraSeleccionada: (BluetoothDevice) -> Unit,
     onCancelar: () -> Unit
 ) {
-    var showDialog by remember { mutableStateOf(true) }
-
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = { showDialog = false; onCancelar() },
-            title = { Text("Seleccionar impresora") },
-            text = {
-                if (pairedDevices.isEmpty()) {
-                    Text("No hay impresoras emparejadas")
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 300.dp)
-                    ) {
-                        items(pairedDevices) { device ->
-                            Text(
-                                text = device.name ?: "Desconocido",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        onImpresoraSeleccionada(device)
-                                        showDialog = false
-                                    }
-                                    .padding(12.dp),
-                                color = Color.Black
-                            )
-                        }
+    AlertDialog(
+        onDismissRequest = onCancelar,
+        title = { Text("Seleccionar impresora") },
+        text = {
+            if (pairedDevices.isEmpty()) {
+                Text("No hay impresoras emparejadas")
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp)
+                ) {
+                    items(pairedDevices) { device ->
+                        Text(
+                            text = device.name ?: "Desconocido",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onImpresoraSeleccionada(device) }
+                                .padding(12.dp),
+                            color = Color.Black
+                        )
                     }
                 }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showDialog = false; onCancelar() }) {
-                    Text("Cancelar")
-                }
             }
-        )
-    }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onCancelar) {
+                Text("Cancelar")
+            }
+        }
+    )
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 @Composable
 fun VelocimetroTeslaRojo(velocidad: Float) {
-
-    // Animación suave al cambiar velocidad
     val velocidadAnimada by animateFloatAsState(
         targetValue = velocidad,
         animationSpec = tween(300),
@@ -535,10 +321,7 @@ fun VelocimetroTeslaRojo(velocidad: Float) {
 
     val maxVelocidad = 120f
     val progreso = (velocidadAnimada / maxVelocidad).coerceIn(0f, 1f)
-
-    // 🔥 Colores ROJO/GRIS estilo tu app
     val rojoPrincipal = Color(0xFFFF0000)
-    val rojoOscuro = Color(0xFFB71C1C)
     val grisClaro = Color(0xFFDDDDDD)
     val grisMedio = Color(0xFF999999)
 
@@ -546,15 +329,11 @@ fun VelocimetroTeslaRojo(velocidad: Float) {
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
     ) {
-
-        // 🔵 Aro tipo Tesla minimalista
         Canvas(modifier = Modifier.size(250.dp)) {
-
             val strokeWidth = 22f
             val radius = size.minDimension / 2f - strokeWidth
             val center = Offset(size.width / 2f, size.height / 2f)
 
-            // Aro gris (fondo)
             drawArc(
                 color = grisClaro.copy(alpha = 0.4f),
                 startAngle = 135f,
@@ -565,7 +344,6 @@ fun VelocimetroTeslaRojo(velocidad: Float) {
                 style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
             )
 
-            // 🔥 Aro rojo activo
             drawArc(
                 color = rojoPrincipal,
                 startAngle = 135f,
@@ -579,14 +357,12 @@ fun VelocimetroTeslaRojo(velocidad: Float) {
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // 🔥 Velocidad digital gigante estilo Tesla
         Text(
             text = velocidadAnimada.toInt().toString(),
             style = MaterialTheme.typography.displayLarge,
             color = rojoPrincipal
         )
 
-        // Texto km/h
         Text(
             text = "km/h",
             style = MaterialTheme.typography.titleMedium,
@@ -595,12 +371,8 @@ fun VelocimetroTeslaRojo(velocidad: Float) {
     }
 }
 
-
-
-
 fun enviarNotificacionprueba(token: String, titulo: String, mensaje: String, imagen: String? = null) {
     val client = OkHttpClient()
-
     val json = """
         {
             "token": "$token",
@@ -620,19 +392,11 @@ fun enviarNotificacionprueba(token: String, titulo: String, mensaje: String, ima
         override fun onFailure(call: Call, e: IOException) {
             Log.e("Notificacion", "Error enviando notificación", e)
         }
-
         override fun onResponse(call: Call, response: Response) {
             Log.d("Notificacion", "Respuesta: ${response.body?.string()}")
         }
     })
 }
-
-
-
-
-
-
-
 
 @Preview(showBackground = true)
 @Composable

@@ -1,69 +1,51 @@
-package com.gruposanangel.delivery.ui.screens
-
+package com.gruposanangel.delivery
 
 import android.bluetooth.BluetoothDevice
 import androidx.compose.runtime.*
-
 import androidx.compose.ui.platform.LocalContext
-
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
-import com.gruposanangel.delivery.MainActivity
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryInventario
-
 import com.gruposanangel.delivery.data.VentaRepository
+import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.model.Plantila_carga
+import com.gruposanangel.delivery.ui.screens.*
 
-// ---------------------------
-// NAV HOST
-// ---------------------------
 @Composable
 fun Navegador(
     repository: RepositoryCliente?,
     onLogout: () -> Unit = {},
-    autoOpenTicketId: Long? = null // ⚡ Nuevo parámetro
+    autoOpenTicketId: String? = null
 ) {
-
-
-
-
     val navController = rememberNavController()
     var impresoraBluetooth by remember { mutableStateOf<BluetoothDevice?>(null) }
     val context = LocalContext.current
-    val db = AppDatabase.getDatabase(context)
-    val ventaRepository = VentaRepository(db.VentaDao())
-
 
     NavHost(navController = navController, startDestination = "delivery?screen=Inicio") {
-
-
-        // Pantalla principal con navegación inferior
         composable(
             "delivery?screen={screen}",
             arguments = listOf(navArgument("screen") { defaultValue = "Inicio" })
         ) { backStackEntry ->
             val screenArg = backStackEntry.arguments?.getString("screen") ?: "Inicio"
-            val context = LocalContext.current
             val db = AppDatabase.getDatabase(context)
-            val inventarioRepo = RepositoryInventario(db.productoDao())
+            val firebaseDataSource = FirebaseDataSource()
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
 
             Pantalla_Principal(
                 navController = navController,
                 startScreen = screenArg,
                 repository = repository,
                 inventarioRepo = inventarioRepo,
-
                 onLogout = onLogout,
                 impresoraBluetooth = impresoraBluetooth,
                 onImpresoraSeleccionada = { device -> impresoraBluetooth = device }
             )
         }
 
-        // Lista de productos
         composable("LISTA PRODUCTOS") {
             MovimientosInventarioScreen(
                 navController = navController,
@@ -72,19 +54,10 @@ fun Navegador(
             )
         }
 
-        // Notificaciones
         composable("NOTIFICACIONES") {
             PantallaNotificaciones(navController)
-
-
-
         }
 
-
-
-
-
-        // Detalle de carga
         composable("DETALLE_CARGA") {
             val plantilacarga = navController
                 .previousBackStackEntry
@@ -94,58 +67,33 @@ fun Navegador(
             PantallaDetalleCarga(navController, plantilacarga)
         }
 
-
-
-
-
-        // Inventario del vendedor
         composable("INVENTARIO VENDEDROR") {
-            val context = LocalContext.current
             val db = AppDatabase.getDatabase(context)
-            val inventarioRepo = RepositoryInventario(db.productoDao())
+            val firebaseDataSource = FirebaseDataSource()
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
             PantallaInventario(navController, inventarioRepo)
         }
 
-
-
-
-
-        // Perfil de usuario
         composable("perfil_usuario") {
-            val context = LocalContext.current
-            val usuarioDao = AppDatabase.getDatabase(context).usuarioDao() // <-- Obtenemos el DAO aquí
-
+            val usuarioDao = AppDatabase.getDatabase(context).usuarioDao()
             PerfilDeUsuarioScreen(
                 navController = navController,
                 usuarioDao = usuarioDao
             )
         }
 
-
-
-
-        // Crear cliente
         composable("crear_cliente") {
             CrearClienteScreen(navController, repository!!)
         }
 
-
-
-
-        // Crear producto
         composable("CREAR_PRODUCTO") {
             CrearProductoScreen(navController)
         }
 
-
-        // PANTALLA PRODUCTOS
         composable("PRODUCTOS") {
             ListaProductosScreen(navController)
         }
 
-
-
-        // Editar producto
         composable(
             "EDITAR_PRODUCTOS/{productoId}",
             arguments = listOf(navArgument("productoId") { type = NavType.StringType })
@@ -154,31 +102,16 @@ fun Navegador(
             EditarProductoScreen(navController, productoId = id)
         }
 
-
-
-
-        // Mapa
         composable("MAPA_SCREEN") {
             MapaScreen(navController = navController)
         }
 
 
-
-        // Aquí agregamos la nueva pantalla
-        composable("ventas_filtradas") {
-            VentasFirebaseScreen(navController)
-        }
-
-
-        // 📊 INFO DE VENTAS DEL VENDEDOR
         composable("VENDEDOR_INFO_VENTAS") {
             VendedorInfoVentasScreen()
         }
 
-
-        // POANTALLA VENTAS ROOM
         composable("ventas_room") {
-            val context = LocalContext.current
             val db = AppDatabase.getDatabase(context)
             val ventaRepository = VentaRepository(db.VentaDao())
 
@@ -189,32 +122,22 @@ fun Navegador(
             )
         }
 
-
-
-
-
-
-
-        // Lista de clientes
         composable(
             route = "detalle_ticket_completo/{ticketId}",
-            arguments = listOf(navArgument("ticketId") { type = NavType.LongType })
+            arguments = listOf(navArgument("ticketId") { type = NavType.StringType })
         ) { backStackEntry ->
-            val ticketId = backStackEntry.arguments?.getLong("ticketId") ?: 0L
-
-
+            val ticketId = backStackEntry.arguments?.getString("ticketId") ?: ""
+            val db = AppDatabase.getDatabase(context)
+            val ventaRepository = VentaRepository(db.VentaDao())
 
             DetalleTicketScreen(
                 navController = navController,
                 ticketId = ticketId,
-                ventaRepository = ventaRepository, // 🔹 pasar tu repositorio aquí
-                impresoraBluetooth = impresoraBluetooth // 🔹 PASAR LA IMPRESORA AQUÍ
+                ventaRepository = ventaRepository,
+                impresoraBluetooth = impresoraBluetooth
             )
         }
 
-
-
-        // 🔍 DETALLE DE CLIENTE
         composable(
             route = "detalle_cliente/{clienteId}?origen={origen}",
             arguments = listOf(
@@ -229,37 +152,21 @@ fun Navegador(
                 clienteId = clienteId,
                 navController = navController,
                 repository = repository,
-                origen = origen // 🔹 pasamos el origen
+                origen = origen
             )
         }
 
-
-
-
-
-
-        // Ventas por periodo
         composable("ventas_periodo") {
-            val context = LocalContext.current
-
-            // 1️⃣ Obtener la base de datos y los DAOs
             val db = AppDatabase.getDatabase(context)
-            val ventaDao = db.VentaDao()
-            val productoDao = db.productoDao()
-
-            // 2️⃣ Crear repositorios
-            val ventaRepository = VentaRepository(ventaDao)
-            val inventarioRepo = RepositoryInventario(productoDao)
-
-            // 3️⃣ Crear ViewModel usando la factory con ambos repositorios
-            val viewModel: VistaModeloVenta = viewModel(
-                factory = VistaModeloVentaFactory(
-                    repositoryInventario = inventarioRepo,
-                    ventaRepository = ventaRepository
+            val firebaseDataSource = FirebaseDataSource()
+            val viewModel: VentaViewModel = viewModel(
+                factory = VentaViewModelFactory(
+                    repositoryInventario = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao()),
+                    ventaRepository = VentaRepository(db.VentaDao()),
+                    repositoryUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
                 )
             )
 
-            // 4️⃣ Llamar a la pantalla
             PantallaVentaPeriodo(
                 navController = navController,
                 vistaModelo = viewModel
@@ -267,83 +174,39 @@ fun Navegador(
         }
 
 
-
-
-
-
-        // Pantalla de venta de cliente (usa id y repo local)
-        composable(
-            route = "pantalla_venta/{idCliente}",
-            arguments = listOf(navArgument("idCliente") { type = NavType.StringType })
-        ) { backStackEntry ->
-            val idCliente = backStackEntry.arguments?.getString("idCliente") ?: ""
-            val context = LocalContext.current
-            val db = AppDatabase.getDatabase(context)
-            val inventarioRepo = RepositoryInventario(db.productoDao()) // <-- crear repo local
-
-            PantallaVenta(
-                navController = navController,
-                clienteId = idCliente,
-                repository = repository,
-                inventarioRepo = inventarioRepo,           // <-- PASAR inventarioRepo
-                impresoraBluetooth = impresoraBluetooth,
-                productosPreview = null
-            )
-        }
-
         composable(
             route = "detalle_ticket_supervisor/{firestoreId}"
         ) { backStackEntry ->
-
             val firestoreId = backStackEntry.arguments?.getString("firestoreId") ?: ""
-
             DetalleTicketSupervisorScreen(
                 firestoreId = firestoreId,
                 navController = navController,
-                impresoraBluetooth = null // si el supervisor imprime
+                impresoraBluetooth = null
             )
         }
 
-
-
-        // PantallaVentas2 (Nueva pantalla)
         composable(
-            route = "pantalla_ventas2/{clienteId}",
+            route = "pantalla_ventas/{clienteId}",
             arguments = listOf(navArgument("clienteId") { type = NavType.StringType })
         ) { backStackEntry ->
-
             val clienteId = backStackEntry.arguments?.getString("clienteId") ?: ""
-            val context = LocalContext.current
             val db = AppDatabase.getDatabase(context)
+            val firebaseDataSource = FirebaseDataSource()
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
 
-            val inventarioRepo = RepositoryInventario(db.productoDao())
-            val ventaRepository = VentaRepository(db.VentaDao())
-
-            PantallaVentas2(
+            PantallaVentas(
                 navController = navController,
                 clienteId = clienteId,
-                repository = repository,            // 🔹 SE LO PASAMOS DIRECTO (lo recibes en Navegador)
-                inventarioRepo = inventarioRepo,    // 🔹 El repo local del inventario
+                repository = repository,
+                inventarioRepo = inventarioRepo,
                 impresoraBluetooth = impresoraBluetooth,
                 productosPreview = null
             )
         }
-
-
-
-
-
-
     }
 
     LaunchedEffect(autoOpenTicketId) {
         autoOpenTicketId?.let { id ->
-
-            // Guardamos el ID en savedStateHandle para que la pantalla lo lea si lo necesita
-            navController.currentBackStackEntry
-                ?.savedStateHandle
-                ?.set("ticketId", id)
-
             navController.navigate("detalle_ticket_completo/$id") {
                 popUpTo(navController.graph.startDestinationId) { inclusive = false }
                 launchSingleTop = true
@@ -351,10 +214,7 @@ fun Navegador(
         }
     }
 
-
-
     val openScreen = (context as? MainActivity)?.intent?.action
-
     LaunchedEffect(openScreen) {
         if (openScreen == "OPEN_MAPA") {
             navController.navigate("MAPA_SCREEN") {
@@ -363,7 +223,4 @@ fun Navegador(
             }
         }
     }
-
-
-
 }
