@@ -23,6 +23,9 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.gruposanangel.delivery.utilidades.FcmUtils
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.net.URL
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
@@ -54,7 +57,10 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val uid = FirebaseAuth.getInstance().currentUser?.uid
         if (uid != null) {
-            FcmUtils.saveTokenToArray(uid, token)
+            // Usamos corrutinas para llamar a la función suspendida de guardado atómico
+            CoroutineScope(Dispatchers.IO).launch {
+                FcmUtils.saveTokenToArray(uid, token)
+            }
         }
     }
 

@@ -220,7 +220,11 @@ fun Pantalla_Principal(
                 when (selectedScreen) {
                     Screen.Inicio -> {
                         if (isAdmin) {
-                            Pantalla_Dashboard_Admin(navController)
+                            Pantalla_Dashboard_Admin(
+                                navController = navController,
+                                impresoraBluetooth = impresoraBluetooth,
+                                onImpresoraSeleccionada = onImpresoraSeleccionada
+                            )
                         } else {
                             PantallaDashboardVendedor(
                                 navController = navController,

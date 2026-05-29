@@ -190,16 +190,7 @@ fun Navegador(
         }
 
 
-        composable(
-            route = "detalle_ticket_supervisor/{firestoreId}"
-        ) { backStackEntry ->
-            val firestoreId = backStackEntry.arguments?.getString("firestoreId") ?: ""
-            DetalleTicketSupervisorScreen(
-                firestoreId = firestoreId,
-                navController = navController,
-                impresoraBluetooth = null
-            )
-        }
+
 
         composable(
             route = "pantalla_ventas/{clienteId}?origen={origen}",

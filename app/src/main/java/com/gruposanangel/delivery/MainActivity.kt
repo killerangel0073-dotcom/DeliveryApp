@@ -32,6 +32,7 @@ import com.gruposanangel.delivery.utilidades.FcmUtils
 import com.gruposanangel.delivery.utilidades.HardLockPermissionWrapper
 import com.gruposanangel.delivery.utilidades.hayInternet
 import kotlinx.coroutines.*
+import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
@@ -114,12 +115,30 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() { super.onDestroy(); repository.stopEscuchaFirebase(); inventarioRepo.stopEscuchaFirebase(); syncJob?.cancel() }
 
     fun cerrarSesion(context: Context) {
-        val auth = FirebaseAuth.getInstance(); val uid = auth.currentUser?.uid
+        val auth = FirebaseAuth.getInstance()
+        val uid = auth.currentUser?.uid
         val prefs = context.getSharedPreferences("fcm_prefs", Context.MODE_PRIVATE)
-        val token = uid?.let { prefs.getString("fcm_token", null) }
+        
         lifecycleScope.launch(Dispatchers.IO) {
-            try { if (token != null && uid != null) FcmUtils.removeTokenFromArray(uid, token) } catch (e: Exception) { Log.e("LOGOUT", "Error FCM", e) }
-            repositoryUsuario.cerrarSesion(); withContext(Dispatchers.Main) { prefs.edit().remove("fcm_token").apply(); auth.signOut() }
+            try {
+                if (uid != null) {
+                    // 1. Obtener el token actual de forma segura
+                    val token = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+                    
+                    // 2. Eliminación atómica únicamente de este dispositivo
+                    FcmUtils.removeTokenFromArray(uid, token)
+                }
+            } catch (e: Exception) {
+                Log.e("LOGOUT", "Error limpiando tokens FCM: ${e.message}")
+            } finally {
+                // 3. Cierre de sesión seguro (Incluso si falla lo anterior para no bloquear al usuario)
+                repositoryUsuario.cerrarSesion()
+                withContext(Dispatchers.Main) {
+                    prefs.edit().remove("fcm_token").apply()
+                    auth.signOut()
+                    // El estado usuarioActual se volverá null y disparará la PantallaLoginPro automáticamente
+                }
+            }
         }
     }
 }

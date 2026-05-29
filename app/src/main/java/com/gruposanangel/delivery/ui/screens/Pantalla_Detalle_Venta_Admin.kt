@@ -104,9 +104,7 @@ fun Pantalla_Detalle_Venta_Admin(
                         totalVenta = ventaEntity?.total ?: ticketState?.total ?: 0.0,
                         vendedorNombre = usuario?.nombre ?: "Vendedor",
                         metodoPago = ventaEntity?.metodoPago ?: "",
-                        sincronizado = ventaEntity?.sincronizado,
-                        firestoreId = ventaEntity?.firestoreId ?: "",
-                        clienteId = ventaEntity?.clienteId ?: ""
+
                     )
                     withContext(Dispatchers.Main) {
                         Toast.makeText(context, "Imprimiendo...", Toast.LENGTH_SHORT).show()
