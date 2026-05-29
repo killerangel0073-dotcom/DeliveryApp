@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.utilidades.FcmUtils
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -22,20 +23,8 @@ class LoginViewModel(private val usuarioRepository: RepositoryUsuario) : ViewMod
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-    init {
-        checkUserSession()
-    }
-
-    private fun checkUserSession() {
-        viewModelScope.launch {
-            // OFFLINE-FIRST: Verificamos una sola vez al arrancar si ya existe un usuario en Room
-            // para permitir el acceso inmediato. Usamos firstOrNull para que la corrutina termine de inmediato.
-            val usuario = usuarioRepository.getUsuarioActual().firstOrNull()
-            if (usuario != null) {
-                _uiState.update { it.copy(isUserLoggedIn = true, loginSuccess = true) }
-            }
-        }
-    }
+    // checkUserSession se elimina porque la sesión ahora se gestiona 
+    // de forma centralizada y reactiva en MainActivity.kt
 
     fun login(email: String, password: String) {
         if (email.isBlank() || password.isBlank()) {
@@ -53,7 +42,10 @@ class LoginViewModel(private val usuarioRepository: RepositoryUsuario) : ViewMod
                 // 2. Sincronización inmediata con Room (Offline-First)
                 usuarioRepository.syncUsuario(uid)
 
-                // 3. Notificar éxito
+                // 3. Registrar Token FCM para Notificaciones Push
+                FcmUtils.updateFcmToken(uid)
+
+                // 4. Notificar éxito
                 _uiState.update { it.copy(isLoading = false, loginSuccess = true) }
 
             } catch (e: Exception) {

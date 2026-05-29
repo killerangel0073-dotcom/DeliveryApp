@@ -1,0 +1,203 @@
+package com.gruposanangel.delivery.ui.screens
+
+import android.util.Log
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.google.firebase.Timestamp
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.gruposanangel.delivery.data.VentaEntity
+import com.gruposanangel.delivery.VentaRepository
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import java.util.*
+
+data class SellerSummary(
+    val uid: String,
+    val nombre: String,
+    val rutaNombre: String,
+    val photoUrl: String,
+    val totalVendido: Double,
+    val clientesConVenta: Int,
+    val ticketPromedio: Double,
+    val ventas: List<VentaEntity> = emptyList(),
+)
+
+data class DashboardUiState(
+    val isLoading: Boolean = true,
+    val totalVentasDia: Double = 0.0,
+    val totalTicketsDia: Int = 0,
+    val totalClientesDia: Int = 0,
+    val ticketPromedioGlobal: Double = 0.0,
+    val resumenVendedores: List<SellerSummary> = emptyList(),
+    val todasLasVentasHoy: List<VentaEntity> = emptyList(),
+    val error: String? = null,
+)
+
+class DashboardAdminViewModel(
+    private val ventaRepository: VentaRepository
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(DashboardUiState())
+    val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
+
+    private val db = FirebaseFirestore.getInstance()
+    private var ventasListener: ListenerRegistration? = null
+    private var usersCache: Map<String, Triple<String, String, String>> = emptyMap()
+    private var allVendedoresUids: Set<String> = emptySet()
+
+    init {
+        // Precargar info de usuarios una vez al inicio
+        precargarUsuarios()
+        cargarDatosDashboard(Date())
+    }
+
+    private fun precargarUsuarios() {
+        viewModelScope.launch {
+            try {
+                val usersSnap = db.collection("users").get().await()
+                usersCache = usersSnap.documents.asSequence().associate { doc ->
+                    val nombre = doc.getString("nombre") ?: "Sin Nombre"
+                    val foto = doc.getString("photo_url") ?: ""
+                    val rutaRef = doc.getDocumentReference("rutaAsignada")
+                    val rutaNombre = rutaRef?.id ?: "Sin Ruta"
+                    doc.id to Triple(nombre, rutaNombre, foto)
+                }
+                
+                allVendedoresUids = usersSnap.documents.asSequence().mapNotNull { doc ->
+                    val puesto = doc.getString("puestoTrabajo")?.lowercase(Locale.getDefault()) ?: ""
+                    if (puesto.contains("vendedor") || puesto.contains("ruta")) {
+                        doc.id
+                    } else null
+                }.toSet()
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error precargando usuarios", e)
+            }
+        }
+    }
+
+    fun cargarDatosDashboard(fecha: Date) {
+        // Cancelar listener previo si existe
+        ventasListener?.remove()
+        
+        _uiState.update { it.copy(isLoading = true) }
+
+        // Rango de fecha
+        val cal = Calendar.getInstance()
+        cal.time = fecha
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        val inicio = Timestamp(cal.time)
+        
+        cal.set(Calendar.HOUR_OF_DAY, 23)
+        cal.set(Calendar.MINUTE, 59)
+        cal.set(Calendar.SECOND, 59)
+        cal.set(Calendar.MILLISECOND, 999)
+        val fin = Timestamp(cal.time)
+
+        // Escuchar cambios en tiempo real
+        ventasListener = db.collection("ventas")
+            .whereGreaterThanOrEqualTo("fecha", inicio)
+            .whereLessThanOrEqualTo("fecha", fin)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DashboardVM", "Error en listener", error)
+                    _uiState.update { it.copy(isLoading = false, error = error.message) }
+                    return@addSnapshotListener
+                }
+
+                snapshot?.let { snap ->
+                    procesarSnapshotVentas(snap.documents.map { doc ->
+                        VentaEntity(
+                            id = doc.id,
+                            clienteId = doc.getString("clienteId") ?: "",
+                            clienteNombre = doc.getString("clienteNombre") ?: "Cliente",
+                            total = (doc.get("total") as? Number)?.toDouble() ?: 0.0,
+                            metodoPago = doc.getString("metodoPago") ?: "",
+                            vendedorId = doc.getString("vendedorId") ?: "",
+                            fecha = doc.getTimestamp("fecha")?.toDate()?.time ?: 0L,
+                            sincronizado = true
+                        )
+                    })
+                }
+            }
+    }
+
+    private fun procesarSnapshotVentas(todasLasVentas: List<VentaEntity>) {
+        viewModelScope.launch {
+            // Si el cache de usuarios está vacío, intentar cargar de nuevo (por si falló al inicio)
+            if (usersCache.isEmpty()) {
+                val usersSnap = db.collection("users").get().await()
+                usersCache = usersSnap.documents.asSequence().associate { doc ->
+                    val nombre = doc.getString("nombre") ?: "Sin Nombre"
+                    val foto = doc.getString("photo_url") ?: ""
+                    val rutaRef = doc.getDocumentReference("rutaAsignada")
+                    val rutaNombre = rutaRef?.id ?: "Sin Ruta"
+                    doc.id to Triple(nombre, rutaNombre, foto)
+                }
+                allVendedoresUids = usersSnap.documents.asSequence().mapNotNull { doc ->
+                    val puesto = doc.getString("puestoTrabajo")?.lowercase(Locale.getDefault()) ?: ""
+                    if (puesto.contains("vendedor") || puesto.contains("ruta")) {
+                        doc.id
+                    } else null
+                }.toSet()
+            }
+
+            val uidsActivos = (allVendedoresUids + todasLasVentas.map { it.vendedorId }).filter { it.isNotEmpty() }.toSet()
+
+            val resumen = uidsActivos.map { uid ->
+                val info = usersCache[uid] ?: Triple("Vendedor ($uid)", "Sin Ruta", "")
+                val ventasVendedor = todasLasVentas.filter { it.vendedorId == uid }
+                val totalVendido = ventasVendedor.sumOf { it.total }
+                val clientesUnicos = ventasVendedor.map { it.clienteId }.distinct().size
+                val promedio = if (ventasVendedor.isNotEmpty()) totalVendido / ventasVendedor.size else 0.0
+
+                SellerSummary(
+                    uid = uid,
+                    nombre = info.first,
+                    rutaNombre = info.second,
+                    photoUrl = info.third,
+                    totalVendido = totalVendido,
+                    clientesConVenta = clientesUnicos,
+                    ticketPromedio = promedio,
+                    ventas = ventasVendedor
+                )
+            }
+
+            val totalVentas = todasLasVentas.sumOf { it.total }
+            val totalTickets = todasLasVentas.size
+            val totalClientes = todasLasVentas.map { it.clienteId }.distinct().size
+            val promedioGlobal = if (totalTickets > 0) totalVentas / totalTickets else 0.0
+
+            _uiState.update { state ->
+                state.copy(
+                    isLoading = false,
+                    totalVentasDia = totalVentas,
+                    totalTicketsDia = totalTickets,
+                    totalClientesDia = totalClientes,
+                    ticketPromedioGlobal = promedioGlobal,
+                    resumenVendedores = resumen.sortedByDescending { it.totalVendido },
+                    todasLasVentasHoy = todasLasVentas
+                )
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        ventasListener?.remove()
+    }
+}
+
+class DashboardAdminViewModelFactory(
+    private val ventaRepository: VentaRepository
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        return DashboardAdminViewModel(ventaRepository) as T
+    }
+}

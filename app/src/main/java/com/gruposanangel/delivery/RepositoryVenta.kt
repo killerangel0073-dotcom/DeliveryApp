@@ -1,9 +1,11 @@
-package com.gruposanangel.delivery.data
+package com.gruposanangel.delivery
 
 import ProductoTicketDetalle
 import TicketVentaCompleto
 import android.util.Log
-import com.google.firebase.auth.FirebaseAuth
+import com.gruposanangel.delivery.data.VentaDao
+import com.gruposanangel.delivery.data.VentaEntity
+import com.gruposanangel.delivery.data.VentaDetalleEntity
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,105 +19,185 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
 import java.util.Date
-import java.util.TimeZone
 import java.util.UUID
 
 class VentaRepository(private val ventaDao: VentaDao) {
 
-    suspend fun obtenerVentasPorPeriodo(inicio: Long, fin: Long): List<VentaEntity> =
+    suspend fun obtenerVentasPorPeriodo(vendedorId: String, inicio: Long, fin: Long): List<VentaEntity> =
         withContext(Dispatchers.IO) {
-            ventaDao.obtenerVentasPorPeriodo(inicio, fin)
+            ventaDao.obtenerVentasPorPeriodo(vendedorId, inicio, fin)
         }
 
+    fun obtenerVentasPorPeriodoFlow(vendedorId: String, inicio: Long, fin: Long): kotlinx.coroutines.flow.Flow<List<VentaEntity>> {
+        return ventaDao.obtenerVentasPorPeriodoFlow(vendedorId, inicio, fin)
+    }
+
     suspend fun obtenerTicketCompleto(ticketId: String): TicketVentaCompleto? {
-        val venta = ventaDao.obtenerVentaPorId(ticketId) ?: return null
+        val ventaLocal = ventaDao.obtenerVentaPorId(ticketId)
         val detalles = ventaDao.obtenerDetallesPorVenta(ticketId)
 
-        val productos = detalles.map {
-            ProductoTicketDetalle(
-                nombre = it.nombre,
-                cantidad = it.cantidad,
-                precio = it.precio
+        if ((ventaLocal != null) && detalles.isNotEmpty()) {
+            val productos = detalles.map {
+                ProductoTicketDetalle(
+                    nombre = it.nombre,
+                    cantidad = it.cantidad,
+                    precio = it.precio,
+                )
+            }
+
+            var fotoFinal = ventaLocal.clienteImagenUrl ?: ""
+
+            if (fotoFinal.isEmpty() || !fotoFinal.startsWith("/")) {
+                try {
+                    val firestore = FirebaseFirestore.getInstance()
+                    val clienteDoc = firestore.collection("clientes").document(ventaLocal.clienteId).get().await()
+                    if (clienteDoc.exists()) {
+                        fotoFinal = clienteDoc.getString("FotografiaCliente") ?: ""
+                    }
+                } catch (e: Exception) {
+                    Log.w("VentaRepo", "No se pudo recuperar foto remota para ticket local $ticketId: ${e.message}")
+                }
+            }
+
+            return TicketVentaCompleto(
+                numeroTicket = ventaLocal.id,
+                cliente = ventaLocal.clienteNombre,
+                total = ventaLocal.total,
+                fecha = Date(ventaLocal.fecha),
+                sincronizado = ventaLocal.sincronizado,
+                fotoCliente = fotoFinal,
+                productos = productos,
             )
         }
 
-        return TicketVentaCompleto(
-            numeroTicket = venta.id,
-            cliente = venta.clienteNombre,
-            total = venta.total,
-            fecha = Date(venta.fecha),
-            sincronizado = venta.sincronizado,
-            fotoCliente = venta.clienteImagenUrl ?: "",
-            productos = productos
-        )
+        return obtenerTicketCompletoFirestore(ticketId)
+    }
+
+    suspend fun obtenerTicketCompletoFirestore(ticketId: String): TicketVentaCompleto? = withContext(Dispatchers.IO) {
+        val firestore = FirebaseFirestore.getInstance()
+        try {
+            val doc = firestore.collection("ventas").document(ticketId).get().await()
+            if (!doc.exists()) {
+                Log.w("VentaRepo", "El ticket $ticketId no existe en Firestore")
+                return@withContext null
+            }
+
+            val clienteId = when (val clienteRaw = doc.get("clienteId") ?: doc.get("clienteRef") ?: doc.get("id_cliente")) {
+                is com.google.firebase.firestore.DocumentReference -> clienteRaw.id
+                else -> clienteRaw?.toString() ?: ""
+            }
+
+            val clienteNombre = doc.getString("clienteNombre") ?: "Cliente"
+            val total = (doc.get("total") as? Number)?.toDouble() ?: 0.0
+            val fecha = doc.getTimestamp("fecha")?.toDate() ?: Date()
+
+            var fotoUrl = doc.getString("clienteImagenUrl") ?: doc.getString("FotografiaCliente") ?: ""
+
+            if (fotoUrl.isEmpty() && clienteId.isNotEmpty()) {
+                try {
+                    val clienteDoc = firestore.collection("clientes").document(clienteId).get().await()
+                    if (clienteDoc.exists()) {
+                        fotoUrl = clienteDoc.getString("FotografiaCliente") ?: ""
+                    }
+                } catch (e: Exception) { }
+            }
+
+            val productosSnap = firestore.collection("ventas").document(ticketId).collection("productos").get().await()
+            val productos = productosSnap.documents.map { pDoc ->
+                ProductoTicketDetalle(
+                    nombre = pDoc.getString("nombre") ?: "Producto",
+                    cantidad = (pDoc.get("cantidad") as? Number)?.toInt() ?: 0,
+                    precio = (pDoc.get("precio") as? Number)?.toDouble() ?: 0.0
+                )
+            }
+
+            TicketVentaCompleto(
+                numeroTicket = ticketId,
+                cliente = clienteNombre,
+                total = total,
+                fecha = fecha,
+                sincronizado = true,
+                fotoCliente = fotoUrl,
+                productos = productos
+            )
+        } catch (e: Exception) {
+            Log.e("VentaRepo", "Error crítico buscando ticket en Firestore", e)
+            null
+        }
     }
 
     suspend fun descargarVentasDia(vendedorId: String): List<VentaEntity> =
         withContext(Dispatchers.IO) {
             val firestore = FirebaseFirestore.getInstance()
+            Log.d("VentaRepo", "Iniciando sincronización de historial para: $vendedorId")
 
-            val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+            val calendar = Calendar.getInstance()
             calendar.set(Calendar.HOUR_OF_DAY, 0)
             calendar.set(Calendar.MINUTE, 0)
             calendar.set(Calendar.SECOND, 0)
             calendar.set(Calendar.MILLISECOND, 0)
             val inicio = calendar.time
 
-            calendar.set(Calendar.HOUR_OF_DAY, 23)
-            calendar.set(Calendar.MINUTE, 59)
-            calendar.set(Calendar.SECOND, 59)
-            calendar.set(Calendar.MILLISECOND, 999)
-            val fin = calendar.time
+            val calendarFin = Calendar.getInstance()
+            calendarFin.set(Calendar.HOUR_OF_DAY, 23); calendarFin.set(Calendar.MINUTE, 59)
+            calendarFin.set(Calendar.SECOND, 59); calendarFin.set(Calendar.MILLISECOND, 999)
+            val fin = calendarFin.time
 
             try {
                 val snapshot = firestore.collection("ventas")
-                    .whereEqualTo("vendedorId", vendedorId)
                     .whereGreaterThanOrEqualTo("fecha", inicio)
                     .whereLessThanOrEqualTo("fecha", fin)
                     .get()
                     .await()
 
                 snapshot.documents.forEach { doc ->
-                    val localId = doc.getString("localId") ?: doc.id // Fallback al ID de firestore si no hay localId
-
-                    val venta = VentaEntity(
-                        id = localId,
-                        clienteId = doc.getString("clienteId") ?: "",
-                        clienteNombre = doc.getString("clienteNombre") ?: "",
-                        clienteImagenUrl = doc.getString("clienteImagenUrl"),
-                        total = doc.getDouble("total") ?: 0.0,
-                        metodoPago = doc.getString("metodoPago") ?: "",
-                        vendedorId = doc.getString("vendedorId") ?: "",
-                        fecha = doc.getTimestamp("fecha")?.toDate()?.time ?: System.currentTimeMillis(),
-                        sincronizado = true,
-                        firestoreId = doc.id
-                    )
-
-                    val productosSnapshot = firestore
-                        .collection("ventas")
-                        .document(doc.id)
-                        .collection("productos")
-                        .get()
-                        .await()
-
-                    val detalles = productosSnapshot.documents.map { pDoc ->
-                        VentaDetalleEntity(
-                            ventaId = localId,
-                            productoId = pDoc.id,
-                            nombre = pDoc.getString("nombre") ?: "Producto",
-                            precio = pDoc.getDouble("precio") ?: 0.0,
-                            cantidad = (pDoc.getLong("cantidad") ?: 0L).toInt()
-                        )
+                    val vId = when(val vIdRaw = doc.get("vendedorId")) {
+                        is com.google.firebase.firestore.DocumentReference -> vIdRaw.id
+                        else -> vIdRaw?.toString() ?: ""
                     }
 
-                    ventaDao.refrescarVentaCompleta(venta, detalles)
-                }
+                    if (vId == vendedorId) {
+                        val localId = doc.getString("localId") ?: doc.id
+                        val fRaw = doc.get("fecha")
+                        val fechaFinal = when(fRaw) {
+                            is com.google.firebase.Timestamp -> fRaw.toDate().time
+                            is Number -> fRaw.toLong()
+                            else -> System.currentTimeMillis()
+                        }
 
+                        val venta = VentaEntity(
+                            id = localId,
+                            clienteId = doc.getString("clienteId") ?: "",
+                            clienteNombre = doc.getString("clienteNombre") ?: "Cliente",
+                            clienteImagenUrl = doc.getString("clienteImagenUrl"),
+                            total = (doc.get("total") as? Number)?.toDouble() ?: 0.0,
+                            metodoPago = doc.getString("metodoPago") ?: "Efectivo",
+                            vendedorId = vendedorId,
+                            fecha = fechaFinal,
+                            sincronizado = true,
+                            firestoreId = doc.id
+                        )
+
+                        val prodsSnap = firestore.collection("ventas").document(doc.id).collection("productos").get().await()
+                        val detalles = prodsSnap.documents.map { pDoc ->
+                            VentaDetalleEntity(
+                                ventaId = localId,
+                                productoId = pDoc.id,
+                                nombre = pDoc.getString("nombre") ?: "Producto",
+                                precio = (pDoc.get("precio") as? Number)?.toDouble() ?: 0.0,
+                                cantidad = (pDoc.getLong("cantidad") ?: 0L).toInt()
+                            )
+                        }
+
+                        ventaDao.refrescarVentaCompleta(venta, detalles)
+                        Log.d("VentaRepo", "✅ Sincronizada venta: ${venta.clienteNombre} [$localId]")
+                    }
+                }
             } catch (e: Exception) {
-                Log.e("VentaRepo", "Error sincronizando Firebase", e)
+                Log.e("VentaRepo", "❌ Error sincronizando historial: ${e.message}")
             }
 
-            return@withContext ventaDao.obtenerVentasPorPeriodo(inicio.time, fin.time)
+            return@withContext ventaDao.obtenerVentasPorPeriodo(vendedorId, inicio.time, fin.time)
         }
 
     suspend fun guardarVentaLocal(
@@ -127,7 +209,7 @@ class VentaRepository(private val ventaDao: VentaDao) {
         metodoPago: String,
         vendedorId: String
     ): String = withContext(Dispatchers.IO) {
-        val idLocal = UUID.randomUUID().toString() // 🔥 Cambio a UUID para idempotencia
+        val idLocal = UUID.randomUUID().toString()
         val venta = VentaEntity(
             id = idLocal,
             clienteId = clienteId,
@@ -170,23 +252,10 @@ class VentaRepository(private val ventaDao: VentaDao) {
         ventaDao.obtenerDetallesPorVenta(ventaId)
     }
 
-    suspend fun marcarVentaComoSincronizada(ventaId: String) = withContext(Dispatchers.IO) {
-        ventaDao.marcarComoSincronizada(ventaId)
-    }
-
     suspend fun obtenerVentaPorId(ventaId: String): VentaEntity? {
         return ventaDao.obtenerVentaPorId(ventaId)
     }
 
-    suspend fun obtenerFirestoreIdDeVenta(ventaLocalId: String): String? =
-        withContext(Dispatchers.IO) {
-            ventaDao.obtenerFirestoreIdDeVenta(ventaLocalId)
-        }
-
-    /**
-     * Sincroniza una venta con el servidor a través de Cloud Functions.
-     * Centralizado aquí para que tanto el ViewModel como el Worker lo usen.
-     */
     suspend fun sincronizarConServidor(
         ventaLocalId: String,
         clienteId: String,
@@ -205,13 +274,15 @@ class VentaRepository(private val ventaDao: VentaDao) {
                 put("clienteNombre", clienteNombre)
                 put("productos", JSONArray().apply {
                     productos.forEach { p ->
-                        put(JSONObject().apply {
-                            put("id", p.id)
-                            put("nombre", p.nombre)
-                            put("precio", p.precio)
-                            put("cantidad", p.cantidad)
-                            put("imagenUrl", p.imagenUrl ?: "")
-                        })
+                        put(
+                            JSONObject().apply {
+                                put("id", p.id)
+                                put("nombre", p.nombre)
+                                put("precio", p.precio)
+                                put("cantidad", p.cantidad)
+                                put("imagenUrl", p.imagenUrl)
+                            }
+                        )
                     }
                 })
                 put("metodoPago", metodoPago)

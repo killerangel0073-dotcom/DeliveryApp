@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,6 +48,26 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
     )
     val uiState by viewModel.uiState.collectAsState()
 
+    // Llamamos a la vista pura pasando los datos reales del ViewModel
+    PantallaLoginProContent(
+        isLoading = uiState.isLoading,
+        errorMessage = uiState.errorMessage,
+        onLoginClick = { em, pass -> viewModel.login(em, pass) },
+        onLoginSuccess = onLoginSuccess,
+        loginSuccessSignal = uiState.loginSuccess
+    )
+}
+
+// 🔹 VISTA PURA (Separa el diseño de la base de datos para que el Preview funcione al 100%)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PantallaLoginProContent(
+    isLoading: Boolean,
+    errorMessage: String?,
+    onLoginClick: (String, String) -> Unit,
+    onLoginSuccess: () -> Unit,
+    loginSuccessSignal: Boolean
+) {
     // -------------------- STATE LOCAL (Solo UI) --------------------
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -65,8 +87,8 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
         showButton = true
     }
 
-    LaunchedEffect(uiState.loginSuccess) {
-        if (uiState.loginSuccess) {
+    LaunchedEffect(loginSuccessSignal) {
+        if (loginSuccessSignal) {
             delay(200)
             onLoginSuccess()
         }
@@ -78,48 +100,47 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
         animationSpec = tween(400)
     )
 
+    // Animación de ancho del botón: 220dp -> 60dp (Círculo)
     val buttonWidth by animateDpAsState(
-        targetValue = if (uiState.isLoading) 52.dp else 200.dp,
-        animationSpec = tween(300)
+        targetValue = if (isLoading) 60.dp else 220.dp,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "width"
     )
 
+    // Animación de redondeo: 14dp -> 100dp (Círculo perfecto)
     val buttonCorner by animateDpAsState(
-        targetValue = if (uiState.isLoading) 50.dp else 14.dp,
-        animationSpec = tween(300)
+        targetValue = if (isLoading) 100.dp else 14.dp,
+        animationSpec = tween(300),
+        label = "corner"
     )
 
     // -------------------- UI --------------------
     Box(
         modifier = Modifier.fillMaxSize()
     ) {
+        // 🔹 FONDO
+        Image(
+            painter = painterResource(R.drawable.fondo_mapa),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
 
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-
-            // 🔹 IMAGEN ARRIBA
-            Image(
-                painter = painterResource(R.drawable.fondo_mapa),
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f), // ocupa casi toda la pantalla
-                contentScale = ContentScale.Crop
-            )
-
-
-        }
-
-
-
-
-
-        // 🔹 Overlay oscuro para contraste
+        // 🔹 Overlay oscuro sutil para legibilidad (Gris/Negro sutil)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.0f))
+                .background(Color.Black.copy(alpha = 0.35f))
         )
+
+        // 🔹 Bloqueo de clics mientras carga (Sin Card invasiva)
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(enabled = false) {} 
+            )
+        }
 
         // 🔹 Contenido de login
         Box(
@@ -134,7 +155,6 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
                 modifier = Modifier.fillMaxWidth()
             ) {
 
-
                 Image(
                     painter = painterResource(id = R.drawable.logotipo),
                     contentDescription = "Logo",
@@ -147,18 +167,13 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
                 Text(
                     text = "Grupo San Ángel",
                     color = Color.White,
-                    fontSize = 30.sp
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp
                 )
 
-                // 🔹 TEXTO ABAJO
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    contentAlignment = Alignment.Center
-                ) {
+                Spacer(modifier = Modifier.height(10.dp))
 
-                }
                 // EMAIL
                 AnimatedVisibility(visible = showEmail, enter = enterAnim) {
                     OutlinedTextField(
@@ -171,15 +186,16 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
                         colors = TextFieldDefaults.outlinedTextFieldColors(
-                            containerColor = Color(0xFFF5F5F5),
+                            containerColor = Color.White,
                             focusedBorderColor = Color(0xFFFF0000),
                             unfocusedBorderColor = Color.Gray,
-                            focusedLabelColor = Color(0xFFFF0000),
-                            cursorColor = Color(0xFFFF0000)
+                            focusedLabelColor = Color.White,
+                            cursorColor = Color(0xFFFF0000),
+                            focusedTextColor = Color.Black,
+                            unfocusedTextColor = Color.Black
                         )
                     )
                 }
-
 
                 // PASSWORD
                 AnimatedVisibility(visible = showPassword, enter = enterAnim) {
@@ -202,18 +218,20 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
                         colors = TextFieldDefaults.outlinedTextFieldColors(
-                            containerColor = Color(0xFFF5F5F5),
+                            containerColor = Color.White,
                             focusedBorderColor = Color(0xFFFF0000),
                             unfocusedBorderColor = Color.Gray,
-                            focusedLabelColor = Color(0xFFFF0000),
-                            cursorColor = Color(0xFFFF0000)
+                            focusedLabelColor = Color.White,
+                            cursorColor = Color(0xFFFF0000),
+                            focusedTextColor = Color.Black,
+                            unfocusedTextColor = Color.Black
                         )
                     )
                 }
 
                 // ERROR ANIMADO
                 AnimatedVisibility(
-                    visible = uiState.errorMessage != null,
+                    visible = errorMessage != null,
                     enter = slideInVertically { -it } + fadeIn(),
                     exit = slideOutVertically { -it } + fadeOut()
                 ) {
@@ -224,7 +242,7 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
                             .padding(12.dp)
                     ) {
                         Text(
-                            uiState.errorMessage.orEmpty(),
+                            errorMessage.orEmpty(),
                             color = Color(0xFFD32F2F),
                             fontSize = 14.sp
                         )
@@ -233,25 +251,31 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // BUTTON MORPH → LOADING
+                // 🚀 BOTÓN DINÁMICO (MORFEO PREMIUM)
                 AnimatedVisibility(visible = showButton, enter = enterAnim) {
                     Button(
-                        onClick = { viewModel.login(email, password) },
+                        onClick = { onLoginClick(email, password) },
                         modifier = Modifier
-                            .height(70.dp)
+                            .height(60.dp) // Un poco más estético
                             .width(buttonWidth),
                         shape = RoundedCornerShape(buttonCorner),
-                        enabled = !uiState.isLoading,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000))
+                        enabled = !isLoading,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000)),
+                        contentPadding = PaddingValues(0.dp) // Evita que el texto mueva el indicator
                     ) {
-                        if (uiState.isLoading) {
+                        if (isLoading) {
                             CircularProgressIndicator(
                                 color = Color.White,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(24.dp)
+                                strokeWidth = 3.dp,
+                                modifier = Modifier.size(28.dp)
                             )
                         } else {
-                            Text("Iniciar sesión", color = Color.White, fontSize = 20.sp)
+                            Text(
+                                "Iniciar sesión", 
+                                color = Color.White, 
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -260,53 +284,31 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
     }
 }
 
-@Preview(showBackground = true)
+// 🔹 PREVIEWS SEPARADOS PARA VER AMBOS ESTADOS
+@Preview(showBackground = true, showSystemUi = true, name = "Login - Estado Normal")
 @Composable
-fun PreviewLogin() {
+fun PreviewLoginNormal() {
+    MaterialTheme {
+        PantallaLoginProContent(
+            isLoading = false,
+            errorMessage = null,
+            onLoginClick = { _, _ -> },
+            onLoginSuccess = {},
+            loginSuccessSignal = false
+        )
+    }
+}
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFFF2F2F2))
-    ) {
-
-        Column(
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-        ) {
-
-            Image(
-                painter = painterResource(id = R.drawable.logotipo),
-                contentDescription = null,
-                modifier = Modifier.size(140.dp)
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            OutlinedTextField(
-                value = "",
-                onValueChange = {},
-                label = { Text("Email") },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = "",
-                onValueChange = {},
-                label = { Text("Password") },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Button(onClick = {}, modifier = Modifier.fillMaxWidth()) {
-                Text("Login")
-            }
-        }
+@Preview(showBackground = true, showSystemUi = true, name = "Login - Estado Cargando")
+@Composable
+fun PreviewLoginLoading() {
+    MaterialTheme {
+        PantallaLoginProContent(
+            isLoading = true,
+            errorMessage = null,
+            onLoginClick = { _, _ -> },
+            onLoginSuccess = {},
+            loginSuccessSignal = false
+        )
     }
 }

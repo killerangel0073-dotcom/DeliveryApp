@@ -40,9 +40,9 @@
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/logotipo_delisa"
+        android:icon="@mipmap/logotipoappdelisa"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/logotipo_delisa"
+        android:roundIcon="@mipmap/logotipoappdelisa_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Delivery">
 

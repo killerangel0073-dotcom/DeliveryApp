@@ -18,11 +18,11 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import com.gruposanangel.delivery.utilidades.FcmUtils
 import java.net.URL
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
@@ -54,7 +54,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val uid = FirebaseAuth.getInstance().currentUser?.uid
         if (uid != null) {
-            saveTokenToFirestore(uid, token)
+            FcmUtils.saveTokenToArray(uid, token)
         }
     }
 
@@ -107,7 +107,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val builder = NotificationCompat.Builder(this, channelToUse)
             .setContentTitle(title)
             .setContentText(body)
-            .setSmallIcon(applicationInfo.icon)
+            // TODO: Cambiar por R.drawable.ic_notification (Vector XML de color blanco plano con transparencia)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
@@ -194,21 +195,4 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
 
-    /* ============================================================
-       GUARDAR TOKEN EN FIRESTORE
-    ============================================================ */
-    private fun saveTokenToFirestore(uid: String, token: String) {
-        FirebaseFirestore.getInstance()
-            .collection("users").document(uid)
-            .set(
-                mapOf("fcmTokens" to FieldValue.arrayUnion(token)),
-                SetOptions.merge()
-            )
-            .addOnSuccessListener {
-                Log.d(TAG, "Token guardado correctamente en Firestore.")
-            }
-            .addOnFailureListener {
-                Log.e(TAG, "Error al guardar token en Firestore", it)
-            }
-    }
 }

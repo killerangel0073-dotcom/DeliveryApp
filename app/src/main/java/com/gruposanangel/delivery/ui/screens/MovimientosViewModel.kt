@@ -76,7 +76,13 @@ class MovimientosViewModel(
             try {
                 val uid = usuarioRepo.obtenerUsuarioActual()?.uid ?: ""
                 val listaProductos = productosSeleccionados.map { p ->
-                    mapOf("productoId" to p.id, "cantidad" to (cantidades[p.id] ?: 0))
+                    mapOf(
+                        "productoId" to p.id,
+                        "nombre" to p.nombre,
+                        "precio" to p.precio,
+                        "imagenUrl" to p.imagenUrl,
+                        "cantidad" to (cantidades[p.id] ?: 0)
+                    )
                 }
 
                 val tipoOrden = when {

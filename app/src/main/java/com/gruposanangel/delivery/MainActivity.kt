@@ -23,11 +23,13 @@ import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import com.google.firebase.auth.FirebaseAuth
 import com.gruposanangel.delivery.data.*
+import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import com.gruposanangel.delivery.SegundoPlano.LocationService
 import com.gruposanangel.delivery.SegundoPlano.scheduleSyncWorkers
 import com.gruposanangel.delivery.ui.screens.*
 import com.gruposanangel.delivery.utilidades.FcmUtils
+import com.gruposanangel.delivery.utilidades.HardLockPermissionWrapper
 import com.gruposanangel.delivery.utilidades.hayInternet
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -39,196 +41,85 @@ class MainActivity : ComponentActivity() {
     private lateinit var inventarioRepo: RepositoryInventario
     private lateinit var ventaRepository: VentaRepository
     private lateinit var repository: RepositoryCliente
-
     private var syncJob: Job? = null
     private var locationServiceStarted = false
 
-    private val ventaIdToOpenMapaState = mutableStateOf<String?>(null)
-    private val openMapaState = mutableStateOf(false)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        handleIntent(intent)
         scheduleSyncWorkers(this)
-
         FirebaseApp.initializeApp(this)
-        FirebaseAppCheck.getInstance()
-            .installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
+        FirebaseAppCheck.getInstance().installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
 
         val db = AppDatabase.getDatabase(this)
-        val clienteDao = db.clienteDao()
-        usuarioDao = db.usuarioDao()
-
-        val firebaseDataSource = FirebaseDataSource()
-        repositoryUsuario = RepositoryUsuario(firebaseDataSource, usuarioDao)
-        repository = RepositoryCliente(clienteDao)
-        inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+        usuarioDao = db.usuarioDao(); repositoryUsuario = RepositoryUsuario(FirebaseDataSource(), usuarioDao)
+        repository = RepositoryCliente(db.clienteDao()); inventarioRepo = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao())
         ventaRepository = VentaRepository(db.VentaDao())
 
-        syncJob?.cancel()
         syncJob = startForegroundSyncLoop()
-
-        val uid = FirebaseAuth.getInstance().currentUser?.uid
-        if (uid != null) {
-            lifecycleScope.launch(Dispatchers.IO) {
-                repositoryUsuario.sincronizarVendedorLocal(uid)
-                lifecycleScope.launch(Dispatchers.IO) {
-                    repository.escucharCambiosFirebase(this@MainActivity)
-                }
-                inventarioRepo.escucharCambiosFirebase(uid)
-            }
-        }
+        iniciarSincronizacionInmediata()
 
         WindowCompat.setDecorFitsSystemWindows(window, true)
-
         setContent {
-            val currentUser = FirebaseAuth.getInstance().currentUser
-            var loggedIn by remember { mutableStateOf(currentUser != null) }
-            val context = LocalContext.current
+            val usuarioActual by repositoryUsuario.getUsuarioActual().collectAsState(initial = null)
+            val context = LocalContext.current; val sysUI = rememberSystemUiController()
+            SideEffect { sysUI.setSystemBarsColor(Color.Red, darkIcons = false); sysUI.setNavigationBarColor(Color.Black, darkIcons = true) }
 
-            val systemUiController = rememberSystemUiController()
-            SideEffect {
-                systemUiController.setSystemBarsColor(color = Color.Red, darkIcons = false)
-                systemUiController.setNavigationBarColor(color = Color.Black, darkIcons = true)
-            }
-
-            Box(modifier = Modifier.fillMaxSize().background(Color.Red)) {
-                PermissionGate(
-                    onAllRequiredChecksPassed = {
-                        if (!locationServiceStarted) {
-                            startLocationService()
-                        }
-
-                        if (loggedIn) {
-                            Navegador(
-                                repository = repository,
-                                onLogout = { cerrarSesion(context) { loggedIn = false } },
-                                autoOpenTicketId = ventaIdToOpenMapaState.value
-                            )
-                        } else {
-                            PantallaLoginPro(
-                                onLoginSuccess = { loggedIn = true }
-                            )
-                        }
-                    }
-                )
+            Box(Modifier.fillMaxSize().background(Color.Red)) {
+                HardLockPermissionWrapper {
+                    if (!locationServiceStarted) startLocationService()
+                    if (usuarioActual != null) { Navegador(repository = repository, onLogout = { cerrarSesion(context) }) }
+                    else { PantallaLoginPro { iniciarSincronizacionInmediata() } }
+                }
             }
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-
-        if (
-            LocationService.isRunning.not() &&
-            ContextCompat.checkSelfPermission(
-                this,
-                android.Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            locationServiceStarted = false
+    private fun iniciarSincronizacionInmediata() {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                FcmUtils.updateFcmToken(uid)
+                repositoryUsuario.sincronizarVendedorLocal(uid)
+                repository.descargarClientesFirebase(this@MainActivity)
+                inventarioRepo.descargarProductosFirebase(uid)
+                ventaRepository.descargarVentasDia(uid) // 🔥 Descargamos las ventas del día para evitar lista vacía
+                repository.escucharCambiosFirebase(this@MainActivity)
+                inventarioRepo.escucharCambiosFirebase(uid)
+            } catch (e: Exception) { Log.e("SYNC", "Error inicial", e) }
         }
     }
 
     private fun startForegroundSyncLoop(): Job = lifecycleScope.launch(Dispatchers.IO) {
-        Log.d("SYNC", "Loop de sincronización iniciado")
-
-        // 🔥 CARGA INICIAL: Asegurar clientes 100% Offline al arrancar
-        val currentUser = FirebaseAuth.getInstance().currentUser
-        if (currentUser != null && hayInternet(this@MainActivity)) {
-            Log.d("SYNC", "Ejecutando carga inicial de clientes...")
-            repository.descargarClientesFirebase(this@MainActivity)
-        }
-
         while (isActive) {
             val user = FirebaseAuth.getInstance().currentUser
             if (user != null && hayInternet(this@MainActivity)) {
                 try {
                     val pendientes = ventaRepository.obtenerVentasPendientes()
-                    val uid = user.uid
-                    val almacenId = inventarioRepo.getAlmacenVendedor(uid)
-                    if (almacenId == null) {
-                        Log.w("SYNC", "almacenId null — esperando siguiente intento")
-                        delay(5000)
-                        continue
-                    }
-
-                    pendientes.forEach { venta ->
-                        val productos = ventaRepository.obtenerDetallesDeVenta(venta.id).map {
-                            Plantilla_Producto(it.productoId, it.nombre, it.precio, it.cantidad)
-                        }
-
-                        val (exito, mensaje) = ventaRepository.sincronizarConServidor(
-                            venta.id,
-                            venta.clienteId,
-                            venta.clienteNombre,
-                            productos,
-                            venta.metodoPago,
-                            venta.vendedorId,
-                            almacenId
-                        )
-                        if (exito) {
-                            val firestoreId = try { JSONObject(mensaje).optString("ventaId") } catch (_: Exception) { null }
-                            if (!firestoreId.isNullOrEmpty())
-                                ventaRepository.marcarVentaConFirestoreId(venta.id, firestoreId)
+                    val uid = user.uid; val almacenId = inventarioRepo.getAlmacenVendedor(uid)
+                    if (almacenId != null) {
+                        pendientes.forEach { v ->
+                            val prods = ventaRepository.obtenerDetallesDeVenta(v.id).map { Plantilla_Producto(it.productoId, it.nombre, it.precio, it.cantidad) }
+                            val (exito, msg) = ventaRepository.sincronizarConServidor(v.id, v.clienteId, v.clienteNombre, prods, v.metodoPago, v.vendedorId, almacenId)
+                            if (exito) { val fId = try { JSONObject(msg).optString("ventaId") } catch (_: Exception) { null }; if (!fId.isNullOrEmpty()) ventaRepository.marcarVentaConFirestoreId(v.id, fId) }
                         }
                     }
-
-                } catch (e: Exception) {
-                    Log.e("SYNC", "Error en sincronización", e)
-                }
+                } catch (e: Exception) { }
             }
-            delay(5000)
+            delay(10000)
         }
     }
 
-    private fun startLocationService() {
-        if (locationServiceStarted) return
-        val intent = Intent(this, LocationService::class.java).apply { action = LocationService.ACTION_START }
-        ContextCompat.startForegroundService(this, intent)
-        locationServiceStarted = true
-    }
+    private fun startLocationService() { if (!locationServiceStarted) { ContextCompat.startForegroundService(this, Intent(this, LocationService::class.java).apply { action = LocationService.ACTION_START }); locationServiceStarted = true } }
+    override fun onResume() { super.onResume(); if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED && !LocationService.isRunning) locationServiceStarted = false }
+    override fun onDestroy() { super.onDestroy(); repository.stopEscuchaFirebase(); inventarioRepo.stopEscuchaFirebase(); syncJob?.cancel() }
 
-    private fun handleIntent(intent: Intent?) {
-        if (intent?.action == "OPEN_MAPA") {
-            openMapaState.value = true
-        }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleIntent(intent)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        if (::repository.isInitialized) {
-            repository.stopEscuchaFirebase()
-            inventarioRepo.stopEscuchaFirebase()
-        }
-        syncJob?.cancel()
-    }
-
-    fun cerrarSesion(context: Context, onComplete: () -> Unit = {}) {
-        val auth = FirebaseAuth.getInstance()
-        val currentUser = auth.currentUser
+    fun cerrarSesion(context: Context) {
+        val auth = FirebaseAuth.getInstance(); val uid = auth.currentUser?.uid
         val prefs = context.getSharedPreferences("fcm_prefs", Context.MODE_PRIVATE)
-
-        val savedToken = currentUser?.uid?.let { prefs.getString("fcm_token", null) }
-        if (savedToken != null) {
-            CoroutineScope(Dispatchers.IO).launch {
-                FcmUtils.removeTokenFromArray(currentUser.uid, savedToken)
-                withContext(Dispatchers.Main) {
-                    prefs.edit().remove("fcm_token").apply()
-                    auth.signOut()
-                    onComplete()
-                }
-            }
-        } else {
-            prefs.edit().remove("fcm_token").apply()
-            auth.signOut()
-            onComplete()
+        val token = uid?.let { prefs.getString("fcm_token", null) }
+        lifecycleScope.launch(Dispatchers.IO) {
+            try { if (token != null && uid != null) FcmUtils.removeTokenFromArray(uid, token) } catch (e: Exception) { Log.e("LOGOUT", "Error FCM", e) }
+            repositoryUsuario.cerrarSesion(); withContext(Dispatchers.Main) { prefs.edit().remove("fcm_token").apply(); auth.signOut() }
         }
     }
 }

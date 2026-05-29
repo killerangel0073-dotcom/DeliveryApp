@@ -6,9 +6,9 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.google.firebase.auth.FirebaseAuth
 import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryInventario
-import com.gruposanangel.delivery.data.VentaRepository
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import org.json.JSONObject

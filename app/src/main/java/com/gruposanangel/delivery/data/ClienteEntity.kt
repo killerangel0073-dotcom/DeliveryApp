@@ -25,5 +25,6 @@ data class ClienteEntity(
 
     // 🔥 Nuevos campos
     val ownerUid: String = "",
-    val lastModified: Long = System.currentTimeMillis()
+    val lastModified: Long = System.currentTimeMillis(),
+    val rutaId: String? = null // ID de la ruta asignada
 )

@@ -118,8 +118,12 @@ class RepositoryUsuario(
         usuarioDao.limpiarTabla()
     }
 
+    suspend fun obtenerTokensDirectivos(): List<String> {
+        return firebaseDataSource.obtenerTokensDirectivos()
+    }
+
     suspend fun obtenerTokenSupervisor(): String? {
-        return firebaseDataSource.obtenerTokenSupervisor()
+        return obtenerTokensDirectivos().firstOrNull()
     }
 
     // --- MÉTODOS DE COMPATIBILIDAD ---

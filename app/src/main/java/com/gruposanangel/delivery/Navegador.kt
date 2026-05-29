@@ -10,7 +10,7 @@ import androidx.navigation.navArgument
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryInventario
-import com.gruposanangel.delivery.data.VentaRepository
+import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.model.Plantila_carga
 import com.gruposanangel.delivery.ui.screens.*
@@ -67,7 +67,7 @@ fun Navegador(
             PantallaDetalleCarga(navController, plantilacarga)
         }
 
-        composable("INVENTARIO VENDEDROR") {
+        composable("INVENTARIO_VENDEDOR") {
             val db = AppDatabase.getDatabase(context)
             val firebaseDataSource = FirebaseDataSource()
             val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
@@ -103,9 +103,17 @@ fun Navegador(
         }
 
         composable("MAPA_SCREEN") {
-            MapaScreen(navController = navController)
+            val mapaViewModel: MapaViewModel = viewModel()
+            MapaScreen(navController = navController, viewModel = mapaViewModel)
         }
 
+        composable("ADMIN_USUARIOS") {
+            Pantalla_Usuarios_Admin(navController)
+        }
+
+        composable("ADMIN_RUTAS") {
+            Pantalla_Gestion_Rutas(navController)
+        }
 
         composable("VENDEDOR_INFO_VENTAS") {
             VendedorInfoVentasScreen()
@@ -136,6 +144,14 @@ fun Navegador(
                 ventaRepository = ventaRepository,
                 impresoraBluetooth = impresoraBluetooth
             )
+        }
+
+        composable(
+            route = "detalle_venta_admin/{ticketId}",
+            arguments = listOf(navArgument("ticketId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val ticketId = backStackEntry.arguments?.getString("ticketId") ?: ""
+            Pantalla_Detalle_Venta_Admin(navController, ticketId, impresoraBluetooth)
         }
 
         composable(
@@ -186,10 +202,14 @@ fun Navegador(
         }
 
         composable(
-            route = "pantalla_ventas/{clienteId}",
-            arguments = listOf(navArgument("clienteId") { type = NavType.StringType })
+            route = "pantalla_ventas/{clienteId}?origen={origen}",
+            arguments = listOf(
+                navArgument("clienteId") { type = NavType.StringType },
+                navArgument("origen") { type = NavType.StringType; defaultValue = "Clientes"; nullable = true }
+            )
         ) { backStackEntry ->
             val clienteId = backStackEntry.arguments?.getString("clienteId") ?: ""
+            val origen = backStackEntry.arguments?.getString("origen") ?: "Clientes"
             val db = AppDatabase.getDatabase(context)
             val firebaseDataSource = FirebaseDataSource()
             val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
@@ -200,14 +220,14 @@ fun Navegador(
                 repository = repository,
                 inventarioRepo = inventarioRepo,
                 impresoraBluetooth = impresoraBluetooth,
-                productosPreview = null
+                origen = origen
             )
         }
     }
 
     LaunchedEffect(autoOpenTicketId) {
         autoOpenTicketId?.let { id ->
-            navController.navigate("detalle_ticket_completo/$id") {
+            navController.navigate("detalle_venta_admin/$id") {
                 popUpTo(navController.graph.startDestinationId) { inclusive = false }
                 launchSingleTop = true
             }
@@ -217,7 +237,7 @@ fun Navegador(
     val openScreen = (context as? MainActivity)?.intent?.action
     LaunchedEffect(openScreen) {
         if (openScreen == "OPEN_MAPA") {
-            navController.navigate("MAPA_SCREEN") {
+            navController.navigate("delivery?screen=    Mapa    ") {
                 popUpTo(navController.graph.startDestinationId) { inclusive = false }
                 launchSingleTop = true
             }

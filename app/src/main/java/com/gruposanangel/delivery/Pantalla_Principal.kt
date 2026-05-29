@@ -1,15 +1,15 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.bluetooth.BluetoothDevice
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AltRoute
 import androidx.compose.material.icons.filled.Category
@@ -31,6 +31,7 @@ import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,7 +43,7 @@ import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryInventario
-import com.gruposanangel.delivery.data.VentaRepository
+import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import kotlinx.coroutines.tasks.await
@@ -87,11 +88,17 @@ fun Pantalla_Principal(
         )
     )
 
+    // 📍 Persistencia del Mapa: El ViewModel vive en el scope de Pantalla_Principal
+    val mapaViewModel: MapaViewModel = viewModel()
+
     val isPreview = LocalInspectionMode.current
     val items = listOf(Screen.Inventario, Screen.Clientes, Screen.Inicio, Screen.Ruta, Screen.Mapa)
-    var selectedScreen by remember { mutableStateOf(items.find { it.label == startScreen } ?: Screen.Inicio) }
+    var selectedScreen by remember(startScreen) { 
+        mutableStateOf(items.find { it.label == startScreen } ?: Screen.Inicio)
+    }
     var displayName by remember { mutableStateOf(if (isPreview) "Usuario de Prueba" else "Cargando...") }
     var photoUrl by remember { mutableStateOf("") }
+    var puestoTrabajo by remember { mutableStateOf<String?>(null) }
 
     // OFFLINE-FIRST: Observamos el usuario desde Room de forma reactiva
     val usuarioActual by repoUsuario.getUsuarioActual().collectAsState(initial = null)
@@ -100,18 +107,33 @@ fun Pantalla_Principal(
         usuarioActual?.let {
             displayName = it.nombre
             photoUrl = it.photoUrl ?: ""
+            puestoTrabajo = it.puestoTrabajo
         }
+    }
+
+    val isAdmin = remember(puestoTrabajo) {
+        puestoTrabajo == "CEO1.1" || puestoTrabajo == "Gerente General" || puestoTrabajo == "Supervisor" || puestoTrabajo == "Administración"
     }
 
     Scaffold(
         bottomBar = {
-            AnimatedCurvedBottomBarPro(
-                items = items,
-                selectedScreen = selectedScreen,
-                onItemSelected = { selectedScreen = it }
-            )
+            Column(modifier = Modifier.background(Color(0xFFFF0000))) {
+                AnimatedCurvedBottomBarPro(
+                    items = items,
+                    selectedScreen = selectedScreen,
+                    onItemSelected = { screen ->
+                        // 🔥 ACTUALIZACIÓN: Navegar físicamente para que el BackStack sepa dónde estamos
+                        navController.navigate("delivery?screen=${screen.label}") {
+                            popUpTo("delivery?screen=Inicio") { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+                // 🛡️ ESPACIO DINÁMICO PARA BOTONES DEL SISTEMA
+                Spacer(Modifier.navigationBarsPadding())
+            }
         }
-
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -119,69 +141,100 @@ fun Pantalla_Principal(
                 .padding(innerPadding)
         ) {
             if (selectedScreen == Screen.Inicio) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = if (isPreview) 8.dp else 0.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // 🔝 HEADER MODERNO (Perfil y Logout)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Color.White,
+                    shadowElevation = 2.dp
                 ) {
-                    val clickableModifier = Modifier
-                        .size(50.dp)
-                        .clip(CircleShape)
-                        .clickable { navController.navigate("perfil_usuario") }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Foto de Perfil con Borde
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(Color.Red.copy(alpha = 0.1f))
+                                .clickable { navController.navigate("perfil_usuario") },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isPreview || photoUrl.isEmpty()) {
+                                Image(
+                                    painter = painterResource(R.drawable.repartidor),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                AsyncImage(
+                                    model = photoUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
 
-                    if (isPreview || photoUrl.isEmpty()) {
-                        Image(
-                            painter = painterResource(R.drawable.repartidor),
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = clickableModifier
-                        )
-                    } else {
-                        AsyncImage(
-                            model = photoUrl,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = clickableModifier
-                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Hola,",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                            Text(
+                                text = displayName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black,
+                                color = Color.Black
+                            )
+                        }
+
+                        // Botón Logout Estilizado
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFF8F9FA),
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clickable { onLogout() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Logout,
+                                    contentDescription = "Salir",
+                                    tint = Color.Red,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Text(
-                        text = displayName,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    IconButton(onClick = {
-                        if (!isPreview) FirebaseAuth.getInstance().signOut()
-                        onLogout()
-                    }) {
-                        Icon(Icons.Default.Logout, contentDescription = "Cerrar sesión")
-                    }
-
-
-
-
-
-
-
                 }
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
                 when (selectedScreen) {
-                    Screen.Inicio -> Pantalla_Inicio(
-                        navController = navController,
-                        onImpresoraSeleccionada = onImpresoraSeleccionada
-                    )
+                    Screen.Inicio -> {
+                        if (isAdmin) {
+                            Pantalla_Dashboard_Admin(navController)
+                        } else {
+                            PantallaDashboardVendedor(
+                                navController = navController,
+                                impresoraSeleccionada = impresoraBluetooth,
+                                onImpresoraSeleccionada = onImpresoraSeleccionada
+                            )
+                        }
+                    }
 
                     Screen.Clientes -> repository?.let { PantallaClientes(navController, it) }
                     Screen.Inventario -> PantallaInventario(navController, inventarioRepo)
                     Screen.Ruta -> PaginaVentaScreen(navController, ventaRepository)
                     Screen.Mapa -> {
-                        MapaScreen(navController = navController)
+                        MapaScreen(navController = navController, viewModel = mapaViewModel)
                     }
 
                 }
@@ -200,16 +253,22 @@ fun AnimatedCurvedBottomBarPro(
     onItemSelected: (Screen) -> Unit
 ) {
     val barHeight = 72.dp
-    val notchRadius = 32.dp
-    val liftHeight = 24.dp
+    val notchRadius = 42.dp // Más ancha para que no se vea delgada
+    val liftHeight = 16.dp // Más baja (antes 26.dp)
 
     val iconPositions = remember { MutableList(items.size) { 0f } }
     val selectedIndex = items.indexOf(selectedScreen)
 
+    // 🎯 OPTIMIZACIÓN: Calculamos el centro de la pantalla como posición inicial por defecto
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val defaultCenterX = screenWidthPx / 2f
+
     // Detectar si todos los iconos ya reportaron su posición
     val allMeasured = iconPositions.none { it == 0f }
 
-    // Posición inicial PRO (evita que se vaya a 0px)
+    // Posición inicial PRO: Empieza en el centro exacto para evitar el salto desde la izquierda
     val initialX = remember { mutableStateOf<Float?>(null) }
 
     LaunchedEffect(iconPositions[selectedIndex]) {
@@ -220,30 +279,39 @@ fun AnimatedCurvedBottomBarPro(
     }
 
     val notchX by animateFloatAsState(
-        targetValue = if (allMeasured) iconPositions[selectedIndex] else (initialX.value ?: 0f),
-        animationSpec = spring(dampingRatio = 0.55f, stiffness = 80f)
+        targetValue = if (allMeasured) iconPositions[selectedIndex] else (initialX.value ?: defaultCenterX),
+        animationSpec = spring(
+            dampingRatio = 0.6f, 
+            stiffness = Spring.StiffnessLow // Movimiento más elegante y "pesado"
+        ),
+        label = "notchAnimation"
     )
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(barHeight)
+            .graphicsLayer { clip = false } // Evita cortes en el notch al subir
     ) {
-
-        // Fondo con notch profesional + BLUR SUAVE
+        // Fondo con notch profesional + Gradiente sutil
         Canvas(Modifier.fillMaxSize()) {
-
             val radius = notchRadius.toPx()
             val lift = liftHeight.toPx()
 
             val path = Path().apply {
                 moveTo(0f, 0f)
-                lineTo(notchX - radius, 0f)
-                quadraticBezierTo(
-                    notchX,
-                    -lift,
-                    notchX + radius,
-                    0f
+                lineTo(notchX - radius * 1.2f, 0f)
+                // Curva de entrada suave
+                cubicTo(
+                    notchX - radius * 0.8f, 0f,
+                    notchX - radius * 0.5f, -lift,
+                    notchX, -lift
+                )
+                // Curva de salida suave
+                cubicTo(
+                    notchX + radius * 0.5f, -lift,
+                    notchX + radius * 0.8f, 0f,
+                    notchX + radius * 1.2f, 0f
                 )
                 lineTo(size.width, 0f)
                 lineTo(size.width, size.height)
@@ -251,85 +319,89 @@ fun AnimatedCurvedBottomBarPro(
                 close()
             }
 
-            // BLUR/SOMBRA SUAVE debajo del notch
             drawPath(
                 path = path,
-                color = Color(0xFFFF0000), // tu rojo original
-                alpha = 0.92f
+                color = Color(0xFFFF0000),
+                alpha = 0.95f
             )
         }
 
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 6.dp),
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-
             items.forEachIndexed { index, screen ->
-
                 val isSelected = index == selectedIndex
-
-                // Escala tipo iPhone
+                
                 val scale by animateFloatAsState(
                     targetValue = if (isSelected) 1.35f else 1f,
-                    animationSpec = spring(
-                        dampingRatio = 0.45f,
-                        stiffness = 160f
-                    )
+                    animationSpec = spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow),
+                    label = "iconScale"
                 )
 
-                // Levantamiento sutil
                 val offsetY by animateDpAsState(
-                    targetValue = if (isSelected) (-12).dp else 0.dp,
-                    animationSpec = spring(
-                        dampingRatio = 0.60f,
-                        stiffness = 140f
-                    )
+                    targetValue = if (isSelected) (-14).dp else 0.dp,
+                    animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessLow),
+                    label = "iconOffset"
                 )
 
                 Column(
                     modifier = Modifier
-                        .width(70.dp)
+                        .weight(1f)
                         .offset(y = offsetY)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onItemSelected(screen) }
                         .onGloballyPositioned { pos ->
-                            iconPositions[index] =
-                                pos.positionInParent().x + pos.size.width / 2f
+                            iconPositions[index] = pos.positionInParent().x + pos.size.width / 2f
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-
-                    // ICONO CON GLOW PRO+
+                    // 🌟 EFECTO PREMIUM: Contenedor con Resplandor Sutil
                     Box(
                         modifier = Modifier
+                            .size(44.dp)
                             .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
-                                shadowElevation = if (isSelected) 20f else 0f
-                                shape = CircleShape
-                                clip = false
                             }
+                            .background(
+                                color = if (isSelected) Color.White.copy(alpha = 0.15f) else Color.Transparent,
+                                shape = CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            screen.icon,
+                            imageVector = screen.icon,
                             contentDescription = screen.label,
                             tint = Color.White,
                             modifier = Modifier.size(28.dp)
                         )
                     }
 
-                    Spacer(Modifier.height(3.dp))
+                    Spacer(Modifier.height(4.dp))
+
+                    // 🏷️ Texto con entrada escalonada (Visibilidad mejorada para inactivos)
+                    val textAlpha by animateFloatAsState(
+                        targetValue = if (isSelected) 1f else 0.8f,
+                        animationSpec = tween(300),
+                        label = "textAlpha"
+                    )
 
                     Text(
                         text = screen.label.trim(),
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        maxLines = 1
+                        color = Color.White.copy(alpha = textAlpha),
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                        maxLines = 1,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = if (isSelected) 1.1f else 1.0f
+                            scaleY = if (isSelected) 1.1f else 1.0f
+                        }
                     )
                 }
             }

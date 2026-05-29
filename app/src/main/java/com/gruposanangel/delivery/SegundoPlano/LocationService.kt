@@ -37,6 +37,8 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import com.gruposanangel.delivery.R
+import com.gruposanangel.delivery.data.AppDatabase
+import com.gruposanangel.delivery.data.RepositoryLocation
 import java.io.IOException
 import com.gruposanangel.delivery.SegundoPlano.LocationState
 import kotlin.coroutines.coroutineContext
@@ -81,6 +83,7 @@ class LocationService : Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val firebaseUser get() = FirebaseAuth.getInstance().currentUser
     private val firestore = FirebaseFirestore.getInstance()
+    private lateinit var repoLocation: RepositoryLocation
     private var rutaNombreCache: String? = null
 
     private var velocidadFiltrada = 0f
@@ -123,6 +126,9 @@ class LocationService : Service() {
         super.onCreate()
         isRunning = true
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        
+        val db = AppDatabase.getDatabase(this)
+        repoLocation = RepositoryLocation(db.locationDao())
 
         if (!tienePermisosUbicacion()) {
             Log.e(TAG, "❌ Sin permisos de ubicación. Cerrando servicio.")
@@ -175,32 +181,25 @@ class LocationService : Service() {
             val debeSubirPorTiempo = tiempoSinSubir >= INTERVALO_MAX_QUIETO_MS
 
             if (debeSubirPorMovimiento || debeSubirPorTiempo) {
-                subirUbicacionCompleta(loc, ruta, velocidad, statusActual)
+                repoLocation.guardarUbicacion(
+                    lat = loc.latitude,
+                    lng = loc.longitude,
+                    accuracy = loc.accuracy,
+                    speed = velocidad,
+                    battery = BatteryState.state.value.level,
+                    ruta = ruta,
+                    status = statusActual
+                )
+                
+                // Intentar vaciar cola de Room si hay internet
+                repoLocation.sincronizarPendientes()
                 
                 lastUploadTimestamp = now
-                lastUploadedLocation = Location(loc) // Guardamos copia para la siguiente comparación
+                lastUploadedLocation = Location(loc)
                 
-                Log.d(TAG, "📡 Sincronización exitosa ($ruta). Motivo: ${if(debeSubirPorMovimiento) "Movimiento" else "Heartbeat/Tiempo"}")
+                Log.d(TAG, "📡 Sincronización procesada ($ruta). Motivo: ${if(debeSubirPorMovimiento) "Movimiento" else "Heartbeat/Tiempo"}")
             }
         }
-    }
-
-    private fun subirUbicacionCompleta(location: Location, ruta: String, speedKmh: Float, status: String) {
-        val data = mapOf(
-            "latitude" to location.latitude,
-            "longitude" to location.longitude,
-            "accuracy" to location.accuracy,
-            "provider" to location.provider,
-            "speed" to speedKmh,
-            "battery" to BatteryState.state.value.level,
-            "timestamp" to Timestamp.now(),
-            "status" to status
-        )
-
-        firestore.collection("locations")
-            .document(ruta)
-            .set(data, SetOptions.merge())
-            .addOnFailureListener { e -> Log.e(TAG, "Error subiendo datos", e) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

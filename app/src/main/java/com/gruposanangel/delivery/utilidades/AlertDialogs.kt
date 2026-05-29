@@ -1,15 +1,15 @@
 package com.gruposanangel.delivery.utilidades
 
-
-
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.width
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -35,7 +35,7 @@ fun DialogoConfirmacion(
             Text(
                 text = titulo,
                 color = Color.Red,
-                fontSize = 28.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
@@ -44,7 +44,7 @@ fun DialogoConfirmacion(
         text = {
             Text(
                 text = mensaje,
-                fontSize = 18.sp,
+                fontSize = 16.sp,
                 color = Color.Black,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
@@ -77,21 +77,51 @@ fun DialogoConfirmacion(
                     Text(text = textoCancelar, fontWeight = FontWeight.Bold)
                 }
             }
-        },
-        dismissButton = { } // vacío porque ahora los incluimos en el Row
+        }
     )
 }
 
-@Preview(showBackground = true)
+@SuppressLint("MissingPermission")
 @Composable
-fun DialogoConfirmacionPreview() {
-    MaterialTheme {
-        // Envolvemos en un Box para visualizarlo centrado
-        DialogoConfirmacion(
-            titulo = "¡AVISO!",
-            mensaje = "¿Estás seguro de que deseas eliminar este registro? Esta acción no se puede deshacer.",
-            onConfirmar = { /* Acción de prueba */ },
-            onCancelar = { /* Acción de prueba */ }
-        )
-    }
+fun PantallaSeleccionImpresora(
+    pairedDevices: List<BluetoothDevice>,
+    onImpresoraSeleccionada: (BluetoothDevice) -> Unit,
+    onCancelar: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onCancelar,
+        containerColor = Color.White,
+        title = { Text("Seleccionar impresora", fontWeight = FontWeight.Black) },
+        text = {
+            if (pairedDevices.isEmpty()) {
+                Text("No hay impresoras vinculadas en los ajustes de Android.")
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 300.dp)
+                ) {
+                    items(pairedDevices) { device ->
+                        Text(
+                            text = device.name ?: "Desconocido",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onImpresoraSeleccionada(device) }
+                                .padding(vertical = 12.dp, horizontal = 4.dp),
+                            color = Color.Black,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        HorizontalDivider(color = Color.LightGray.copy(alpha = 0.5f))
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onCancelar) {
+                Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }

@@ -1,5 +1,6 @@
 package com.gruposanangel.delivery.data
 
+import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -54,11 +55,35 @@ class FirebaseDataSource {
         return docRef.id
     }
 
-    suspend fun obtenerTokenSupervisor(): String? {
-        val query = firestore.collection("users")
-            .whereEqualTo("puestoTrabajo", "CEO1.1")
-            .whereEqualTo("activo", true).get().await()
-        val tokens = query.documents.firstOrNull()?.get("fcmTokens") as? List<*>
-        return tokens?.firstOrNull() as? String
+    suspend fun obtenerTokensDirectivos(): List<String> {
+        return try {
+            val puestos = listOf("CEO1.1", "Gerente General")
+            val tokens = mutableListOf<String>()
+            
+            for (puesto in puestos) {
+                val snapshot = firestore.collection("users")
+                    .whereEqualTo("puestoTrabajo", puesto)
+                    .whereEqualTo("activo", true)
+                    .get()
+                    .await()
+                
+                snapshot.documents.forEach { doc ->
+                    val fcmTokensRaw = doc.get("fcmTokens") as? List<*>
+                    fcmTokensRaw?.forEach { item ->
+                        when (item) {
+                            is String -> if (item.isNotBlank()) tokens.add(item)
+                            is Map<*, *> -> {
+                                val t = item["token"] as? String
+                                if (!t.isNullOrBlank()) tokens.add(t)
+                            }
+                        }
+                    }
+                }
+            }
+            tokens.distinct()
+        } catch (e: Exception) {
+            Log.e("FirebaseDataSource", "Error obteniendo tokens", e)
+            emptyList()
+        }
     }
 }

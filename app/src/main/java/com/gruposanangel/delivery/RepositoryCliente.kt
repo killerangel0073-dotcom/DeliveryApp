@@ -107,16 +107,15 @@ class RepositoryCliente(private val dao: ClienteDao) {
                 dao.insertAll(clientesParaGuardar)
                 Log.d(TAG, "Se descargaron y guardaron ${clientesParaGuardar.size} clientes nuevos/actualizados.")
 
-                // 5. Descarga de fotos en segundo plano (opcional, para no bloquear el flujo principal)
-                // Si la descarga es exitosa actualizamos la entidad en Room para apuntar a la
-                // ruta local, de modo que la UI pueda cargar la imagen desde disco.
+                // 5. Descarga de fotos en segundo plano (opcional)
                 CoroutineScope(Dispatchers.IO).launch {
                     clientesParaGuardar.forEach { cliente ->
-                        cliente.fotografiaUrl?.let { url ->
+                        val url = cliente.fotografiaUrl
+                        if (!url.isNullOrBlank() && url.startsWith("http")) {
                             try {
                                 val rutaLocal = descargarFotoCliente(url, cliente.id, context)
                                 if (!rutaLocal.isNullOrBlank()) {
-                                    // Actualizar la entidad local con la ruta del archivo descargado
+                                    // Solo actualizamos si la descarga fue exitosa
                                     dao.update(cliente.copy(fotografiaUrl = rutaLocal))
                                 }
                             } catch (e: Exception) {
@@ -299,20 +298,21 @@ class RepositoryCliente(private val dao: ClienteDao) {
                                 }
                             }
 
-                            // Descargar foto a local si hay URL
+                            // 📸 ESTRATEGIA DE IMAGEN: Prioridad Local > Descarga > Remota (URL)
                             val rutaFinal = when {
-                                // ✅ si el local ya tiene foto y existe → conservar
-                                local?.fotografiaUrl != null &&
-                                        File(local.fotografiaUrl).exists() -> {
+                                // 1. Si ya tenemos una foto local válida, conservarla
+                                local?.fotografiaUrl != null && local.fotografiaUrl.startsWith("/") && File(local.fotografiaUrl).exists() -> {
                                     local.fotografiaUrl
                                 }
 
-                                // 🔽 si viene de Firebase → descargar
-                                remote.fotografiaUrl != null -> {
-                                    descargarFotoCliente(remote.fotografiaUrl, remote.id, context)
+                                // 2. Si hay URL remota, intentar descargarla
+                                !remote.fotografiaUrl.isNullOrBlank() && remote.fotografiaUrl.startsWith("http") -> {
+                                    val localPath = descargarFotoCliente(remote.fotografiaUrl, remote.id, context)
+                                    // 🔥 Si la descarga falla (null), devolvemos la URL original para que Coil la cargue vía red
+                                    localPath ?: remote.fotografiaUrl
                                 }
 
-                                else -> null
+                                else -> remote.fotografiaUrl
                             }
 
                             remote.copy(fotografiaUrl = rutaFinal)

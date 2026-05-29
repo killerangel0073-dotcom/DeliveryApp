@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface VentaDao {
@@ -37,8 +38,11 @@ interface VentaDao {
     @Query("SELECT * FROM ventas WHERE id = :ventaId")
     suspend fun obtenerVentaPorId(ventaId: String): VentaEntity?
 
-    @Query("SELECT * FROM ventas WHERE fecha BETWEEN :inicio AND :fin ORDER BY fecha DESC")
-    suspend fun obtenerVentasPorPeriodo(inicio: Long, fin: Long): List<VentaEntity>
+    @Query("SELECT * FROM ventas WHERE vendedorId = :vendedorId AND fecha BETWEEN :inicio AND :fin ORDER BY fecha DESC")
+    suspend fun obtenerVentasPorPeriodo(vendedorId: String, inicio: Long, fin: Long): List<VentaEntity>
+
+    @Query("SELECT * FROM ventas WHERE vendedorId = :vendedorId AND fecha BETWEEN :inicio AND :fin ORDER BY fecha DESC")
+    fun obtenerVentasPorPeriodoFlow(vendedorId: String, inicio: Long, fin: Long): Flow<List<VentaEntity>>
 
     @Query("UPDATE ventas SET sincronizado = :sincronizado, firestoreId = :firestoreId WHERE id = :id")
     suspend fun updateSincronizacion(id: String, firestoreId: String?, sincronizado: Boolean)
