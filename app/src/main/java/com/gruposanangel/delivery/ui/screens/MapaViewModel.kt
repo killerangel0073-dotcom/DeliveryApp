@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.maps.android.compose.CameraPositionState
@@ -29,7 +30,9 @@ data class MapaUiState(
     val selectedCliente: Cliente? = null,
     val seguirVendedor: String? = null,
     val vendedorSeleccionadoRuta: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    val puestoTrabajo: String? = null,
+    val miRuta: String? = null
 )
 
 class MapaViewModel : ViewModel() {
@@ -51,6 +54,26 @@ class MapaViewModel : ViewModel() {
 
     init {
         escucharUbicacionesVendedores()
+        cargarDatosUsuario()
+    }
+
+    private fun cargarDatosUsuario() {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        viewModelScope.launch {
+            try {
+                val doc = db.collection("users").document(uid).get().await()
+                val puesto = doc.getString("puestoTrabajo")
+                val rutaRef = doc.getDocumentReference("rutaAsignada")
+                var rutaNombre: String? = null
+                if (rutaRef != null) {
+                    rutaNombre = rutaRef.id // Ej: "Ruta 2 Delisa"
+                }
+                
+                _uiState.update { it.copy(puestoTrabajo = puesto, miRuta = rutaNombre) }
+            } catch (e: Exception) {
+                Log.e("MapaVM", "Error cargando datos de usuario", e)
+            }
+        }
     }
 
     private fun escucharUbicacionesVendedores() {

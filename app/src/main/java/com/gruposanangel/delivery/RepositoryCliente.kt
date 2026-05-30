@@ -24,7 +24,6 @@ class RepositoryCliente(private val dao: ClienteDao) {
     private val TAG = "ClienteRepository"
 
     // Job para controlar las corrutinas del SnapshotListener y evitar fugas o saturación
-    private var syncJob: Job? = null
 
 
     // ============================================================
@@ -227,51 +226,46 @@ class RepositoryCliente(private val dao: ClienteDao) {
     // 🔥 3. Listener de cambios desde Firestore (bidireccional)
     // ============================================================
     fun escucharCambiosFirebase(context: Context) {
-
         listenerRegistration?.remove()
 
+        // Escuchar la colección completa. Firebase enviará el estado actual inmediatamente.
         listenerRegistration = firestore.collection("clientes")
             .addSnapshotListener { snapshot, error ->
-
                 if (error != null) {
-                    Log.e(TAG, "Error escuchando firestore", error)
+                    Log.e(TAG, "Error escuchando firestore: ${error.message}")
                     return@addSnapshotListener
                 }
 
-                if (snapshot == null) return@addSnapshotListener
+                if (snapshot == null || snapshot.isEmpty) {
+                    Log.d(TAG, "Snapshot vacío o nulo")
+                    return@addSnapshotListener
+                }
 
-                val remoteIds = snapshot.documents.map { it.id }.toSet()
+                // Procesamos en un hilo de fondo sin cancelar el job anterior si no es necesario,
+                // pero asegurando que no se encimen procesos pesados.
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val remoteDocuments = snapshot.documents
+                        val localClientes = dao.getAllClientes()
+                        val localMap = localClientes.associateBy { it.id }
+                        val remoteIds = remoteDocuments.map { it.id }.toSet()
 
-                // Cancelar cualquier trabajo previo para este SnapshotListener
-                syncJob?.cancel()
-                syncJob = CoroutineScope(Dispatchers.IO).launch {
-
-                    val localClientes = dao.getAllClientes()
-                    val localMap = localClientes.associateBy { it.id }
-
-                    // ======================================================
-                    // 1) Eliminar locales si NO están en Firestore
-                    // ======================================================
-                    localClientes.forEach { local ->
-                        if (local.syncStatus && !remoteIds.contains(local.id)) {
-                            dao.deleteById(local.id)
+                        // 1. Eliminar locales que ya no existen en la nube (solo los sincronizados)
+                        localClientes.filter { it.syncStatus && !remoteIds.contains(it.id) }.forEach {
+                            dao.deleteById(it.id)
                         }
-                    }
 
-                    // ======================================================
-                    // 2) Insertar / actualizar desde Firestore (descarga fotos en paralelo)
-                    // ======================================================
-                    val clientesActualizados = snapshot.documents.map { doc ->
-                        async {
+                        // 2. Procesar documentos remotos
+                        remoteDocuments.forEach { doc ->
                             val id = doc.id
-                            val fechaMillis = doc.getTimestamp("fechaDeCreacion")?.toDate()?.time
-                                ?: System.currentTimeMillis()
-                            val lastModified = doc.getLong("lastModified") ?: System.currentTimeMillis()
+                            val remoteLastModified = doc.getLong("lastModified") ?: 0L
+                            val local = localMap[id]
 
-                            val remote = ClienteEntity(
+                            // Mapeo básico
+                            val remoteEntity = ClienteEntity(
                                 id = id,
-                                nombreNegocio = doc.getString("nombreNegocio") ?: "",
-                                nombreDueno = doc.getString("nombreDueno") ?: "",
+                                nombreNegocio = doc.getString("nombreNegocio") ?: "Sin nombre",
+                                nombreDueno = doc.getString("nombreDueno") ?: "Sin dueño",
                                 telefono = doc.getString("telefono") ?: "",
                                 correo = doc.getString("correo") ?: "",
                                 tipoExhibidor = doc.getString("tipoExhibidor") ?: "",
@@ -280,50 +274,35 @@ class RepositoryCliente(private val dao: ClienteDao) {
                                 fotografiaUrl = doc.getString("FotografiaCliente"),
                                 activo = doc.getBoolean("activo") ?: true,
                                 medio = doc.getString("medio") ?: "medio",
-                                fechaDeCreacion = fechaMillis,
+                                fechaDeCreacion = doc.getTimestamp("fechaDeCreacion")?.toDate()?.time ?: System.currentTimeMillis(),
                                 syncStatus = true,
                                 ownerUid = doc.getString("ownerUid") ?: "",
-                                lastModified = lastModified
+                                lastModified = remoteLastModified
                             )
 
-                            val local = localMap[id]
-
-                            // Reglas para resolver conflicto local vs remoto
-                            if (local != null) {
-                                if (!local.syncStatus) {
-                                    return@async local
-                                }
-                                if (remote.lastModified <= local.lastModified) {
-                                    return@async local
+                            // Lógica de actualización:
+                            // - Si no existe localmente -> Insertar
+                            // - Si existe y remote es más nuevo -> Actualizar
+                            // - Si existe pero local no está sincronizado (pendiente de subida) -> Ignorar (respetar local)
+                            if (local == null || (local.syncStatus && remoteLastModified > local.lastModified)) {
+                                dao.insert(remoteEntity)
+                                
+                                // Descarga de foto opcional si es nueva
+                                val url = remoteEntity.fotografiaUrl
+                                if (!url.isNullOrBlank() && url.startsWith("http")) {
+                                    launch {
+                                        val path = descargarFotoCliente(url, id, context)
+                                        if (path != null) {
+                                            dao.update(remoteEntity.copy(fotografiaUrl = path))
+                                        }
+                                    }
                                 }
                             }
-
-                            // 📸 ESTRATEGIA DE IMAGEN: Prioridad Local > Descarga > Remota (URL)
-                            val rutaFinal = when {
-                                // 1. Si ya tenemos una foto local válida, conservarla
-                                local?.fotografiaUrl != null && local.fotografiaUrl.startsWith("/") && File(local.fotografiaUrl).exists() -> {
-                                    local.fotografiaUrl
-                                }
-
-                                // 2. Si hay URL remota, intentar descargarla
-                                !remote.fotografiaUrl.isNullOrBlank() && remote.fotografiaUrl.startsWith("http") -> {
-                                    val localPath = descargarFotoCliente(remote.fotografiaUrl, remote.id, context)
-                                    // 🔥 Si la descarga falla (null), devolvemos la URL original para que Coil la cargue vía red
-                                    localPath ?: remote.fotografiaUrl
-                                }
-
-                                else -> remote.fotografiaUrl
-                            }
-
-                            remote.copy(fotografiaUrl = rutaFinal)
-
-
-
                         }
+                        Log.d(TAG, "Sincronización reactiva completada: ${remoteDocuments.size} documentos procesados")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error procesando snapshot", e)
                     }
-
-                    // Esperar a que todas las descargas terminen y actualizar Room
-                    clientesActualizados.awaitAll().forEach { dao.insert(it) }
                 }
             }
     }

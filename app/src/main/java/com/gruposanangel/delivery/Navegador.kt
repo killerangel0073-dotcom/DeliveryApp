@@ -22,8 +22,13 @@ fun Navegador(
     autoOpenTicketId: String? = null
 ) {
     val navController = rememberNavController()
+    // 🔥 ESTADO DE IMPRESORA GLOBAL
     var impresoraBluetooth by remember { mutableStateOf<BluetoothDevice?>(null) }
     val context = LocalContext.current
+    
+    val setImpresora: (BluetoothDevice) -> Unit = { device ->
+        impresoraBluetooth = device
+    }
 
     NavHost(navController = navController, startDestination = "delivery?screen=Inicio") {
         composable(
@@ -42,7 +47,7 @@ fun Navegador(
                 inventarioRepo = inventarioRepo,
                 onLogout = onLogout,
                 impresoraBluetooth = impresoraBluetooth,
-                onImpresoraSeleccionada = { device -> impresoraBluetooth = device }
+                onImpresoraSeleccionada = setImpresora
             )
         }
 

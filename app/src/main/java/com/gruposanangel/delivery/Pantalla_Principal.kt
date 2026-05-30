@@ -223,13 +223,13 @@ fun Pantalla_Principal(
                             Pantalla_Dashboard_Admin(
                                 navController = navController,
                                 impresoraBluetooth = impresoraBluetooth,
-                                onImpresoraSeleccionada = onImpresoraSeleccionada
+                                onImpresoraSeleccionada = { device -> onImpresoraSeleccionada(device) }
                             )
                         } else {
                             PantallaDashboardVendedor(
                                 navController = navController,
                                 impresoraSeleccionada = impresoraBluetooth,
-                                onImpresoraSeleccionada = onImpresoraSeleccionada
+                                onImpresoraSeleccionada = { device -> onImpresoraSeleccionada(device) }
                             )
                         }
                     }

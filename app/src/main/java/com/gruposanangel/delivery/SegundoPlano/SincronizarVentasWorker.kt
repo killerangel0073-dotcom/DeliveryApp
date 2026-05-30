@@ -42,6 +42,8 @@ class SincronizarVentasWorker(
             val almacenId = inventarioRepo.getAlmacenVendedor(uidVendedor)
                 ?: return Result.retry() // Reintentar si el almacén no está cargado aún
 
+            val nombreVendedor = usuarioActual?.nombre ?: FirebaseAuth.getInstance().currentUser?.displayName ?: "Vendedor"
+
             // 🔥 3. Subida en Ráfaga con Manejo de Intermitencia
             for (venta in pendientes) {
                 // Detener si el Worker ha sido cancelado (p.ej. por pérdida de red si se configuró así)
@@ -65,6 +67,7 @@ class SincronizarVentasWorker(
                         productos = productos,
                         metodoPago = venta.metodoPago,
                         vendedorId = venta.vendedorId,
+                        vendedorNombre = nombreVendedor,
                         almacenVendedorId = almacenId
                     )
                 } catch (e: Exception) {

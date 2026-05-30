@@ -105,32 +105,67 @@ class RepositoryInventario(
         listenerRegistration?.remove()
         repositoryScope.launch {
             try {
+                // 1. Obtener almacén asignado
                 var userDoc = firestore.collection("users").document(uid).get().await()
-                if (!userDoc.exists()) userDoc = firestore.collection("users").whereEqualTo("uid", uid).get().await().documents.firstOrNull() ?: return@launch
-                val nombreAlmacen = userDoc.getString("ultimoAlmacenNombre") ?: return@launch
-                listenerRegistration = firestore.collection("inventarioStock").whereEqualTo("almacenNombre", nombreAlmacen).addSnapshotListener { snap, _ ->
-                    if (snap == null) return@addSnapshotListener
-                    repositoryScope.launch {
-                        val pendientes = obtenerMapaVentasPendientes()
-                        val entities = snap.documents.mapNotNull { d ->
-                            val id = d.id
-                            val baseId = id.split("_")[0]
-                            val cant = ((d.getLong("cantidad") ?: 0L).toInt() - (pendientes[id] ?: 0)).coerceAtLeast(0)
-                            val cat = productoDao.getProductoById(baseId)
-                            val prev = productoDao.getProductoById(id)
-
-                            val nombreNube = d.getString("productoNombre")
-                            val precioNube = (d.get("precioUnitario") as? Number)?.toDouble() ?: 0.0
-
-                            val nombreFinal = if (!nombreNube.isNullOrEmpty()) nombreNube else (cat?.nombre ?: prev?.nombre ?: "Producto")
-                            val precioFinal = if (precioNube > 0) precioNube else (cat?.precio ?: prev?.precio ?: 0.0)
-
-                            ProductoEntity(id, baseId, nombreFinal, precioFinal, cant, cat?.imagenUrl ?: prev?.imagenUrl ?: "", true)
-                        }
-                        if (entities.isNotEmpty()) productoDao.insertAll(entities)
-                    }
+                if (!userDoc.exists()) {
+                    userDoc = firestore.collection("users").whereEqualTo("uid", uid).get().await().documents.firstOrNull() ?: return@launch
                 }
-            } catch (e: Exception) { }
+                
+                val nombreAlmacen = userDoc.getString("ultimoAlmacenNombre") ?: return@launch
+                Log.d(TAG, "Escuchando inventario para almacén: $nombreAlmacen")
+
+                // 2. Establecer SnapshotListener
+                listenerRegistration = firestore.collection("inventarioStock")
+                    .whereEqualTo("almacenNombre", nombreAlmacen)
+                    .addSnapshotListener { snap, error ->
+                        if (error != null) {
+                            Log.e(TAG, "Error en SnapshotListener de inventario", error)
+                            return@addSnapshotListener
+                        }
+                        
+                        if (snap == null) return@addSnapshotListener
+
+                        repositoryScope.launch {
+                            try {
+                                val pendientes = obtenerMapaVentasPendientes()
+                                val entities = snap.documents.mapNotNull { d ->
+                                    val id = d.id
+                                    val baseId = id.split("_")[0]
+                                    val cantNube = (d.getLong("cantidad") ?: 0L).toInt()
+                                    val cantFinal = (cantNube - (pendientes[id] ?: 0)).coerceAtLeast(0)
+                                    
+                                    val cat = productoDao.getProductoById(baseId)
+                                    val prev = productoDao.getProductoById(id)
+
+                                    val nombreNube = d.getString("productoNombre")
+                                    val precioNube = (d.get("precioUnitario") as? Number)?.toDouble() ?: 0.0
+
+                                    val nombreFinal = if (!nombreNube.isNullOrEmpty()) nombreNube else (cat?.nombre ?: prev?.nombre ?: "Producto")
+                                    val precioFinal = if (precioNube > 0) precioNube else (cat?.precio ?: prev?.precio ?: 0.0)
+
+                                    ProductoEntity(
+                                        id = id,
+                                        productoId = baseId,
+                                        nombre = nombreFinal,
+                                        precio = precioFinal,
+                                        cantidadDisponible = cantFinal,
+                                        imagenUrl = cat?.imagenUrl ?: prev?.imagenUrl ?: d.getString("imagenUrl") ?: "",
+                                        syncStatus = true
+                                    )
+                                }
+                                
+                                if (entities.isNotEmpty()) {
+                                    productoDao.insertAll(entities)
+                                    Log.d(TAG, "Inventario sincronizado reactivamente: ${entities.size} productos")
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error procesando actualización de inventario", e)
+                            }
+                        }
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error iniciando escucha de inventario", e)
+            }
         }
     }
 

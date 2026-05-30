@@ -261,34 +261,70 @@ fun MapaScreen(
                 Modifier.align(Alignment.TopStart).padding(top = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                uiState.vendedores.forEach { v ->
-                    val activo = uiState.seguirVendedor == v.ruta
-                    Card(
-                        modifier = Modifier
-                            .clickable { viewModel.toggleSeguirVendedor(v.ruta) },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (activo) Color.Red else Color.White
-                        ),
-                        elevation = CardDefaults.cardElevation(4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                if (uiState.puestoTrabajo == "Vendedor de Ruta") {
+                    // 🔘 BOTÓN ÚNICO SEGUIMIENTO (PARA VENDEDORES)
+                    uiState.miRuta?.let { rutaAsignada ->
+                        val activo = uiState.seguirVendedor == rutaAsignada
+                        Card(
+                            modifier = Modifier
+                                .clickable { viewModel.toggleSeguirVendedor(rutaAsignada) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (activo) Color.Red else Color.White
+                            ),
+                            elevation = CardDefaults.cardElevation(4.dp)
                         ) {
-                            Icon(
-                                Icons.Default.LocalShipping,
-                                contentDescription = null,
-                                tint = if (activo) Color.White else Color.Red,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = v.ruta.replace(" Delisa", ""),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Black,
-                                color = if (activo) Color.White else Color.DarkGray
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.MyLocation,
+                                    contentDescription = null,
+                                    tint = if (activo) Color.White else Color.Red,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = "MI RUTA",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (activo) Color.White else Color.DarkGray
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // 🔘 BOTONES DE RUTA NORMALES (ADMIN / OTROS)
+                    uiState.vendedores.forEach { v ->
+                        val activo = uiState.seguirVendedor == v.ruta
+                        Card(
+                            modifier = Modifier
+                                .clickable { viewModel.toggleSeguirVendedor(v.ruta) },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (activo) Color.Red else Color.White
+                            ),
+                            elevation = CardDefaults.cardElevation(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.LocalShipping,
+                                    contentDescription = null,
+                                    tint = if (activo) Color.White else Color.Red,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = v.ruta.replace(" Delisa", ""),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (activo) Color.White else Color.DarkGray
+                                )
+                            }
                         }
                     }
                 }

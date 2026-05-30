@@ -8,6 +8,10 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.gruposanangel.delivery.data.AppDatabase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class WatchdogReceiver : BroadcastReceiver() {
 
@@ -20,11 +24,20 @@ class WatchdogReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Log.d("Watchdog", "🐶 Watchdog check...")
 
-        // 🔹 Reinicia el servicio de ubicación
-        val serviceIntent = Intent(context, LocationService::class.java).apply {
-            action = LocationService.ACTION_START
+        // 🔹 Solo reinicia si el usuario es Vendedor de Ruta
+        CoroutineScope(Dispatchers.IO).launch {
+            val db = AppDatabase.getDatabase(context)
+            val usuario = db.usuarioDao().obtenerUsuarioActual()
+            
+            if (usuario?.puestoTrabajo == "Vendedor de Ruta") {
+                val serviceIntent = Intent(context, LocationService::class.java).apply {
+                    action = LocationService.ACTION_START
+                }
+                ContextCompat.startForegroundService(context, serviceIntent)
+            } else {
+                Log.d("Watchdog", "🐶 Ignorado: Usuario no es Vendedor de Ruta")
+            }
         }
-        ContextCompat.startForegroundService(context, serviceIntent)
 
         // 🔹 Preparamos alarma del Watchdog
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager

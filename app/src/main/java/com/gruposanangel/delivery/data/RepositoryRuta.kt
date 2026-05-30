@@ -3,6 +3,7 @@ package com.gruposanangel.delivery.data
 import android.util.Log
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import com.gruposanangel.delivery.Itinerario
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.tasks.await
@@ -74,6 +75,52 @@ class RepositoryRuta(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error asignando clientes a ruta", e)
+        }
+    }
+
+    /**
+     * Guarda un itinerario en la colección puente 'rutas_itinerarios'.
+     * No toca la colección 'clientes'.
+     */
+    suspend fun guardarItinerario(itinerario: Itinerario) = withContext(Dispatchers.IO) {
+        try {
+            // 🛡️ Mapeo manual para limpieza absoluta de campos 'fantasma' (stability)
+            val data = hashMapOf(
+                "id" to itinerario.id,
+                "rutaId" to itinerario.rutaId,
+                "diaSemana" to itinerario.diaSemana,
+                "frecuencia" to itinerario.frecuencia,
+                "activo" to itinerario.activo,
+                "lastUpdated" to itinerario.lastUpdated,
+                "clientesOrdenados" to itinerario.clientesOrdenados.map {
+                    mapOf(
+                        "clienteId" to it.clienteId,
+                        "ordenVisita" to it.ordenVisita
+                    )
+                }
+            )
+
+            db.collection("rutas_itinerarios")
+                .document(itinerario.id)
+                .set(data, SetOptions.merge())
+                .await()
+            Log.d(TAG, "Itinerario guardado (Limpio): ${itinerario.id}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error guardando itinerario", e)
+            throw e
+        }
+    }
+
+    /**
+     * Obtiene un itinerario específico de Firestore.
+     */
+    suspend fun obtenerItinerario(id: String): Itinerario? {
+        return try {
+            val doc = db.collection("rutas_itinerarios").document(id).get().await()
+            doc.toObject(Itinerario::class.java)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error obteniendo itinerario", e)
+            null
         }
     }
 }

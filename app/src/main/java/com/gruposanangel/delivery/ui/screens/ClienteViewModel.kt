@@ -47,12 +47,13 @@ class ClienteViewModel(
                 )
             },
             searchQuery = query,
+            // Solo quitamos el loader si ya hay clientes o si Room ya emitió
             isLoading = false
         )
     }.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = ClienteUiState()
+        started = SharingStarted.Eagerly, // Cambiado a Eagerly para que empiece a escuchar de inmediato
+        initialValue = ClienteUiState(isLoading = true)
     )
 
     fun onSearchQueryChanged(newQuery: String) {

@@ -104,7 +104,21 @@ fun PantallaUsuariosAdminContent(uiState: UsuariosAdminUiState, imgBitmap: Bitma
                     FormTextField(puesto, { puesto = it }, "Puesto", Icons.Default.Work)
                     FormTextField(licencia, { licencia = it }, "Licencia", Icons.Default.DirectionsCar)
                     FormTextField(credencial, { credencial = it }, "INE", Icons.Default.AccountBox)
-                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) { Text("Cuenta Activa", fontWeight = FontWeight.Bold); Switch(checked = activo, onCheckedChange = { activo = it }, colors = SwitchDefaults.colors(checkedThumbColor = Color.Red)) }
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) { 
+                        Text("Cuenta Activa", fontWeight = FontWeight.Bold)
+                        Switch(
+                            checked = activo, 
+                            onCheckedChange = { activo = it }, 
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color.Red,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = Color.LightGray,
+                                checkedBorderColor = Color.Red,
+                                uncheckedBorderColor = Color.LightGray
+                            )
+                        ) 
+                    }
                     if (uiState.isLoading) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally), color = Color.Red)
                     else Button(onClick = { onSave(nombre, email, puesto, activo, licencia, credencial) }, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Icon(if (uiState.isNewUserMode) Icons.Default.Add else Icons.Default.Save, null); Spacer(Modifier.width(8.dp)); Text(if (uiState.isNewUserMode) "CREAR CUENTA" else "ACTUALIZAR", fontWeight = FontWeight.ExtraBold) }
                 }

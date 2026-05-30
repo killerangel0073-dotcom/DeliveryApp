@@ -59,6 +59,17 @@ class VentaRepository(private val ventaDao: VentaDao) {
                 }
             }
 
+            var vendedorNombre = "Vendedor"
+            try {
+                val firestore = FirebaseFirestore.getInstance()
+                val vendedorDoc = firestore.collection("users").document(ventaLocal.vendedorId).get().await()
+                if (vendedorDoc.exists()) {
+                    vendedorNombre = vendedorDoc.getString("nombre") ?: "Vendedor"
+                }
+            } catch (e: Exception) {
+                Log.w("VentaRepo", "No se pudo recuperar nombre del vendedor para ticket local $ticketId: ${e.message}")
+            }
+
             return TicketVentaCompleto(
                 numeroTicket = ventaLocal.id,
                 cliente = ventaLocal.clienteNombre,
@@ -67,6 +78,7 @@ class VentaRepository(private val ventaDao: VentaDao) {
                 sincronizado = ventaLocal.sincronizado,
                 fotoCliente = fotoFinal,
                 productos = productos,
+                vendedorNombre = vendedorNombre
             )
         }
 
@@ -87,6 +99,11 @@ class VentaRepository(private val ventaDao: VentaDao) {
                 else -> clienteRaw?.toString() ?: ""
             }
 
+            val vendedorId = when (val vendRaw = doc.get("vendedorId") ?: doc.get("vendedorRef")) {
+                is com.google.firebase.firestore.DocumentReference -> vendRaw.id
+                else -> vendRaw?.toString() ?: ""
+            }
+
             val clienteNombre = doc.getString("clienteNombre") ?: "Cliente"
             val total = (doc.get("total") as? Number)?.toDouble() ?: 0.0
             val fecha = doc.getTimestamp("fecha")?.toDate() ?: Date()
@@ -98,6 +115,16 @@ class VentaRepository(private val ventaDao: VentaDao) {
                     val clienteDoc = firestore.collection("clientes").document(clienteId).get().await()
                     if (clienteDoc.exists()) {
                         fotoUrl = clienteDoc.getString("FotografiaCliente") ?: ""
+                    }
+                } catch (e: Exception) { }
+            }
+
+            var vendedorNombre = doc.getString("vendedorNombre") ?: "Vendedor"
+            if ((vendedorNombre == "Vendedor") && vendedorId.isNotEmpty()) {
+                try {
+                    val vendedorDoc = firestore.collection("users").document(vendedorId).get().await()
+                    if (vendedorDoc.exists()) {
+                        vendedorNombre = vendedorDoc.getString("nombre") ?: "Vendedor"
                     }
                 } catch (e: Exception) { }
             }
@@ -118,7 +145,8 @@ class VentaRepository(private val ventaDao: VentaDao) {
                 fecha = fecha,
                 sincronizado = true,
                 fotoCliente = fotoUrl,
-                productos = productos
+                productos = productos,
+                vendedorNombre = vendedorNombre
             )
         } catch (e: Exception) {
             Log.e("VentaRepo", "Error crítico buscando ticket en Firestore", e)
@@ -263,6 +291,7 @@ class VentaRepository(private val ventaDao: VentaDao) {
         productos: List<Plantilla_Producto>,
         metodoPago: String,
         vendedorId: String,
+        vendedorNombre: String,
         almacenVendedorId: String
     ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         val url = "https://us-central1-appventas--san-angel.cloudfunctions.net/registrarVenta"
@@ -272,6 +301,7 @@ class VentaRepository(private val ventaDao: VentaDao) {
                 put("ventaLocalId", ventaLocalId)
                 put("clienteId", clienteId)
                 put("clienteNombre", clienteNombre)
+                put("vendedorNombre", vendedorNombre)
                 put("productos", JSONArray().apply {
                     productos.forEach { p ->
                         put(

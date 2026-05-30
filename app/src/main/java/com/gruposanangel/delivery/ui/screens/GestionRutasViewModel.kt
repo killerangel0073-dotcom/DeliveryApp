@@ -3,10 +3,11 @@ package com.gruposanangel.delivery.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.gruposanangel.delivery.ClienteOrdenado
+import com.gruposanangel.delivery.Itinerario
 import com.gruposanangel.delivery.data.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 data class GestionRutasUiState(
     val isLoading: Boolean = false,
@@ -72,19 +73,19 @@ class GestionRutasViewModel(
 
     private fun actualizarClientesEnRuta() {
         val state = _uiState.value
-        val nombreRutaBuscada = "${state.selectedRutaBase} ${state.selectedDay} ${state.selectedWeek}"
+        // Generamos el ID compuesto: Ruta1_Lun_Par
+        val itinerarioId = "${state.selectedRutaBase.replace(" ", "")}_${state.selectedDay}_${state.selectedWeek}"
         
-        // Buscamos si existe una ruta con ese nombre
-        val rutaExistente = state.rutas.find { it.nombre.equals(nombreRutaBuscada, ignoreCase = true) }
-        
-        if (rutaExistente != null) {
-            val ids = state.clientesDisponibles
-                .filter { it.rutaId == rutaExistente.id }
-                .map { it.id }
-                .toSet()
-            _uiState.update { it.copy(selectedClientIds = ids) }
-        } else {
-            _uiState.update { it.copy(selectedClientIds = emptySet()) }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            val itinerario = repositoryRuta.obtenerItinerario(itinerarioId)
+            
+            val ids = itinerario?.clientesOrdenados?.map { it.clienteId }?.toSet() ?: emptySet()
+            
+            _uiState.update { it.copy(
+                selectedClientIds = ids,
+                isLoading = false
+            ) }
         }
     }
 
@@ -99,28 +100,40 @@ class GestionRutasViewModel(
 
     fun guardarConfiguracionRuta() {
         val state = _uiState.value
-        val nombreRuta = "${state.selectedRutaBase} ${state.selectedDay} ${state.selectedWeek}"
+        // ID Compuesto: Ruta1_Lun_Par
+        val itinerarioId = "${state.selectedRutaBase.replace(" ", "")}_${state.selectedDay}_${state.selectedWeek}"
+        
         _uiState.update { it.copy(isLoading = true) }
         
         viewModelScope.launch {
-            // Buscamos o creamos ID
-            val rutaExistente = state.rutas.find { it.nombre.equals(nombreRuta, ignoreCase = true) }
-            val id = rutaExistente?.id ?: UUID.randomUUID().toString()
-            
-            val nuevaRuta = RutaEntity(
-                id = id,
-                nombre = nombreRuta,
-                diasVisita = state.selectedDay,
-                frecuencia = if (state.selectedWeek == "Par") "Quincenal Par" else "Quincenal Non"
-            )
-            
-            repositoryRuta.guardarRuta(nuevaRuta)
-            repositoryRuta.asignarClientesARuta(id, state.selectedClientIds)
-            
-            _uiState.update { it.copy(
-                isLoading = false, 
-                successMessage = "Logística guardada: $nombreRuta"
-            ) }
+            try {
+                // Creamos la lista ordenada (por ahora simplemente el orden en que están en el Set)
+                val clientesOrdenados = state.selectedClientIds.mapIndexed { index, id ->
+                    ClienteOrdenado(clienteId = id, ordenVisita = index + 1)
+                }
+
+                val nuevoItinerario = Itinerario(
+                    id = itinerarioId,
+                    rutaId = state.selectedRutaBase,
+                    diaSemana = state.selectedDay,
+                    frecuencia = state.selectedWeek,
+                    activo = true,
+                    clientesOrdenados = clientesOrdenados,
+                    lastUpdated = System.currentTimeMillis()
+                )
+                
+                repositoryRuta.guardarItinerario(nuevoItinerario)
+                
+                _uiState.update { it.copy(
+                    isLoading = false, 
+                    successMessage = "Itinerario guardado: ${state.selectedRutaBase} (${state.selectedDay} ${state.selectedWeek})"
+                ) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(
+                    isLoading = false,
+                    error = "Error al guardar: ${e.message}"
+                ) }
+            }
         }
     }
 

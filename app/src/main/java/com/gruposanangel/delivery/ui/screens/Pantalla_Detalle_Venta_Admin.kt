@@ -91,7 +91,11 @@ fun Pantalla_Detalle_Venta_Admin(
                     val productosParaImprimir = detalles.map { d ->
                         Plantilla_Producto(d.productoId, d.nombre, d.precio, d.cantidad)
                     }
-                    val usuario = db.usuarioDao().obtenerPorId(ventaEntity?.vendedorId ?: "")
+                    val usuario = if (ventaEntity?.vendedorId != null) {
+                        db.usuarioDao().obtenerPorId(ventaEntity.vendedorId)
+                    } else null
+                    
+                    val nombreVendedorFinal = usuario?.nombre ?: ticketState?.vendedorNombre ?: "Vendedor"
                     
                     ImprimirTicket58mmCompleto(
                         device = impresoraBluetooth,
@@ -102,7 +106,7 @@ fun Pantalla_Detalle_Venta_Admin(
                         ventaId = ventaEntity?.id,
                         fechaVenta = ventaEntity?.fecha?.let { Date(it) } ?: ticketState?.fecha ?: Date(),
                         totalVenta = ventaEntity?.total ?: ticketState?.total ?: 0.0,
-                        vendedorNombre = usuario?.nombre ?: "Vendedor",
+                        vendedorNombre = nombreVendedorFinal,
                         metodoPago = ventaEntity?.metodoPago ?: "",
 
                     )
@@ -121,7 +125,10 @@ fun Pantalla_Detalle_Venta_Admin(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Detalle de Venta", fontWeight = FontWeight.Black) },
+                title = { 
+                    val folio = ticketState?.numeroTicket?.takeLast(6)?.uppercase() ?: ""
+                    Text("Detalle Venta #$folio", fontWeight = FontWeight.Black) 
+                },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red)

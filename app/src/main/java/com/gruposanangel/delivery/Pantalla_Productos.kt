@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -33,7 +34,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -155,22 +158,33 @@ fun ListaProductosScreen(
                             onValueChange = { textoBusqueda = it },
                             placeholder = {
                                 Text(
-                                    "Busca por nombre o marca",
+                                    "Buscar producto o marca...",
                                     color = Color.Gray,
-                                    fontSize = 15.sp
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             },
                             leadingIcon = {
-                                Icon(Icons.Default.Search, contentDescription = null, tint = Color.LightGray)
+                                Icon(
+                                    imageVector = Icons.Default.Search, 
+                                    contentDescription = null, 
+                                    tint = Color.LightGray,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             },
                             trailingIcon = {
                                 if (textoBusqueda.isNotEmpty()) {
-                                    IconButton(onClick = { textoBusqueda = "" }) {
-                                        Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = Color.Gray)
+                                    IconButton(
+                                        onClick = { textoBusqueda = "" },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = Color.Gray, modifier = Modifier.size(18.dp))
                                     }
                                 }
                             },
                             modifier = Modifier.weight(1f),
+                            textStyle = TextStyle(fontSize = 14.sp),
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
                                 unfocusedContainerColor = Color.Transparent,
@@ -307,7 +321,7 @@ fun ListaProductosScreen(
                 )
             )
 
-            FloatingActionButton(
+            ExtendedFloatingActionButton(
                 onClick = {
                     clicked = true
                     scope.launch {
@@ -322,10 +336,18 @@ fun ListaProductosScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
-                    .graphicsLayer { scaleX = scale; scaleY = scale }
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Agregar Producto", modifier = Modifier.size(28.dp))
-            }
+                    .graphicsLayer { scaleX = scale; scaleY = scale },
+                icon = { 
+                    Icon(
+                        imageVector = Icons.Default.Category, 
+                        contentDescription = null, 
+                        modifier = Modifier.size(24.dp)
+                    ) 
+                },
+                text = { 
+                    Text("NUEVO", fontWeight = FontWeight.Black) 
+                }
+            )
         }
 
         // DIÁLOGO DE CONFIRMACIÓN DE ELIMINACIÓN

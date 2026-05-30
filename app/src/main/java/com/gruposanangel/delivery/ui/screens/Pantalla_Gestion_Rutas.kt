@@ -6,6 +6,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -94,7 +95,6 @@ fun PantallaGestionRutasContent(
     val estadoCamaraMapa = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(19.4768, -96.5897), 12f)
     }
-    var camaraYaEncuadrada by remember { mutableStateOf(false) }
 
     val clientesConCoordenadas by remember(uiState.clientesDisponibles) {
         derivedStateOf {
@@ -102,19 +102,18 @@ fun PantallaGestionRutasContent(
         }
     }
 
-    LaunchedEffect(clientesConCoordenadas) {
-        if (clientesConCoordenadas.isNotEmpty() && !camaraYaEncuadrada) {
+    LaunchedEffect(clientesConCoordenadas, vistaMapa) {
+        if (vistaMapa && clientesConCoordenadas.isNotEmpty()) {
             try {
                 val bounds = withContext(Dispatchers.Default) {
                     val builder = LatLngBounds.Builder()
                     clientesConCoordenadas.forEach { builder.include(LatLng(it.ubicacionLat, it.ubicacionLon)) }
                     builder.build()
                 }
-                kotlinx.coroutines.delay(500)
-                estadoCamaraMapa.animate(CameraUpdateFactory.newLatLngBounds(bounds, 150), 900)
-                camaraYaEncuadrada = true
+                kotlinx.coroutines.delay(400)
+                estadoCamaraMapa.animate(CameraUpdateFactory.newLatLngBounds(bounds, 180), 1000)
             } catch (e: Exception) {
-                Log.e(TAG, "Error encuadre inicial asíncrono", e)
+                Log.e(TAG, "Error encuadre al abrir mapa", e)
             }
         }
     }
@@ -132,6 +131,9 @@ fun PantallaGestionRutasContent(
                         label = { Text(if (vistaMapa) "Ver Lista" else "Ver Mapa", fontWeight = FontWeight.Bold) },
                         leadingIcon = { Icon(if (vistaMapa) Icons.Default.ListAlt else Icons.Default.Map, null, modifier = Modifier.size(16.dp)) },
                         colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color.White,
+                            labelColor = Color.DarkGray,
+                            iconColor = Color.Red,
                             selectedContainerColor = Color.Red.copy(alpha = 0.1f),
                             selectedLabelColor = Color.Red,
                             selectedLeadingIconColor = Color.Red
@@ -266,43 +268,56 @@ fun MenuSelectorFlotante(label: String, valor: String, activo: Boolean, modifier
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VistaListaRutas(clientes: List<ClienteEntity>, selectedIds: Set<String>, onToggle: (String) -> Unit, modifier: Modifier = Modifier) {
-    LazyColumn(modifier = modifier, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 100.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(items = clientes, key = { it.id }) { c ->
-            val sel = selectedIds.contains(c.id)
+    // 🚀 Agrupamos los seleccionados arriba de la lista
+    val clientesOrdenados = remember(clientes, selectedIds) {
+        clientes.sortedByDescending { selectedIds.contains(it.id) }
+    }
 
-            Card(
-                modifier = Modifier.fillMaxWidth().clickable { onToggle(c.id) },
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(
-                    width = if (sel) 2.dp else 1.dp,
-                    color = if (sel) Color.Red.copy(alpha = 0.8f) else ColorBordesModernos
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = if (sel) 4.dp else 0.5.dp)
+    LazyColumn(modifier = modifier, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 100.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(items = clientesOrdenados, key = { it.id }) { c ->
+            val sel = selectedIds.contains(c.id)
+            
+            // Animación de escala sutil al aparecer/cambiar posición
+            AnimatedVisibility(
+                visible = true,
+                enter = fadeIn() + expandVertically(),
+                modifier = Modifier.animateItemPlacement()
             ) {
-                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(contentAlignment = Alignment.BottomEnd) {
-                        AsyncImage(model = c.fotografiaUrl, contentDescription = null, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentScale = ContentScale.Crop, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)))
-                        if (sel) {
-                            Box(modifier = Modifier.size(18.dp).background(Color.Red, CircleShape).padding(2.dp), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(12.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { onToggle(c.id) },
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = BorderStroke(
+                        width = if (sel) 2.dp else 1.dp,
+                        color = if (sel) Color.Red.copy(alpha = 0.8f) else ColorBordesModernos // Color rojo para el borde si está en ruta
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = if (sel) 4.dp else 0.5.dp)
+                ) {
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(contentAlignment = Alignment.BottomEnd) {
+                            AsyncImage(model = c.fotografiaUrl, contentDescription = null, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentScale = ContentScale.Crop, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)))
+                            if (sel) {
+                                Box(modifier = Modifier.size(18.dp).background(Color.Red, CircleShape).padding(2.dp), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                }
                             }
                         }
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(c.nombreNegocio, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = ColorFondoLetras)
-                        Spacer(Modifier.height(2.dp))
-                        Text(c.nombreDueno, fontSize = 12.sp, color = ColorSubtitulos, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(6.dp))
-                        Surface(shape = RoundedCornerShape(6.dp), color = if (sel) Color.Red.copy(0.08f) else ColorBordesModernos.copy(0.5f)) {
-                            Text(text = if (sel) "INCLUIDO EN HOJA DE RUTA" else "DISPONIBLE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (sel) Color.Red else ColorSubtitulos, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(c.nombreNegocio, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = ColorFondoLetras)
+                            Spacer(Modifier.height(2.dp))
+                            Text(c.nombreDueno, fontSize = 12.sp, color = ColorSubtitulos, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.height(6.dp))
+                            Surface(shape = RoundedCornerShape(6.dp), color = if (sel) Color.Red.copy(0.1f) else ColorBordesModernos.copy(0.5f)) {
+                                Text(text = if (sel) "INCLUIDO EN RUTA" else "DISPONIBLE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (sel) Color.Red else ColorSubtitulos, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                            }
                         }
-                    }
-                    IconButton(onClick = { onToggle(c.id) }, colors = IconButtonDefaults.iconButtonColors(containerColor = if (sel) Color.Red else ColorFondoGrisClaro), modifier = Modifier.size(36.dp)) {
-                        Icon(imageVector = if (sel) Icons.Default.RemoveCircleOutline else Icons.Default.AddCircleOutline, contentDescription = null, tint = if (sel) Color.White else Color.Red, modifier = Modifier.size(20.dp))
+                        IconButton(onClick = { onToggle(c.id) }, colors = IconButtonDefaults.iconButtonColors(containerColor = if (sel) Color.Red else ColorFondoGrisClaro), modifier = Modifier.size(36.dp)) {
+                            Icon(imageVector = if (sel) Icons.Default.RemoveCircleOutline else Icons.Default.AddCircleOutline, contentDescription = null, tint = if (sel) Color.White else Color.Red, modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
             }
@@ -369,12 +384,16 @@ fun VistaMapaRutas(
             uiSettings = MapUiSettings(zoomControlsEnabled = false)
         ) {
             clientesValidos.forEach { c ->
-                val isSelected = selectedIds.contains(c.id)
                 val isTouched = c == selMap
+                val isSelected = selectedIds.contains(c.id)
 
+                // Lógica de colores solicitada:
+                // 1. Verde si se está tocando (foco)
+                // 2. Amarillo si ya está agregado a la ruta
+                // 3. Rojo por defecto
                 val markerIcon = when {
-                    isSelected -> iconAmarillo
                     isTouched -> iconVerde
+                    isSelected -> iconAmarillo
                     else -> iconRojo
                 }
 
@@ -410,7 +429,10 @@ fun VistaMapaRutas(
                             val isSelected = selectedIds.contains(c.id)
                             Button(
                                 onClick = { onToggle(c.id) },
-                                colors = ButtonDefaults.buttonColors(containerColor = if (isSelected) ColorFondoLetras else Color.Red), // 🎯 CORREGIDO AQUÍ
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) Color.Red.copy(alpha = 0.6f) else Color.Red,
+                                    contentColor = Color.White
+                                ),
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.padding(top = 8.dp).height(34.dp),
                                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)

@@ -141,21 +141,29 @@ fun DashboardContent(
     // Lógica de Impresora
     var showPrinterDialog by remember { mutableStateOf(false) }
     var pairedDevices by remember { mutableStateOf<List<BluetoothDevice>>(emptyList()) }
-    val bluetoothManager = remember { context.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager }
-    val bluetoothAdapter = remember { bluetoothManager.adapter }
+    
+    // 🔥 USAMOS UNA REFERENCIA ESTABLE AL ADAPTER
+    val bluetoothManager = remember(context) { context.getSystemService(Context.BLUETOOTH_SERVICE) as android.bluetooth.BluetoothManager }
+    val bluetoothAdapter = remember(bluetoothManager) { bluetoothManager.adapter }
 
-    val bluetoothPermissions = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-        arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT, android.Manifest.permission.BLUETOOTH_SCAN)
-    } else {
-        arrayOf(android.Manifest.permission.BLUETOOTH, android.Manifest.permission.BLUETOOTH_ADMIN)
+    val bluetoothPermissions = remember {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            arrayOf(android.Manifest.permission.BLUETOOTH_CONNECT, android.Manifest.permission.BLUETOOTH_SCAN)
+        } else {
+            arrayOf(android.Manifest.permission.BLUETOOTH, android.Manifest.permission.BLUETOOTH_ADMIN)
+        }
     }
 
     val bluetoothLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
         if (perms.values.all { it }) {
-            pairedDevices = bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
-            showPrinterDialog = true
+            try {
+                pairedDevices = bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
+                showPrinterDialog = true
+            } catch (e: SecurityException) {
+                android.widget.Toast.makeText(context, "Error de seguridad Bluetooth", android.widget.Toast.LENGTH_SHORT).show()
+            }
         } else {
             android.widget.Toast.makeText(context, "Se requieren permisos de Bluetooth", android.widget.Toast.LENGTH_SHORT).show()
         }
@@ -645,6 +653,7 @@ fun CardVentaAdmin(
             Icon(Icons.Default.Payments, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
+                Text("FOLIO #${venta.id.takeLast(6).uppercase()}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
                 Text(venta.clienteNombre, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text(fHora.format(Date(venta.fecha)), fontSize = 11.sp, color = Color.Gray)
             }
