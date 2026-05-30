@@ -70,8 +70,41 @@ class MainActivity : ComponentActivity() {
             val usuarioActual by repositoryUsuario.getUsuarioActual().collectAsState(initial = null)
             val context = LocalContext.current; val sysUI = rememberSystemUiController()
             
+            // 🚀 ESTADO PARA MANEJO DE NOTIFICACIONES Y NAVEGACIÓN
+            var navAction by remember { mutableStateOf<String?>(null) }
+            var navExtras by remember { mutableStateOf<Bundle?>(null) }
+
+            // Función para procesar el Intent actual (SOPORTA BACKGROUND Y FOREGROUND)
+            val procesarIntent: (Intent?) -> Unit = { i ->
+                val extras = i?.extras
+                val tipo = extras?.getString("tipo")
+                val ventaId = extras?.getString("ventaId")
+
+                Log.d("NAV_DEBUG", "Analizando Intent: Action=${i?.action}, Tipo=$tipo, VentaId=$ventaId")
+
+                if (tipo != null || ventaId != null || (i?.action != null && i.action != Intent.ACTION_MAIN)) {
+                    // Si el Intent trae datos de navegación, los priorizamos sobre la acción
+                    navAction = when {
+                        tipo == "VENTA_NUEVA" || ventaId != null -> "OPEN_VENTA_DETALLE"
+                        tipo == "CARGA_NUEVA" -> "OPEN_NOTIFICACIONES"
+                        else -> i?.action
+                    }
+                    navExtras = extras
+                    Log.d("NAV_DEBUG", "Navegación detectada: $navAction")
+                }
+            }
+
+            // Procesar el intent inicial y los cambios
+            LaunchedEffect(Unit) { procesarIntent(intent) }
+            
             // Estado de bloqueo de cuenta
             var isAccountBlocked by remember { mutableStateOf(false) }
+
+            DisposableEffect(intent) {
+                // Esto se disparará cuando setIntent(intent) sea llamado en onNewIntent
+                procesarIntent(intent)
+                onDispose { }
+            }
 
             // Listener en tiempo real para el estado "activo" del usuario
             LaunchedEffect(usuarioActual?.uid) {
@@ -107,7 +140,19 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.fillMaxSize().background(Color.Red)) {
                     HardLockPermissionWrapper {
                         startLocationService(usuarioActual?.puestoTrabajo)
-                        if (usuarioActual != null) { Navegador(repository = repository, onLogout = { cerrarSesion(context) }) }
+                        if (usuarioActual != null) { 
+                            Navegador(
+                                repository = repository, 
+                                onLogout = { cerrarSesion(context) },
+                                intentAction = navAction,
+                                intentExtras = navExtras
+                            )
+                            // Limpiamos los estados de navegación después de pasarlos para que no se repitan
+                            if (navAction != null) {
+                                navAction = null
+                                navExtras = null
+                            }
+                        }
                         else { PantallaLoginPro { iniciarSincronizacionInmediata() } }
                     }
                 }
@@ -177,6 +222,12 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onResume() { super.onResume(); if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED && !LocationService.isRunning) locationServiceStarted = false }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+    }
+
     override fun onDestroy() { 
         super.onDestroy()
         repository.stopEscuchaFirebase()

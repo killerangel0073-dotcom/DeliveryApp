@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.model.Plantilla_Producto
+import com.gruposanangel.delivery.utilidades.enviarNotificacion
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -102,6 +103,21 @@ class MovimientosViewModel(
                 )
 
                 val docId = inventarioRepo.crearOrdenTransferencia(ordenData)
+                
+                // 🔔 NOTIFICAR AL DESTINO (VENDEDOR O ALMACÉN)
+                if (tipoOrden == "TRANSFERENCIA_VENDEDOR" || tipoOrden == "TRANSFERENCIA_INTERNA") {
+                    val tokens = usuarioRepo.obtenerTokensPorDestino(destino)
+                    tokens.forEach { token ->
+                        enviarNotificacion(
+                            token = token,
+                            titulo = "Nueva Carga Asignada",
+                            mensaje = "Tienes una nueva carga desde $origen. Toca para aceptar.",
+                            tipo = "CARGA_NUEVA",
+                            idExtra = docId
+                        )
+                    }
+                }
+
                 _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true) }
                 onSuccess(docId)
             } catch (e: Exception) {

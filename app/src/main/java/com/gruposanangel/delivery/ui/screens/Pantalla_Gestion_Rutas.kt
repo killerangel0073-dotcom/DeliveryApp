@@ -387,7 +387,7 @@ fun VistaMapaRutas(
                 val isTouched = c == selMap
                 val isSelected = selectedIds.contains(c.id)
 
-                // Lógica de colores solicitada:
+
                 // 1. Verde si se está tocando (foco)
                 // 2. Amarillo si ya está agregado a la ruta
                 // 3. Rojo por defecto

@@ -25,8 +25,11 @@ interface LocationDao {
     @Insert
     suspend fun insertar(ubicacion: LocationEntity)
 
-    @Query("SELECT * FROM ubicaciones_pendientes ORDER BY timestamp ASC LIMIT 50")
+    @Query("SELECT * FROM ubicaciones_pendientes ORDER BY timestamp ASC LIMIT 100")
     suspend fun obtenerPendientes(): List<LocationEntity>
+
+    @Query("SELECT COUNT(*) FROM ubicaciones_pendientes")
+    suspend fun obtenerConteoPendientes(): Int
 
     @Delete
     suspend fun eliminar(ubicaciones: List<LocationEntity>)

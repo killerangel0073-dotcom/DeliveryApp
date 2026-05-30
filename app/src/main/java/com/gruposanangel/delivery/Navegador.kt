@@ -19,7 +19,9 @@ import com.gruposanangel.delivery.ui.screens.*
 fun Navegador(
     repository: RepositoryCliente?,
     onLogout: () -> Unit = {},
-    autoOpenTicketId: String? = null
+    autoOpenTicketId: String? = null,
+    intentAction: String? = null,
+    intentExtras: android.os.Bundle? = null
 ) {
     val navController = rememberNavController()
     // 🔥 ESTADO DE IMPRESORA GLOBAL
@@ -118,6 +120,10 @@ fun Navegador(
 
         composable("ADMIN_RUTAS") {
             Pantalla_Gestion_Rutas(navController)
+        }
+
+        composable("HISTORIAL_RUTA") {
+            Pantalla_Historial_Ruta(navController)
         }
 
         composable("VENDEDOR_INFO_VENTAS") {
@@ -230,12 +236,32 @@ fun Navegador(
         }
     }
 
-    val openScreen = (context as? MainActivity)?.intent?.action
-    LaunchedEffect(openScreen) {
-        if (openScreen == "OPEN_MAPA") {
-            navController.navigate("delivery?screen=    Mapa    ") {
-                popUpTo(navController.graph.startDestinationId) { inclusive = false }
-                launchSingleTop = true
+    LaunchedEffect(intentAction, intentExtras) {
+        if (intentAction == null) return@LaunchedEffect
+
+        android.util.Log.d("NAV_DEBUG", "Intent recibido: Action=$intentAction, Extras=${intentExtras?.keySet()?.joinToString()}")
+        when (intentAction) {
+            "OPEN_MAPA" -> {
+                navController.navigate("delivery?screen=    Mapa    ") {
+                    popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
+            "OPEN_NOTIFICACIONES" -> {
+                navController.navigate("NOTIFICACIONES") {
+                    popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
+            "OPEN_VENTA_DETALLE" -> {
+                val ventaId = intentExtras?.getString("ventaId")
+                android.util.Log.d("NAV_DEBUG", "Tratando de abrir ventaId: $ventaId")
+                if (!ventaId.isNullOrEmpty()) {
+                    navController.navigate("detalle_venta_admin/$ventaId") {
+                        popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                        launchSingleTop = true
+                    }
+                }
             }
         }
     }

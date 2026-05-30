@@ -58,6 +58,7 @@ dependencies {
     // Dependencias sin versión
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("com.google.firebase:firebase-database-ktx") // 👈 Realtime Database para Live Tracking
     implementation("com.google.firebase:firebase-storage-ktx")
     implementation("com.google.firebase:firebase-functions-ktx")
     implementation("com.google.firebase:firebase-messaging-ktx") // 👈 FCM

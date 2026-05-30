@@ -27,7 +27,9 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.*
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
@@ -54,6 +56,10 @@ object LocationConfig {
     const val DISTANCIA_MAX_SALTO = 2000f
     const val WAKELOCK_TIMEOUT = 10 * 60 * 1000L // 10 minutos
     const val NOTIFY_THROTTLE_MS = 120_000L
+    
+    // Batching Audit (Firestore)
+    const val BATCH_MIN_POINTS = 50
+    const val BATCH_MAX_WAIT_TIME_MS = 15 * 60 * 1000L // 15 minutos
 }
 
 class LocationService : Service() {
@@ -65,6 +71,7 @@ class LocationService : Service() {
     private var batteryReceiverRegistered = false
     private var lastUploadedLocation: Location? = null // 🔥 Nueva: Controla el rastro real en Firestore
     private var lastUploadTimestamp: Long = 0
+    private var lastBatchSyncTimestamp: Long = 0
 
     private val DISTANCIA_MINIMA = 7f
     private val INTERVALO_SUBIDA_MOVIMIENTO_MS = 5000L
@@ -79,12 +86,18 @@ class LocationService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private val TAG = "LocationService"
+    private val RTDB_URL = "https://appventas--san-angel-default-rtdb.firebaseio.com/"
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val firebaseUser get() = FirebaseAuth.getInstance().currentUser
     private val firestore = FirebaseFirestore.getInstance()
+    private val rtdb = FirebaseDatabase.getInstance(RTDB_URL).reference // 🚀 RTDB con URL explícita
     private lateinit var repoLocation: RepositoryLocation
     private var rutaNombreCache: String? = null
+    
+    // 🔥 Límite de velocidad sincronizado con Firebase
+    private var limiteVelocidadActual = 70f
+    private var configListener: ListenerRegistration? = null
 
     private var velocidadFiltrada = 0f
     private var velocidadFiltradaUI = 0f
@@ -130,6 +143,10 @@ class LocationService : Service() {
         val db = AppDatabase.getDatabase(this)
         repoLocation = RepositoryLocation(db.locationDao())
 
+        // Inicializar límite desde SharedPreferences (último valor conocido)
+        val prefs = getSharedPreferences("config_gps", Context.MODE_PRIVATE)
+        limiteVelocidadActual = prefs.getFloat("limite_velocidad", 70f)
+
         if (!tienePermisosUbicacion()) {
             Log.e(TAG, "❌ Sin permisos de ubicación. Cerrando servicio.")
             stopSelf()
@@ -145,6 +162,7 @@ class LocationService : Service() {
         requestLocationUpdates()
         registrarBatteryReceiver()
         iniciarWatchdog()
+        iniciarEscuchaConfiguracion()
 
         serviceScope.launch {
             precargarRutaSuspend()
@@ -181,6 +199,7 @@ class LocationService : Service() {
             val debeSubirPorTiempo = tiempoSinSubir >= INTERVALO_MAX_QUIETO_MS
 
             if (debeSubirPorMovimiento || debeSubirPorTiempo) {
+                // 1. VÍA DE AUDITORÍA: Guardar en Room (Silencioso, sin Firestore batch por ahora)
                 repoLocation.guardarUbicacion(
                     lat = loc.latitude,
                     lng = loc.longitude,
@@ -191,15 +210,70 @@ class LocationService : Service() {
                     status = statusActual
                 )
                 
-                // Intentar vaciar cola de Room si hay internet
-                repoLocation.sincronizarPendientes()
+                // 2. VÍA RÁPIDA: Actualizar RTDB para Live Tracking (Cada 5-30s según movimiento)
+                actualizarRealtimeLive(
+                    uid = user.uid,
+                    lat = loc.latitude,
+                    lng = loc.longitude,
+                    accuracy = loc.accuracy,
+                    speed = velocidad,
+                    battery = BatteryState.state.value.level,
+                    status = statusActual,
+                    ruta = ruta
+                )
                 
                 lastUploadTimestamp = now
                 lastUploadedLocation = Location(loc)
                 
-                Log.d(TAG, "📡 Sincronización procesada ($ruta). Motivo: ${if(debeSubirPorMovimiento) "Movimiento" else "Heartbeat/Tiempo"}")
+                Log.d(TAG, "📡 Sync local + RTDB ($ruta). Motivo: ${if(debeSubirPorMovimiento) "Movimiento" else "Heartbeat"}")
+            }
+
+            // ==========================================
+            // 🚀 PASO 2: LOGICA DE RÁFAGA (BATCHING)
+            // ==========================================
+            val tiempoDesdeUltimoBatch = now - lastBatchSyncTimestamp
+            val conteoPendientes = repoLocation.obtenerConteoPendientes()
+
+            val debeSincronizarBatch = conteoPendientes >= LocationConfig.BATCH_MIN_POINTS || 
+                                     tiempoDesdeUltimoBatch >= LocationConfig.BATCH_MAX_WAIT_TIME_MS
+
+            if (debeSincronizarBatch && conteoPendientes > 0) {
+                val exito = repoLocation.sincronizarLoteAFirestore()
+                if (exito) {
+                    lastBatchSyncTimestamp = now
+                }
             }
         }
+    }
+
+    /**
+     * Envía la ubicación actual al Realtime Database para el mapa en vivo.
+     * Estructura: /vendedores_en_vivo/{uid}
+     */
+    private fun actualizarRealtimeLive(
+        uid: String,
+        lat: Double,
+        lng: Double,
+        accuracy: Float,
+        speed: Float,
+        battery: Int,
+        status: String,
+        ruta: String
+    ) {
+        Log.d(TAG, "📡 RTDB: Intentando actualizar ubicación para $ruta ($uid)")
+        val data = mapOf(
+            "latitude" to lat,
+            "longitude" to lng,
+            "accuracy" to accuracy,
+            "speed" to speed,
+            "battery" to battery,
+            "status" to status,
+            "ruta" to ruta,
+            "timestamp" to System.currentTimeMillis()
+        )
+        rtdb.child("vendedores_en_vivo").child(uid).setValue(data)
+            .addOnSuccessListener { Log.i(TAG, "✅ RTDB: Ubicación actualizada correctamente") }
+            .addOnFailureListener { e -> Log.e(TAG, "❌ RTDB Error en setValue: ${e.message}", e) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -363,6 +437,27 @@ class LocationService : Service() {
 
 
 
+    private fun iniciarEscuchaConfiguracion() {
+        configListener?.remove()
+        configListener = firestore.collection("config").document("gps")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error escuchando config", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null && snapshot.exists()) {
+                    val nuevoLimite = snapshot.getDouble("limite_velocidad")?.toFloat() ?: 70f
+                    limiteVelocidadActual = nuevoLimite
+                    
+                    // Guardamos en SharedPreferences como respaldo offline
+                    val prefs = getSharedPreferences("config_gps", Context.MODE_PRIVATE)
+                    prefs.edit().putFloat("limite_velocidad", nuevoLimite).apply()
+                    
+                    Log.i(TAG, "Límite de velocidad actualizado desde Firebase: $nuevoLimite km/h")
+                }
+            }
+    }
+
     private fun procesarNuevaUbicacion(location: Location) {
         // --- 1. FILTRO DE ANTIGÜEDAD (ANTI-CACHÉ) ---
         val edadMs = System.currentTimeMillis() - location.time
@@ -452,22 +547,22 @@ class LocationService : Service() {
 
 
         // --- 6. AUTO-DISPARO DE ALERTA CON UMBRAL ---
-        val limiteMaximo = 70f
-        val margenApagado = 68f // 🚩 Umbral pequeño para que no "parpadee" la alarma
+        val limiteMaximo = limiteVelocidadActual
+        val margenApagado = limiteMaximo - 2f // 🚩 Umbral pequeño para que no "parpadee" la alarma
 
         if (velocidadActual.value > limiteMaximo) {
             if (!alarmaActiva) {
                 alarmaActiva = true
                 lanzarAlertaExceso(velocidadActual.value)
-                Log.w(TAG, "🚨 ALERTA: Exceso detectado (>70 km/h)")
+                Log.w(TAG, "🚨 ALERTA: Exceso detectado (>${limiteMaximo.toInt()} km/h)")
             }
         } else if (velocidadActual.value < margenApagado) {
-            // Solo se apaga cuando baja de 68 km/h
+            // Solo se apaga cuando baja del margen
             if (alarmaActiva) {
                 alarmaActiva = false
                 detenerAlarma()
                 alertaVelocidad.value = null
-                Log.i(TAG, "✅ Velocidad normalizada (<68 km/h)")
+                Log.i(TAG, "✅ Velocidad normalizada (<${margenApagado.toInt()} km/h)")
             }
         }
 
@@ -736,6 +831,8 @@ class LocationService : Service() {
         }
 
         isRunning = false
+        configListener?.remove()
+        configListener = null
         try { fusedLocationClient.removeLocationUpdates(locationCallback) } catch (e: Exception) {}
         detenerAlarma()
         serviceJob.cancel()

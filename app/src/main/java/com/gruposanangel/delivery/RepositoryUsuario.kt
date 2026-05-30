@@ -126,6 +126,10 @@ class RepositoryUsuario(
         return obtenerTokensDirectivos().firstOrNull()
     }
 
+    suspend fun obtenerTokensPorDestino(destino: String): List<String> {
+        return firebaseDataSource.obtenerTokensPorDestino(destino)
+    }
+
     // --- MÉTODOS DE COMPATIBILIDAD ---
 
     suspend fun obtenerUsuarioActual(): UsuarioEntity? {

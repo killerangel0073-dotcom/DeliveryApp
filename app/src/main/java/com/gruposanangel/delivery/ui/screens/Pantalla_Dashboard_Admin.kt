@@ -138,6 +138,24 @@ fun DashboardContent(
     var selectedDate by remember { mutableStateOf(Date()) }
     var showDatePicker by remember { mutableStateOf(false) }
 
+    // Lógica de Velocidad
+    var showSpeedDialog by remember { mutableStateOf(false) }
+    val prefs = remember { context.getSharedPreferences("config_gps", Context.MODE_PRIVATE) }
+    var speedLimit by remember { mutableFloatStateOf(prefs.getFloat("limite_velocidad", 70f)) }
+
+    // 🔥 SINCRONIZACIÓN EN TIEMPO REAL CON FIREBASE
+    LaunchedEffect(Unit) {
+        val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+        firestore.collection("config").document("gps")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    val fireLimit = snapshot.getDouble("limite_velocidad")?.toFloat() ?: 70f
+                    speedLimit = fireLimit
+                    prefs.edit().putFloat("limite_velocidad", fireLimit).apply()
+                }
+            }
+    }
+
     // Lógica de Impresora
     var showPrinterDialog by remember { mutableStateOf(false) }
     var pairedDevices by remember { mutableStateOf<List<BluetoothDevice>>(emptyList()) }
@@ -291,6 +309,21 @@ fun DashboardContent(
                 )
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 🚀 BOTÓN DE VELOCIDAD
+                    IconButton(
+                        onClick = { showSpeedDialog = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Speed,
+                            contentDescription = "Configurar Velocidad",
+                            tint = Color.Red,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(12.dp))
+
                     // 🖨️ BOTÓN DE IMPRESORA (IZQUIERDA DEL CALENDARIO)
                     IconButton(
                         onClick = {
@@ -338,6 +371,64 @@ fun DashboardContent(
                         showPrinterDialog = false
                     },
                     onCancelar = { showPrinterDialog = false }
+                )
+            }
+
+            if (showSpeedDialog) {
+                var tempValue by remember { mutableStateOf(speedLimit.toInt().toString()) }
+                AlertDialog(
+                    onDismissRequest = { showSpeedDialog = false },
+                    containerColor = Color.White,
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Speed, null, tint = Color.Red)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Límite de Velocidad", fontWeight = FontWeight.Black)
+                        }
+                    },
+                    text = {
+                        Column {
+                            Text("Define la velocidad máxima permitida (km/h) para los vendedores antes de disparar la alarma.", fontSize = 14.sp, color = Color.Gray)
+                            Spacer(Modifier.height(16.dp))
+                            OutlinedTextField(
+                                value = tempValue,
+                                onValueChange = { if (it.length <= 3 && it.all { c -> c.isDigit() }) tempValue = it },
+                                label = { Text("Límite km/h") },
+                                suffix = { Text("km/h") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val nuevoLimite = tempValue.toFloatOrNull() ?: 70f
+                                
+                                // Guardar en Firebase (Para sincronizar con vendedores)
+                                val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                firestore.collection("config").document("gps")
+                                    .set(mapOf("limite_velocidad" to nuevoLimite), com.google.firebase.firestore.SetOptions.merge())
+                                
+                                speedLimit = nuevoLimite
+                                prefs.edit().putFloat("limite_velocidad", nuevoLimite).apply()
+                                showSpeedDialog = false
+                                android.widget.Toast.makeText(context, "Límite global actualizado a ${nuevoLimite.toInt()} km/h", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("GUARDAR", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showSpeedDialog = false }) {
+                            Text("CANCELAR", color = Color.Gray)
+                        }
+                    }
                 )
             }
 

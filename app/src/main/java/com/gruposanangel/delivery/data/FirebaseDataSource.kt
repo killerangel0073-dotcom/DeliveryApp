@@ -55,6 +55,59 @@ class FirebaseDataSource {
         return docRef.id
     }
 
+    suspend fun obtenerTokensPorDestino(destino: String): List<String> {
+        return try {
+            val tokens = mutableListOf<String>()
+            // Limpiamos el destino (ej: "Vendedor Delisa R2" -> "Ruta 2 Delisa" o similar)
+            val destinoLimpio = destino.replace("Vendedor ", "").trim()
+            
+            Log.d("NOTIF_SANGEL", "Buscando tokens para destino: $destinoLimpio")
+
+            // 1. Buscar directamente en la colección de rutas por el nombre
+            val rutasSnapshot = firestore.collection("rutas")
+                .get()
+                .await()
+            
+            var vendedorRef: com.google.firebase.firestore.DocumentReference? = null
+
+            for (doc in rutasSnapshot.documents) {
+                val nombreRuta = doc.getString("nombre") ?: ""
+                val almacenRef = doc.getDocumentReference("almacenAsignado")
+                
+                // Si el nombre coincide o el ID del almacén coincide con el destino seleccionado
+                if (nombreRuta.contains(destinoLimpio, true) || (almacenRef != null && almacenRef.id.contains(destinoLimpio, true))) {
+                    vendedorRef = doc.getDocumentReference("vendedorAsignado")
+                    Log.d("NOTIF_SANGEL", "Ruta detectada: $nombreRuta. Vendedor: ${vendedorRef?.id}")
+                    break
+                }
+            }
+
+            // 2. Si encontramos al vendedor, obtenemos sus tokens
+            if (vendedorRef != null) {
+                val userDoc = vendedorRef.get().await()
+                val fcmTokensRaw = userDoc.get("fcmTokens") as? List<*>
+                fcmTokensRaw?.forEach { if (it is String && it.isNotBlank()) tokens.add(it) }
+            } else {
+                // Fallback por si la relación de ruta falla: Buscar por nombre en usuarios
+                val usersSnap = firestore.collection("users").whereEqualTo("activo", true).get().await()
+                for (doc in usersSnap.documents) {
+                    val nombre = doc.getString("nombre") ?: ""
+                    if (nombre.contains(destinoLimpio, true)) {
+                        val fcmTokensRaw = doc.get("fcmTokens") as? List<*>
+                        fcmTokensRaw?.forEach { if (it is String && it.isNotBlank()) tokens.add(it) }
+                    }
+                }
+            }
+            
+            val resultado = tokens.distinct()
+            Log.d("NOTIF_SANGEL", "Dispositivos encontrados: ${resultado.size}")
+            resultado
+        } catch (e: Exception) {
+            Log.e("NOTIF_SANGEL", "Error", e)
+            emptyList()
+        }
+    }
+
     suspend fun obtenerTokensDirectivos(): List<String> {
         return try {
             val puestos = listOf("CEO1.1", "Gerente General")

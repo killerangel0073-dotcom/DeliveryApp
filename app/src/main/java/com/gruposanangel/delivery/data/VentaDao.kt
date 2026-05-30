@@ -47,6 +47,18 @@ interface VentaDao {
     @Query("UPDATE ventas SET sincronizado = :sincronizado, firestoreId = :firestoreId WHERE id = :id")
     suspend fun updateSincronizacion(id: String, firestoreId: String?, sincronizado: Boolean)
 
+    @Query("UPDATE productos SET cantidadDisponible = cantidadDisponible - :cantidad WHERE id = :productoId")
+    suspend fun descontarStockLocal(productoId: String, cantidad: Int)
+
+    @Transaction
+    suspend fun insertarVentaYActualizarStock(venta: VentaEntity, detalles: List<VentaDetalleEntity>) {
+        insertarVenta(venta)
+        detalles.forEach {
+            insertarDetalle(it)
+            descontarStockLocal(it.productoId, it.cantidad)
+        }
+    }
+
     @Query("SELECT firestoreId FROM ventas WHERE id = :ventaLocalId LIMIT 1")
     fun obtenerFirestoreIdDeVenta(ventaLocalId: String): String?
 

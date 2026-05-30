@@ -348,6 +348,22 @@ fun MapaScreen(
                     DropdownMenuItem(text = { Text("Vista Satélite") }, onClick = { viewModel.setMapType(MapType.SATELLITE); expanded = false })
                     DropdownMenuItem(text = { Text("Modo Oscuro") }, onClick = { viewModel.setMapType(MapType.NORMAL, darkMapStyleJson); expanded = false })
                 }
+                
+                if (uiState.puestoTrabajo != "Vendedor de Ruta") {
+                    Spacer(Modifier.height(12.dp))
+
+                    // 🕰️ Botón Historial Retroactivo (Tesla Style)
+                    FloatingActionButton(
+                        onClick = { navController.navigate("HISTORIAL_RUTA") },
+                        containerColor = Color.White,
+                        contentColor = Color.DarkGray,
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        elevation = FloatingActionButtonDefaults.elevation(3.dp)
+                    ) {
+                        Icon(Icons.Default.History, null, modifier = Modifier.size(20.dp), tint = Color.Red)
+                    }
+                }
             }
 
             // 🏷️ Toggle Cobertura de Clientes (Lógica centralizada en ViewModel)

@@ -260,7 +260,7 @@ class VentaRepository(private val ventaDao: VentaDao) {
             )
         }
 
-        ventaDao.insertarVentaConDetalles(venta, detalles)
+        ventaDao.insertarVentaYActualizarStock(venta, detalles)
         idLocal
     }
 

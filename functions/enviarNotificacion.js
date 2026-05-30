@@ -10,7 +10,7 @@ const admin = require('firebase-admin');
  */
 const enviarNotificacion = functions.https.onRequest(async (req, res) => {
   try {
-    const { token, tokens, titulo, mensaje, imagen, ventaId } = req.body;
+    const { token, tokens, titulo, mensaje, imagen, ventaId, tipo } = req.body;
 
     // 1. Normalizar destinatarios
     let targets = [];
@@ -40,7 +40,8 @@ const enviarNotificacion = functions.https.onRequest(async (req, res) => {
       mensaje: mensaje,
       imagen: imagen || "",
       ventaId: ventaId ? String(ventaId) : "",
-      click_action: "OPEN_TICKET_DETAIL"
+      tipo: tipo || "",
+      click_action: tipo === "CARGA_NUEVA" ? "OPEN_NOTIFICACIONES" : (tipo === "VENTA_NUEVA" ? "OPEN_VENTA_DETALLE" : "OPEN_TICKET_DETAIL")
     };
 
     // 4. Opciones específicas de Android para que se vea Premium

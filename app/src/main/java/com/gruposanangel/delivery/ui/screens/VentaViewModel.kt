@@ -242,10 +242,6 @@ class VentaViewModel(
                     vendedorId = uidVendedor
                 )
 
-                productosVenta.forEach {
-                    repositoryInventario.actualizarCantidadProducto(it.id, it.cantidad)
-                }
-
                 withContext(Dispatchers.Main) {
                     enviarNotificacionSegundoPlano(clienteNombre, totalVenta, clienteFotoUrl, ventaLocalId)
                     _uiState.update { it.copy(estaProcesando = false) }
@@ -277,6 +273,7 @@ class VentaViewModel(
                     put("mensaje", "👤 Cliente: $cliente\n💰 Total: $totalFormateado")
                     put("imagen", foto ?: "")
                     put("ventaId", localId)
+                    put("tipo", "VENTA_NUEVA")
                 }
                 
                 val request = Request.Builder()

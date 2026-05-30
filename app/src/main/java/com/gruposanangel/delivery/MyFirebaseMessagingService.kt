@@ -92,8 +92,14 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     private fun showNotification(title: String, body: String, data: Map<String, String>) {
         val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
 
+        val intentAction = when (data["tipo"]) {
+            "CARGA_NUEVA" -> "OPEN_NOTIFICACIONES"
+            "VENTA_NUEVA" -> "OPEN_VENTA_DETALLE"
+            else -> "OPEN_MAPA"
+        }
+
         val intent = Intent(this, MainActivity::class.java).apply {
-            action = "OPEN_MAPA"
+            action = intentAction
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
 
