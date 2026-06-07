@@ -59,7 +59,8 @@ class MainActivity : ComponentActivity() {
 
         val db = AppDatabase.getDatabase(this)
         usuarioDao = db.usuarioDao(); repositoryUsuario = RepositoryUsuario(FirebaseDataSource(), usuarioDao)
-        repository = RepositoryCliente(db.clienteDao()); inventarioRepo = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao())
+        repository = RepositoryCliente(db.clienteDao())
+        inventarioRepo = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
         ventaRepository = VentaRepository(db.VentaDao())
 
         syncJob = startForegroundSyncLoop()
@@ -167,18 +168,20 @@ class MainActivity : ComponentActivity() {
                 // 1. Actualizar Token FCM (Indispensable para comunicación)
                 launch { FcmUtils.updateFcmToken(uid) }
                 
-                // 2. Sincronizar perfil del vendedor
-                launch { repositoryUsuario.sincronizarVendedorLocal(uid) }
+                // 2. Sincronizar perfil del vendedor/admin
+                repositoryUsuario.sincronizarVendedorLocal(uid)
+                
+                val usuario = repositoryUsuario.obtenerUsuarioLocal(uid)
+                val idParaSync = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
                 
                 // 3. Iniciar escucha en tiempo real (SnapshotListeners)
-                // Los SnapshotListeners traen el estado inicial automáticamente, no bloquean.
                 repository.escucharCambiosFirebase(this@MainActivity)
                 inventarioRepo.escucharCambiosFirebase(uid)
                 
-                // 4. Descargas masivas de respaldo (Corren en paralelo sin bloquear los listeners)
+                // 4. Descargas masivas de respaldo
                 launch { repository.descargarClientesFirebase(this@MainActivity) }
                 launch { inventarioRepo.descargarProductosFirebase(uid) }
-                launch { ventaRepository.descargarVentasDia(uid) }
+                launch { ventaRepository.descargarVentasDia(idParaSync) }
 
             } catch (e: Exception) { 
                 Log.e("SYNC", "Error crítico en sincronización inicial: ${e.message}") 

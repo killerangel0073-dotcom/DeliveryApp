@@ -108,6 +108,61 @@ class FirebaseDataSource {
         }
     }
 
+    suspend fun obtenerListaAlmacenes(): List<String> {
+        return try {
+            val snapshot = firestore.collection("almacenes").get().await()
+            snapshot.documents.map { it.id }.sorted()
+        } catch (e: Exception) {
+            Log.e("FirebaseDataSource", "Error obteniendo lista de almacenes", e)
+            emptyList()
+        }
+    }
+
+    suspend fun obtenerStockDanado(almacenNombre: String): Map<String, Int> {
+        return try {
+            val result = firestore.collection("inventarioDanado")
+                .whereEqualTo("almacenNombre", almacenNombre)
+                .get()
+                .await()
+            
+            val stockMap = mutableMapOf<String, Int>()
+            for (doc in result.documents) {
+                val productoId = doc.getString("productoId")
+                val cantidad = doc.getLong("cantidad")?.toInt() ?: 0
+                if (productoId != null) stockMap[productoId] = cantidad
+            }
+            stockMap
+        } catch (e: Exception) {
+            Log.e("FirebaseDataSource", "Error obteniendo stock dañado", e)
+            emptyMap()
+        }
+    }
+
+    suspend fun obtenerStockGlobal(): Map<String, Int> {
+        return try {
+            val result = firestore.collection("inventarioStock").get().await()
+            val globalStock = mutableMapOf<String, Int>()
+            
+            for (doc in result.documents) {
+                // 🛡️ Búsqueda robusta del ID del producto
+                val productoId = doc.getString("productoId") 
+                    ?: doc.getDocumentReference("productoRef")?.id 
+                    ?: doc.id.split("_")[0]
+                
+                val cantidad = doc.getLong("cantidad")?.toInt() ?: 0
+                
+                if (productoId.isNotEmpty()) {
+                    globalStock[productoId] = (globalStock[productoId] ?: 0) + cantidad
+                }
+            }
+            Log.d("FirebaseDataSource", "Stock Global calculado para ${globalStock.size} productos únicos")
+            globalStock
+        } catch (e: Exception) {
+            Log.e("FirebaseDataSource", "Error stock global", e)
+            emptyMap()
+        }
+    }
+
     suspend fun obtenerTokensDirectivos(): List<String> {
         return try {
             val puestos = listOf("CEO1.1", "Gerente General")

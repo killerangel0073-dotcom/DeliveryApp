@@ -76,6 +76,7 @@ fun MovimientosInventarioScreen(
     // Simulación de triggers de lógica para estados reales
     var ejecutarCrearOrden: (String, String, List<Plantilla_Producto>, Map<String, Int>, (String) -> Unit) -> Unit = { _, _, _, _, _ -> }
     var triggerCargarStock: (String) -> Unit = {}
+    var listaAlmacenesDinamica by remember { mutableStateOf(emptyList<String>()) }
 
     if (!isPreview) {
         val db = AppDatabase.getDatabase(context)
@@ -93,12 +94,14 @@ fun MovimientosInventarioScreen(
         uiStateLoading = state.value.isLoading
         productosCatalogo = catalogo.value
         stockOrigen = state.value.stockOrigen
+        listaAlmacenesDinamica = state.value.listaAlmacenes
 
         ejecutarCrearOrden = { orig, dest, prods, cants, onCompletado ->
             viewModel.crearOrden(orig, dest, prods, cants, onCompletado)
         }
         triggerCargarStock = { orig -> viewModel.cargarStockOrigen(orig) }
     } else {
+        listaAlmacenesDinamica = listOf("Almacen Huasteca", "Vendedor Delisa R1", "Vendedor Delisa R2")
 
 
 
@@ -129,12 +132,15 @@ fun MovimientosInventarioScreen(
     var expandedOrigen by remember { mutableStateOf(false) }
     var expandedDestino by remember { mutableStateOf(false) }
 
-    val opcionesOrigen = listOf("Compra Producto", "Almacen Huasteca")
-    val opcionesDestinoCompra = listOf("Almacen Huasteca")
-    val opcionesDestinoAlmacen = listOf(
-        "Vendedor Delisa R1", "Vendedor Delisa R2",
-        "Vendedor Cazador R1", "Vendedor Cazador R2"
-    )
+    val opcionesOrigen = remember(listaAlmacenesDinamica) {
+        listOf("Compra Producto") + listaAlmacenesDinamica.filter { !it.startsWith("Vendedor") && it != "Compra Producto" }
+    }
+    val opcionesDestinoCompra = remember(listaAlmacenesDinamica) {
+        listaAlmacenesDinamica.filter { !it.startsWith("Vendedor") }
+    }
+    val opcionesDestinoAlmacen = remember(listaAlmacenesDinamica) {
+        listaAlmacenesDinamica.filter { it.startsWith("Vendedor") }
+    }
 
     val cantidades = remember { mutableStateMapOf<String, Int>() }
     var mostrarDialogConfirmacion by remember { mutableStateOf(false) }
@@ -272,9 +278,9 @@ fun MovimientosInventarioScreen(
                         )
                         Icon(Icons.Outlined.ArrowDropDown, null, tint = Color.Gray)
                     }
-                    val opcionesDestino = when (origen) {
-                        "Compra Producto" -> opcionesDestinoCompra
-                        "Almacen Huasteca" -> opcionesDestinoAlmacen
+                    val opcionesDestino = when {
+                        origen == "Compra Producto" -> opcionesDestinoCompra
+                        origen != "Selecciona Origen" -> opcionesDestinoAlmacen
                         else -> emptyList()
                     }
                     DropdownMenu(

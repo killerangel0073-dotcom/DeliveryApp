@@ -33,6 +33,9 @@ data class DashboardUiState(
     val ticketPromedioGlobal: Double = 0.0,
     val resumenVendedores: List<SellerSummary> = emptyList(),
     val todasLasVentasHoy: List<VentaEntity> = emptyList(),
+    val nombreAdmin: String = "",
+    val photoUrlAdmin: String = "",
+    val puestoAdmin: String = "",
     val error: String? = null,
 )
 
@@ -51,7 +54,24 @@ class DashboardAdminViewModel(
     init {
         // Precargar info de usuarios una vez al inicio
         precargarUsuarios()
+        cargarDatosAdmin()
         cargarDatosDashboard(Date())
+    }
+
+    private fun cargarDatosAdmin() {
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
+        viewModelScope.launch {
+            try {
+                val doc = db.collection("users").document(uid).get().await()
+                if (doc.exists()) {
+                    _uiState.update { it.copy(
+                        nombreAdmin = doc.getString("nombre") ?: "",
+                        photoUrlAdmin = doc.getString("photo_url") ?: "",
+                        puestoAdmin = doc.getString("puestoTrabajo") ?: "Administrador"
+                    ) }
+                }
+            } catch (e: Exception) { }
+        }
     }
 
     private fun precargarUsuarios() {

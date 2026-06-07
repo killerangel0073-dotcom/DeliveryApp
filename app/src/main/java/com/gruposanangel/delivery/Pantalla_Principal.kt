@@ -5,8 +5,10 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
@@ -141,79 +144,16 @@ fun Pantalla_Principal(
                 .padding(innerPadding)
         ) {
             if (selectedScreen == Screen.Inicio) {
-                // 🔝 HEADER MODERNO (Perfil y Logout)
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color.White,
-                    shadowElevation = 2.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Foto de Perfil con Borde
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(Color.Red.copy(alpha = 0.1f))
-                                .clickable { navController.navigate("perfil_usuario") },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isPreview || photoUrl.isEmpty()) {
-                                Image(
-                                    painter = painterResource(R.drawable.repartidor),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                AsyncImage(
-                                    model = photoUrl,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Hola,",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray
-                            )
-                            Text(
-                                text = displayName,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Black,
-                                color = Color.Black
-                            )
-                        }
-
-                        // Botón Logout Estilizado
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFF8F9FA),
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clickable { onLogout() }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.Logout,
-                                    contentDescription = "Salir",
-                                    tint = Color.Red,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
+                // 🔝 HEADER MAESTRO PREMIUM (Perfil y Logout Unificados)
+                ModernProfileHeader(
+                    nombre = displayName,
+                    puesto = puestoTrabajo ?: "Cargando...",
+                    photoUrl = photoUrl,
+                    enRuta = usuarioActual?.ultimoAlmacenNombre != null, // O usar uiState.enRuta si lo pasamos
+                    onLogout = onLogout,
+                    onProfileClick = { navController.navigate("perfil_usuario") }
+                )
+                Spacer(Modifier.height(8.dp))
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
@@ -242,6 +182,139 @@ fun Pantalla_Principal(
                     }
 
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ModernProfileHeader(
+    nombre: String,
+    puesto: String,
+    photoUrl: String,
+    enRuta: Boolean,
+    onLogout: () -> Unit,
+    onProfileClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
+    // 🎭 Animación de escala sutil (Formal y bonita)
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "profileClickScale"
+    )
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .shadow(8.dp, RoundedCornerShape(24.dp)),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Foto de Perfil Circular con Borde y Estado
+            Box(
+                contentAlignment = Alignment.BottomEnd,
+                modifier = Modifier
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = androidx.compose.material.ripple.rememberRipple(
+                            bounded = true,
+                            color = Color.Red.copy(alpha = 0.2f)
+                        ),
+                        onClick = onProfileClick
+                    )
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .border(2.dp, Color.Red.copy(0.1f), CircleShape),
+                    shape = CircleShape,
+                    color = Color(0xFFF8F9FA)
+                ) {
+                    if (photoUrl.isNotEmpty()) {
+                        AsyncImage(
+                            model = photoUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Image(
+                            painter = painterResource(R.drawable.repartidor),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+                // Punto de Estado Activo
+                Box(
+                    Modifier
+                        .size(14.dp)
+                        .background(Color.White, CircleShape)
+                        .padding(2.dp)
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(if (enRuta) Color(0xFF4CAF50) else Color.LightGray, CircleShape)
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = nombre.ifEmpty { "Cargando..." },
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF1A1A1A),
+                    maxLines = 1
+                )
+                Surface(
+                    color = Color.Red.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.padding(top = 2.dp)
+                ) {
+                    Text(
+                        text = puesto.uppercase(),
+                        color = Color.Red,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // Botón Logout Minimalista Moderno
+            IconButton(
+                onClick = onLogout,
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(Color(0xFFFDECEA), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Logout,
+                    contentDescription = "Cerrar Sesión",
+                    tint = Color.Red,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }

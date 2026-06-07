@@ -23,6 +23,7 @@ import java.util.*
 
 data class VentaUiState(
     val productosEnCarrito: List<Plantilla_Producto> = emptyList(),
+    val catalogoCompleto: List<Plantilla_Producto> = emptyList(), // Para cambios/devoluciones
     val estaProcesando: Boolean = false,
     val totalVenta: Double = 0.0,
     val estadoRuta: EstadoRuta = EstadoRuta.Cargando,
@@ -56,7 +57,11 @@ class VentaViewModel(
 
     // 🔥 OFFLINE-FIRST: Observamos las ventas de hoy de forma reactiva
     val ventasHoyFlow: StateFlow<List<VentaEntity>> = flow {
-        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+        val usuario = repositoryUsuario.obtenerUsuarioActual()
+        val uid = usuario?.uid ?: ""
+        // 🛡️ Si es admin, idParaQuery es "" para ver todo
+        val idParaQuery = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
+        
         val cal = Calendar.getInstance()
         cal.set(Calendar.HOUR_OF_DAY, 0)
         cal.set(Calendar.MINUTE, 0)
@@ -69,7 +74,7 @@ class VentaViewModel(
         cal.set(Calendar.MILLISECOND, 999)
         val fin = cal.timeInMillis
         
-        emitAll(ventaRepository.obtenerVentasPorPeriodoFlow(uid, inicio, fin))
+        emitAll(ventaRepository.obtenerVentasPorPeriodoFlow(idParaQuery, inicio, fin))
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -82,24 +87,33 @@ class VentaViewModel(
     }
 
     private fun escucharVentasNube() {
-        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        val inicio = cal.time
+        viewModelScope.launch {
+            val usuario = repositoryUsuario.obtenerUsuarioActual() ?: return@launch
+            val uid = usuario.uid
+            val esVendedor = usuario.puestoTrabajo == "Vendedor de Ruta"
+            val idParaSync = if (esVendedor) uid else ""
 
-        salesListener?.remove()
-        salesListener = db.collection("ventas")
-            .whereEqualTo("vendedorId", uid)
-            .whereGreaterThanOrEqualTo("fecha", inicio)
-            .addSnapshotListener { snapshot, _ ->
+            val cal = Calendar.getInstance()
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+            val inicio = cal.time
+
+            salesListener?.remove()
+            
+            var query: com.google.firebase.firestore.Query = db.collection("ventas")
+                .whereGreaterThanOrEqualTo("fecha", inicio)
+            
+            if (esVendedor) {
+                query = query.whereEqualTo("vendedorId", uid)
+            }
+
+            salesListener = query.addSnapshotListener { snapshot, _ ->
                 if (snapshot != null) {
                     viewModelScope.launch {
-                        ventaRepository.descargarVentasDia(uid)
+                        ventaRepository.descargarVentasDia(idParaSync)
                     }
                 }
             }
+        }
     }
 
     override fun onCleared() {
@@ -112,6 +126,19 @@ class VentaViewModel(
             repositoryInventario.obtenerProductosLocal()
                 .distinctUntilChanged()
                 .collect { entidades ->
+                    // 1. Catálogo completo (Únicos por ID base, para recibir cambios/devoluciones)
+                    val catalogo = entidades.distinctBy { it.productoId }.map { e ->
+                        Plantilla_Producto(
+                            id = e.id,
+                            nombre = e.nombre,
+                            precio = e.precio,
+                            cantidad = 0,
+                            cantidadDisponible = e.cantidadDisponible,
+                            imagenUrl = e.imagenUrl ?: ""
+                        )
+                    }
+
+                    // 2. Carrito para venta (Solo con stock > 0)
                     val productosMapeados = entidades.asSequence()
                         .filter { it.cantidadDisponible > 0 }
                         .map { entidad ->
@@ -130,6 +157,7 @@ class VentaViewModel(
                     
                     _uiState.update { it.copy(
                         productosEnCarrito = productosMapeados,
+                        catalogoCompleto = catalogo,
                         isLoadingInventario = false
                     ) }
                     recalcularTotal()
@@ -164,11 +192,30 @@ class VentaViewModel(
     fun cargarVentasPorPeriodo(fechaInicio: Date, fechaFin: Date) {
         viewModelScope.launch {
             try {
-                val uid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
-                val ventas = ventaRepository.obtenerVentasPorPeriodo(uid, fechaInicio.time, fechaFin.time)
+                val usuario = repositoryUsuario.obtenerUsuarioActual()
+                val uid = usuario?.uid ?: ""
+                val idParaQuery = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
+                
+                val ventas = ventaRepository.obtenerVentasPorPeriodo(idParaQuery, fechaInicio.time, fechaFin.time)
                 _ventasPeriodo.value = ventas
             } catch (e: Exception) {
                 Log.e("VentaViewModel", "Error cargando ventas por periodo", e)
+            }
+        }
+    }
+
+    fun sincronizarHistorialVendedor() {
+        viewModelScope.launch {
+            try {
+                val usuario = repositoryUsuario.obtenerUsuarioActual()
+                val uid = usuario?.uid ?: ""
+                val idParaSync = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
+                
+                // Sincroniza todas las ventas (Maestro o individuales)
+                ventaRepository.sincronizarVentasPeriodo(idParaSync)
+                cargarVentasHoy()
+            } catch (e: Exception) {
+                Log.e("VentaViewModel", "Error sincronizando historial completo", e)
             }
         }
     }
@@ -311,6 +358,42 @@ class VentaViewModel(
     suspend fun obtenerDetallesDeVenta(ventaId: String): List<VentaDetalleEntity> {
         return withContext(Dispatchers.IO) {
             ventaRepository.obtenerDetallesDeVenta(ventaId)
+        }
+    }
+
+    // --- NUEVO: REGISTRO DE CAMBIOS Y DEVOLUCIONES (DOBLE FLUJO) ---
+
+    fun registrarAjusteDoble(
+        ticketId: String,
+        clienteId: String?,
+        productoEntra: Plantilla_Producto,
+        productoSale: Plantilla_Producto,
+        cantidad: Int,
+        tipoOperacion: String,
+        motivo: String?,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val usuario = repositoryUsuario.obtenerUsuarioActual()
+                val uid = usuario?.uid ?: ""
+                val almacenNombre = usuario?.ultimoAlmacenNombre ?: ""
+
+                repositoryInventario.registrarDobleMovimiento(
+                    tipoOperacion = tipoOperacion,
+                    productoEntra = productoEntra,
+                    productoSale = productoSale,
+                    cantidad = cantidad,
+                    vendedorId = uid,
+                    almacenNombre = almacenNombre,
+                    clienteId = clienteId,
+                    ticketId = ticketId,
+                    motivo = motivo
+                )
+                withContext(Dispatchers.Main) { onSuccess() }
+            } catch (e: Exception) {
+                Log.e("VentaViewModel", "Error al registrar ajuste", e)
+            }
         }
     }
 }

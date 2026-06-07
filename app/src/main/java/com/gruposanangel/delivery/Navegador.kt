@@ -40,7 +40,7 @@ fun Navegador(
             val screenArg = backStackEntry.arguments?.getString("screen") ?: "Inicio"
             val db = AppDatabase.getDatabase(context)
             val firebaseDataSource = FirebaseDataSource()
-            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
 
             Pantalla_Principal(
                 navController = navController,
@@ -77,7 +77,7 @@ fun Navegador(
         composable("INVENTARIO_VENDEDOR") {
             val db = AppDatabase.getDatabase(context)
             val firebaseDataSource = FirebaseDataSource()
-            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
             PantallaInventario(navController, inventarioRepo)
         }
 
@@ -128,6 +128,56 @@ fun Navegador(
 
         composable("VENDEDOR_INFO_VENTAS") {
             VendedorInfoVentasScreen()
+        }
+
+        composable("PANTALLA_ARQUEO") {
+            PantallaArqueo(navController)
+        }
+
+        composable("MI_RENDIMIENTO") {
+            val db = AppDatabase.getDatabase(context)
+            val firebaseDataSource = FirebaseDataSource()
+            val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
+            val ventaRepo = VentaRepository(db.VentaDao())
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
+            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+            
+            val viewModel: DashboardVendedorViewModel = viewModel(
+                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = 
+                        DashboardVendedorViewModel(ventaRepo, usuarioRepo, inventarioRepo, uid) as T
+                }
+            )
+            val uiState by viewModel.uiState.collectAsState()
+
+            Pantalla_Mi_Rendimiento(
+                navController = navController,
+                nombreVendedor = uiState.nombreVendedor,
+                ventaDia = uiState.ventaDia,
+                clientesDia = uiState.clientesDia
+            )
+        }
+
+        composable("CIERRE_DIA") {
+            val db = AppDatabase.getDatabase(context)
+            val firebaseDataSource = FirebaseDataSource()
+            val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
+            val ventaRepo = VentaRepository(db.VentaDao())
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
+            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+
+            val viewModel: DashboardVendedorViewModel = viewModel(
+                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = 
+                        DashboardVendedorViewModel(ventaRepo, usuarioRepo, inventarioRepo, uid) as T
+                }
+            )
+            val uiState by viewModel.uiState.collectAsState()
+
+            PantallaCierreDia(
+                navController = navController,
+                uiState = uiState
+            )
         }
 
         composable("ventas_room") {
@@ -188,7 +238,7 @@ fun Navegador(
             val firebaseDataSource = FirebaseDataSource()
             val viewModel: VentaViewModel = viewModel(
                 factory = VentaViewModelFactory(
-                    repositoryInventario = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao()),
+                    repositoryInventario = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao()),
                     ventaRepository = VentaRepository(db.VentaDao()),
                     repositoryUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
                 )
@@ -214,7 +264,7 @@ fun Navegador(
             val origen = backStackEntry.arguments?.getString("origen") ?: "Clientes"
             val db = AppDatabase.getDatabase(context)
             val firebaseDataSource = FirebaseDataSource()
-            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
 
             PantallaVentas(
                 navController = navController,

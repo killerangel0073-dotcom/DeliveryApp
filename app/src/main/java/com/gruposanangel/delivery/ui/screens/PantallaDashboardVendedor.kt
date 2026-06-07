@@ -24,8 +24,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,6 +39,10 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -57,6 +65,7 @@ import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.SegundoPlano.BatteryState
 import com.gruposanangel.delivery.SegundoPlano.LocationState
 import com.gruposanangel.delivery.VentaRepository
+import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.ui.theme.DeliveryTheme
@@ -91,13 +100,14 @@ fun PantallaDashboardVendedor(
     val firebaseDataSource = FirebaseDataSource()
     val repositoryUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
     val userId = if (!isPreview) FirebaseAuth.getInstance().currentUser?.uid ?: "" else "preview_user"
+    val inventarioRepo = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
 
     val viewModel: DashboardVendedorViewModel = viewModel(
         key = "Dashboard_$userId",
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = 
-                DashboardVendedorViewModel(ventaRepository, repositoryUsuario, userId) as T
+                DashboardVendedorViewModel(ventaRepository, repositoryUsuario, inventarioRepo, userId) as T
         }
     )
 
@@ -129,6 +139,8 @@ fun PantallaDashboardVendedor(
             estaCargando = estadoBateria.isCharging,
             impresoraSeleccionada = impresoraSeleccionada,
             onToggleRuta = { viewModel.toggleRuta(it) },
+            onArqueoClick = { navController.navigate("PANTALLA_ARQUEO") },
+            onNavigate = { navController.navigate(it) },
             onConfigurarImpresora = {
                 val hasPermission = bluetoothPermissions.all {
                     ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -162,7 +174,7 @@ fun PantallaDashboardVendedor(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun DashboardVendedorView(
     uiState: DashboardVendedorUiState,
@@ -171,6 +183,8 @@ fun DashboardVendedorView(
     estaCargando: Boolean = false,
     impresoraSeleccionada: BluetoothDevice? = null,
     onToggleRuta: (Boolean) -> Unit,
+    onArqueoClick: () -> Unit,
+    onNavigate: (String) -> Unit,
     onConfigurarImpresora: () -> Unit
 ) {
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
@@ -256,18 +270,112 @@ fun DashboardVendedorView(
             )
         }
 
-        Spacer(Modifier.height(16.dp))
+        // 🔹 SECCIÓN DE GESTIÓN Y MÉTRICAS (DISEÑO SIMÉTRICO)
+        val listState = rememberLazyListState()
+        val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        
+        // 🎯 Lógica de Centrado: Calculamos el offset para que el carrusel empiece centrado
+        LaunchedEffect(Unit) {
+            val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+            val itemWidthPx = with(density) { 160.dp.toPx() }
+            val spacingPx = with(density) { 12.dp.toPx() }
+            val totalContentWidthPx = (itemWidthPx * 4) + (spacingPx * 3)
+            
+            // Calculamos cuánto scroll se necesita para centrar el bloque de 4 tarjetas
+            if (totalContentWidthPx > screenWidthPx) {
+                val centerOffset = (totalContentWidthPx - screenWidthPx) / 2
+                listState.scrollToItem(0, centerOffset.toInt())
+            }
+        }
 
-        // 🔹 MÉTRICAS DE VENTA
-        Text("MÉTRICAS DE VENTA DELISA", Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Black, color = GrisTextoSecundario, letterSpacing = 1.5.sp)
-        VentaPrincipalCard(uiState.ventaDia, uiState.metaDia, uiState.clientesDia, uiState.ticketPromedioDia, formatoMoneda)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "GESTIÓN Y MÉTRICAS DELISA", 
+                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp), 
+                style = MaterialTheme.typography.labelMedium, 
+                fontWeight = FontWeight.Black, 
+                color = GrisTextoSecundario, 
+                letterSpacing = 1.5.sp,
+                textAlign = TextAlign.Center
+            )
+
+            // 🔥 2. CARRUSEL HORIZONTAL UNIFICADO (Centrado Automático y Snap)
+            LazyRow(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+                flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(lazyListState = listState)
+            ) {
+                item {
+                    val comisionDia = uiState.ventaDia * 0.03
+                    val sueldoTotalHoy = 300.0 + comisionDia
+                    
+                    BloqueBolso(
+                        titulo = "MI BOLSO",
+                        montoTotalHoy = sueldoTotalHoy,
+                        comisionHoy = comisionDia,
+                        formato = formatoMoneda,
+                        modifier = Modifier.width(160.dp)
+                    ) {
+                        onNavigate("MI_RENDIMIENTO")
+                    }
+                }
+                item {
+                    VentaSecundariaCard(
+                        titulo = "ESTA SEMANA",
+                        monto = uiState.ventaSemana,
+                        meta = uiState.metaDia * 6,
+                        color = NegroPremium,
+                        icon = Icons.Default.CalendarMonth,
+                        formato = formatoMoneda,
+                        modifier = Modifier.width(160.dp).height(110.dp)
+                    )
+                }
+                item {
+                    VentaSecundariaCard(
+                        titulo = "META BLOQUE",
+                        monto = uiState.ventaBloque,
+                        meta = uiState.metaDia * 24,
+                        color = RojoDelisa,
+                        icon = Icons.Default.Flag,
+                        formato = formatoMoneda,
+                        modifier = Modifier.width(160.dp).height(110.dp)
+                    )
+                }
+                item {
+                    AccionCardVendedor(
+                        titulo = "ARQUEO",
+                        labelSuperior = "Valor de mercancía",
+                        valorPrincipal = formatoMoneda.format(uiState.valorInventario),
+                        detalle = "Auditoría de Ruta",
+                        icon = Icons.Rounded.Analytics,
+                        color = RojoDelisa,
+                        modifier = Modifier.width(160.dp)
+                    ) {
+                        onArqueoClick()
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        VentaPrincipalCard(
+            monto = uiState.ventaDia, 
+            meta = uiState.metaDia, 
+            clientes = uiState.clientesDia, 
+            ticketPromedio = uiState.ticketPromedioDia, 
+            formato = formatoMoneda,
+            onCierreClick = { onNavigate("CIERRE_DIA") }
+        )
         Spacer(Modifier.height(16.dp))
         WeeklyMiniChart(uiState.ventasPorDiaSemana, uiState.metaDia, formatoMoneda)
-        Spacer(Modifier.height(16.dp))
-        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), Arrangement.spacedBy(14.dp)) {
-            VentaSecundariaCard("SEMANA", uiState.ventaSemana, uiState.metaDia * 6, NegroPremium, formatoMoneda, Modifier.weight(1f))
-            VentaSecundariaCard("BLOQUE", uiState.ventaBloque, uiState.metaDia * 24, RojoDelisa, formatoMoneda, Modifier.weight(1f))
-        }
 
         Spacer(Modifier.height(36.dp))
         
@@ -399,11 +507,144 @@ fun HardwarePrinterCard(selectedPrinter: BluetoothDevice?, onConfigurar: () -> U
 }
 
 @Composable
-fun VentaPrincipalCard(monto: Double, meta: Double, clientes: Int, ticketPromedio: Double, formato: NumberFormat) {
+fun BloqueBolso(
+    titulo: String,
+    montoTotalHoy: Double,
+    comisionHoy: Double,
+    formato: NumberFormat,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.98f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "bolsoScale"
+    )
+
+    Card(
+        modifier = modifier
+            .height(110.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = Color(0xFF4CAF50).copy(0.1f)),
+                onClick = onClick
+            ),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                Text(text = titulo, color = GrisTextoSecundario, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                Icon(Icons.Rounded.Savings, null, tint = Color(0xFF4CAF50).copy(0.4f), modifier = Modifier.size(16.dp))
+            }
+            
+            Column {
+                Text(text = "Sueldo Hoy:", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text(text = formato.format(montoTotalHoy), color = Color(0xFF4CAF50), fontSize = 17.sp, fontWeight = FontWeight.Black)
+            }
+            
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "Comisión:", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(4.dp))
+                Text(text = formato.format(comisionHoy), color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+            }
+        }
+    }
+}
+
+@Composable
+fun AccionCardVendedor(
+    titulo: String,
+    labelSuperior: String,
+    valorPrincipal: String,
+    detalle: String,
+    icon: ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.98f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "accionScale"
+    )
+
+    Card(
+        modifier = modifier
+            .height(110.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = color.copy(alpha = 0.1f)),
+                onClick = onClick
+            ),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                Text(text = titulo, color = GrisTextoSecundario, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                Icon(icon, null, tint = color.copy(0.4f), modifier = Modifier.size(16.dp))
+            }
+            
+            Column {
+                Text(text = labelSuperior, color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text(text = valorPrincipal, color = color, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            }
+            
+            Text(text = detalle, color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun VentaPrincipalCard(
+    monto: Double, 
+    meta: Double, 
+    clientes: Int, 
+    ticketPromedio: Double, 
+    formato: NumberFormat,
+    onCierreClick: () -> Unit
+) {
     val progreso = (monto / meta).coerceIn(0.0, 1.0).toFloat()
     Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp).shadow(8.dp, RoundedCornerShape(24.dp)), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Column(Modifier.padding(24.dp)) {
-            Text("VENTA TOTAL HOY", fontSize = 11.sp, fontWeight = FontWeight.Black, color = RojoDelisa)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("VENTA TOTAL HOY", fontSize = 11.sp, fontWeight = FontWeight.Black, color = RojoDelisa)
+                
+                // 🔥 BOTÓN CERRAR DÍA
+                Surface(
+                    onClick = onCierreClick,
+                    color = RojoDelisa,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.Lock, null, tint = Color.White, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("CERRAR RUTA", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                    }
+                }
+            }
+
             Text(formato.format(monto), fontSize = 40.sp, fontWeight = FontWeight.Black, color = NegroPremium)
             Spacer(Modifier.height(16.dp))
             LinearProgressIndicator(progress = { progreso }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape), color = RojoDelisa, trackColor = RojoDelisa.copy(0.1f))
@@ -423,14 +664,27 @@ fun VentaPrincipalCard(monto: Double, meta: Double, clientes: Int, ticketPromedi
 }
 
 @Composable
-fun VentaSecundariaCard(titulo: String, monto: Double, meta: Double, color: Color, formato: NumberFormat, modifier: Modifier) {
+fun VentaSecundariaCard(titulo: String, monto: Double, meta: Double, color: Color, icon: androidx.compose.ui.graphics.vector.ImageVector, formato: NumberFormat, modifier: Modifier) {
     val progreso = (monto / meta).coerceIn(0.0, 1.0).toFloat()
     Card(modifier = modifier, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
-        Column(Modifier.padding(18.dp)) {
-            Text(titulo, fontSize = 10.sp, fontWeight = FontWeight.Black, color = GrisTextoSecundario)
-            Text(formato.format(monto), fontSize = 18.sp, fontWeight = FontWeight.Black, color = color)
-            Spacer(Modifier.height(12.dp))
-            LinearProgressIndicator(progress = { progreso }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape), color = color, trackColor = color.copy(0.1f))
+        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                Text(titulo, fontSize = 9.sp, fontWeight = FontWeight.Black, color = GrisTextoSecundario)
+                Icon(icon, null, tint = color.copy(0.4f), modifier = Modifier.size(16.dp))
+            }
+            
+            Text(formato.format(monto), fontSize = 17.sp, fontWeight = FontWeight.Black, color = color)
+            
+            Column {
+                LinearProgressIndicator(
+                    progress = { progreso }, 
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape), 
+                    color = color, 
+                    trackColor = color.copy(0.1f)
+                )
+                Spacer(Modifier.height(2.dp))
+                Text("${(progreso * 100).toInt()}% de meta", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = color.copy(0.6f))
+            }
         }
     }
 }
@@ -724,12 +978,12 @@ fun DashboardVendedorActivePreview() {
         ventaBloque = 60000.0,
         ventasPorDiaSemana = sampleVentas
     )
-    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}) }
+    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}, {}, {}) }
 }
 
 @Preview(showBackground = true, showSystemUi = true, name = "Vendedor Dashboard - Detenido")
 @Composable
 fun DashboardVendedorStoppedPreview() {
     val state = DashboardVendedorUiState(enRuta = false, tiempoTranscurrido = "00:00:00", ventaDia = 0.0, metaDia = 5000.0)
-    DeliveryTheme { DashboardVendedorView(state, 0f, 100, false, null, {}, {}) }
+    DeliveryTheme { DashboardVendedorView(state, 0f, 100, false, null, {}, {}, {}, {}) }
 }

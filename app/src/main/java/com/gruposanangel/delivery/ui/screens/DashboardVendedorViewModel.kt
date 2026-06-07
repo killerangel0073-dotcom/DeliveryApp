@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.VentaRepository
 import kotlinx.coroutines.Dispatchers
@@ -34,12 +35,19 @@ data class DashboardVendedorUiState(
     val ventaBloque: Double = 0.0,
     val ventasPorDiaSemana: List<Double> = listOf(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // L, M, M, J, V, S
     val metaDia: Double = 11666.0,
+    val nombreVendedor: String = "",
+    val photoUrl: String = "",
+    val puestoTrabajo: String? = null,
+    val rutaNombre: String = "Ruta General",
+    val valorInventario: Double = 0.0,
+    val ventasHoy: List<com.gruposanangel.delivery.data.VentaEntity> = emptyList(),
     val error: String? = null
 )
 
 class DashboardVendedorViewModel(
     private val ventaRepository: VentaRepository,
     private val usuarioRepository: RepositoryUsuario,
+    private val inventarioRepository: RepositoryInventario,
     private val userId: String
 ) : ViewModel() {
 
@@ -54,11 +62,51 @@ class DashboardVendedorViewModel(
         iniciarContadorTiempo()
         observarVentasReactivo()
         escucharVentasNube()
+        cargarDatosPerfil()
+        observarInventario()
         
-        // 🔥 Sincronización proactiva inicial
+        // 🔥 Sincronización proactiva de la semana completa
         viewModelScope.launch {
-            ventaRepository.descargarVentasDia(userId)
+            try {
+                val cal = Calendar.getInstance()
+                cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+                
+                // Si hoy es domingo o el calendario devolvió un lunes futuro, retrocedemos 7 días
+                if (cal.timeInMillis > System.currentTimeMillis()) {
+                    cal.add(Calendar.DAY_OF_MONTH, -7)
+                }
+                
+                ventaRepository.sincronizarVentasPeriodo(userId, cal.timeInMillis, System.currentTimeMillis())
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error sync inicial semana", e)
+            }
         }
+    }
+
+    private fun cargarDatosPerfil() {
+        usuarioRepository.getUsuarioActual()
+            .onEach { user ->
+                if (user != null) {
+                    _uiState.update { it.copy(
+                        nombreVendedor = user.nombre,
+                        photoUrl = user.photoUrl ?: "",
+                        puestoTrabajo = user.puestoTrabajo,
+                        rutaNombre = user.ultimoAlmacenNombre ?: "Ruta General"
+                    ) }
+                }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observarInventario() {
+        inventarioRepository.obtenerProductosLocal()
+            .onEach { productos ->
+                val valorTotal = productos.filter { it.id.contains("_") }
+                    .sumOf { it.cantidadDisponible * it.precio }
+                _uiState.update { it.copy(valorInventario = valorTotal) }
+            }
+            .launchIn(viewModelScope)
     }
 
     private fun cargarEstadoJornada() {
@@ -201,6 +249,10 @@ class DashboardVendedorViewModel(
                     val iniHoy = calCalc.timeInMillis
                     
                     calCalc.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                    // 🛡️ Ajuste de seguridad para el inicio de semana
+                    if (calCalc.timeInMillis > now) {
+                        calCalc.add(Calendar.DAY_OF_MONTH, -7)
+                    }
                     val iniSemana = calCalc.timeInMillis
 
                     val ventasHoy = ventasMias.filter { it.fecha >= iniHoy }
@@ -236,7 +288,8 @@ class DashboardVendedorViewModel(
                         ticketPromedioDia = ticketPromedio,
                         ventaSemana = ventasSemana.sumOf { v -> v.total },
                         ventaBloque = ventasMias.sumOf { v -> v.total },
-                        ventasPorDiaSemana = ventasPorDia
+                        ventasPorDiaSemana = ventasPorDia,
+                        ventasHoy = ventasHoy
                     ) }
                 }
         }

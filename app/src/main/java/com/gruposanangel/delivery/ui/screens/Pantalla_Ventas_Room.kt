@@ -55,11 +55,22 @@ class VentasRoomViewModel(private val ventaRepository: VentaRepository, context:
     private val _uiState = MutableStateFlow(VentasRoomUiState())
     val uiState: StateFlow<VentasRoomUiState> = _uiState.asStateFlow()
     private val db = AppDatabase.getDatabase(context); private val clienteDao = db.clienteDao()
+    private val usuarioDao = db.usuarioDao()
+
     fun cargarVentas(inicio: Long, fin: Long) {
         viewModelScope.launch {
-            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+            val usuario = usuarioDao.obtenerUsuarioActual()
+            val uid = usuario?.uid ?: ""
+            val idParaQuery = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
+            
             _uiState.value = _uiState.value.copy(isLoading = true)
-            val lista = ventaRepository.obtenerVentasPorPeriodo(uid, inicio, fin).map { VentaConFotoUI(it, clienteDao.getClientePorId(it.clienteId)?.fotografiaUrl ?: "") }
+            
+            // 🔥 Sincronizamos con el servidor para traer el historial antes de mostrar
+            ventaRepository.sincronizarVentasPeriodo(idParaQuery, inicio, fin)
+            
+            val lista = ventaRepository.obtenerVentasPorPeriodo(idParaQuery, inicio, fin)
+                .map { VentaConFotoUI(it, clienteDao.getClientePorId(it.clienteId)?.fotografiaUrl ?: "") }
+
             _uiState.value = VentasRoomUiState(isLoading = false, ventasConFoto = lista)
         }
     }

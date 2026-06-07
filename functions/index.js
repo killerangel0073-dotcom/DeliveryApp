@@ -12,12 +12,14 @@ const { onOrdenTransferenciaAceptadaConDetalle } = require('./onOrdenTransferenc
 
 // Importar la nueva función
 const { notificarNuevaVenta } = require('./notificarNuevaVenta');
+const { procesarAjusteInventario } = require('./procesarAjusteInventario');
 
 // Exportaciones
 exports.registrarVenta = registrarVenta;
 exports.enviarNotificacion = enviarNotificacion;
 exports.enviarNotificacionUniversal = enviarNotificacionUniversal;
 exports.onOrdenTransferenciaAceptadaConDetalle = onOrdenTransferenciaAceptadaConDetalle;
+exports.procesarAjusteInventario = procesarAjusteInventario;
 
 // Exportación de la nueva función
 exports.notificarNuevaVenta = notificarNuevaVenta;

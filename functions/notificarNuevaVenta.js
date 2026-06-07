@@ -86,13 +86,13 @@ exports.notificarNuevaVenta = onDocumentCreated("ventas/{ventaId}", async (event
             },
             data: {
                 tipo: "VENTA_NUEVA",
-                ventaIdFirestore: ventaIdFirestore,
+                ventaId: ventaIdFirestore.toString(),
                 ventaIdLocal: nuevaVenta.localId ? nuevaVenta.localId.toString() : "0",
                 monto: montoTotal.toString(),
                 nombreRuta: nombreRuta,
                 vendedor: nombreVendedor,
                 imagen: urlImagenCliente,
-                click_action: "FLUTTER_NOTIFICATION_CLICK"
+                click_action: "OPEN_VENTA_DETALLE"
             },
             android: {
                 priority: "high",

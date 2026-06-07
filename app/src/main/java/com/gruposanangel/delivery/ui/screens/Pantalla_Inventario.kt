@@ -17,7 +17,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,46 +69,78 @@ fun PantallaInventario(
 
     PantallaInventarioContent(
         uiState = uiState,
-        onNotificacionClick = { navController.navigate("NOTIFICACIONES") }
+        onNotificacionClick = { navController.navigate("NOTIFICACIONES") },
+        onAlmacenSelect = { viewModel.seleccionarAlmacen(it) },
+        onVistaGlobalClick = { viewModel.activarVistaGlobal() }
     )
 }
 
 @Composable
 fun PantallaInventarioContent(
     uiState: InventarioUiState,
-    onNotificacionClick: () -> Unit
+    onNotificacionClick: () -> Unit,
+    onAlmacenSelect: (String) -> Unit = {},
+    onVistaGlobalClick: () -> Unit = {}
 ) {
-    val totalProductos = uiState.productos.sumOf { it.cantidad }
-    val valorTotal = uiState.productos.sumOf { it.cantidad * it.precio }
+    var verDanado by remember { mutableStateOf(false) }
+    val productosAMostrar = if (verDanado) uiState.productosDanados else uiState.productos
+    
+    val totalProductos = productosAMostrar.sumOf { it.cantidad }
+    val valorTotal = productosAMostrar.sumOf { it.cantidad * it.precio }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.White)) {
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            Spacer(modifier = Modifier.height(8.dp))
+            // 🔹 CABECERA ADMINISTRATIVA (Solo si es Admin)
+            if (uiState.isAdmin) {
+                AdminInventoryHeader(
+                    almacenes = uiState.listaAlmacenes,
+                    seleccionado = uiState.almacenSeleccionado,
+                    esVistaGlobal = uiState.esVistaGlobal,
+                    onSelect = onAlmacenSelect,
+                    onGlobal = onVistaGlobalClick
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
 
             ResumenInventario(
                 totalProductos = totalProductos,
                 valorTotal = valorTotal,
                 notificacionesCount = uiState.notificaciones.size,
-                onNotificacionClick = onNotificacionClick
+                onNotificacionClick = onNotificacionClick,
+                titulo = if (verDanado) "DEVOLUCIONES/DAÑADOS" else (uiState.almacenSeleccionado ?: "MI INVENTARIO")
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 🔹 SELECTOR DE TIPO (Bueno vs Dañado)
+            if (!uiState.esVistaGlobal) {
+                TabSelectorInventario(
+                    seleccionado = verDanado,
+                    onToggle = { verDanado = it }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 if (uiState.isLoading) {
                     InventarioSkeleton()
-                } else if (uiState.rutaAsignada == null) {
+                } else if (uiState.rutaAsignada == null && !uiState.isAdmin) {
                     Text("Usuario sin ruta asignada", color = Color.Gray, fontWeight = FontWeight.Bold)
-                } else if (uiState.productos.isEmpty()) {
-                    Text("Aún no tienes productos en tu almacén", color = Color.Gray, fontWeight = FontWeight.Bold)
+                } else if (productosAMostrar.isEmpty()) {
+                    val msg = if (verDanado) "Sin devoluciones registradas" else "Sin stock disponible"
+                    Text(msg, color = Color.Gray, fontWeight = FontWeight.Bold)
                 } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 80.dp)) {
-                        items(uiState.productos, key = { it.id }) { producto ->
-                            ItemProductoInventario(producto)
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(), 
+                        verticalArrangement = Arrangement.spacedBy(10.dp), 
+                        contentPadding = PaddingValues(bottom = 80.dp)
+                    ) {
+                        items(productosAMostrar, key = { it.id + (if (verDanado) "_bad" else "_good") }) { producto ->
+                            ItemProductoInventario(producto, esDanado = verDanado)
                         }
                     }
                 }
@@ -117,30 +150,134 @@ fun PantallaInventarioContent(
 }
 
 @Composable
-fun ResumenInventario(totalProductos: Int, valorTotal: Double, notificacionesCount: Int, onNotificacionClick: () -> Unit) {
+fun AdminInventoryHeader(
+    almacenes: List<String>,
+    seleccionado: String?,
+    esVistaGlobal: Boolean,
+    onSelect: (String) -> Unit,
+    onGlobal: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Selector de Almacén
+        Card(
+            modifier = Modifier
+                .weight(1f)
+                .clickable { expanded = true },
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(2.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("ALMACÉN / VENDEDOR", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                    Text(seleccionado ?: "Seleccionar...", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color.Red, maxLines = 1)
+                }
+                Icon(Icons.Default.ArrowDropDown, null, tint = Color.Gray)
+            }
+            
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                almacenes.forEach { alm ->
+                    DropdownMenuItem(
+                        text = { Text(alm, fontWeight = FontWeight.Medium) },
+                        onClick = { onSelect(alm); expanded = false }
+                    )
+                }
+            }
+        }
+
+        // Botón Vista Global
+        IconButton(
+            onClick = onGlobal,
+            modifier = Modifier
+                .size(48.dp)
+                .background(if (esVistaGlobal) Color.Red else Color.White, RoundedCornerShape(12.dp))
+        ) {
+            Icon(
+                Icons.Default.Public, 
+                contentDescription = "Global", 
+                tint = if (esVistaGlobal) Color.White else Color.Gray
+            )
+        }
+    }
+}
+
+@Composable
+fun TabSelectorInventario(seleccionado: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .background(Color(0xFFEEEEEE), RoundedCornerShape(10.dp))
+            .padding(2.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(if (!seleccionado) Color.White else Color.Transparent, RoundedCornerShape(8.dp))
+                .clickable { onToggle(false) },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("EN CAMIONETA", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (!seleccionado) Color.Red else Color.Gray)
+        }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(if (seleccionado) Color.White else Color.Transparent, RoundedCornerShape(8.dp))
+                .clickable { onToggle(true) },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("DEVOLUCIONES", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (seleccionado) Color.Red else Color.Gray)
+        }
+    }
+}
+
+@Composable
+fun ResumenInventario(
+    totalProductos: Int, 
+    valorTotal: Double, 
+    notificacionesCount: Int, 
+    onNotificacionClick: () -> Unit,
+    titulo: String = "MI INVENTARIO"
+) {
     val nf = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.Red), elevation = CardDefaults.cardElevation(4.dp), modifier = Modifier.fillMaxWidth()) {
-        Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Red, Color(0xFFB71C1C)))).padding(20.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text("TOTAL PIEZAS", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text("$totalProductos", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Black)
-                }
-                Box {
-                    FloatingActionButton(onClick = onNotificacionClick, containerColor = Color.White, contentColor = Color.Red, shape = CircleShape, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Default.Notifications, null, modifier = Modifier.size(24.dp))
+        Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Red, Color(0xFFB71C1C)))).padding(16.dp)) {
+            Column {
+                Text(titulo.uppercase(), color = Color.White.copy(0.8f), fontSize = 10.sp, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("TOTAL PIEZAS", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("$totalProductos", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
                     }
-                    if (notificacionesCount > 0) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp)) {
-                            Box(modifier = Modifier.size(18.dp).background(Color(0xFF00AAFF), CircleShape), contentAlignment = Alignment.Center) {
-                                Text(notificacionesCount.toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Box {
+                        FloatingActionButton(onClick = onNotificacionClick, containerColor = Color.White, contentColor = Color.Red, shape = CircleShape, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Default.Notifications, null, modifier = Modifier.size(22.dp))
+                        }
+                        if (notificacionesCount > 0) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp)) {
+                                Box(modifier = Modifier.size(18.dp).background(Color(0xFF00AAFF), CircleShape), contentAlignment = Alignment.Center) {
+                                    Text(notificacionesCount.toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                }
                             }
                         }
                     }
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("VALOR TOTAL", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text(nf.format(valorTotal), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("VALOR TOTAL", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(nf.format(valorTotal), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                    }
                 }
             }
         }
@@ -148,16 +285,29 @@ fun ResumenInventario(totalProductos: Int, valorTotal: Double, notificacionesCou
 }
 
 @Composable
-fun ItemProductoInventario(producto: Plantilla_Producto) {
+fun ItemProductoInventario(producto: Plantilla_Producto, esDanado: Boolean = false) {
     val totalProducto = producto.cantidad * producto.precio
     val nf = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
-    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
+    Card(
+        shape = RoundedCornerShape(20.dp), 
+        colors = CardDefaults.cardColors(containerColor = Color.White), 
+        elevation = CardDefaults.cardElevation(if (esDanado) 1.dp else 2.dp), 
+        modifier = Modifier.fillMaxWidth(),
+        border = if (esDanado) BorderStroke(1.dp, Color.Red.copy(0.2f)) else null
+    ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(model = producto.imagenUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = producto.nombre, contentScale = ContentScale.Crop, modifier = Modifier.size(75.dp).clip(RoundedCornerShape(16.dp)))
-            Spacer(modifier = Modifier.width(14.dp))
+            Box(contentAlignment = Alignment.BottomEnd) {
+                AsyncImage(model = producto.imagenUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = producto.nombre, contentScale = ContentScale.Crop, modifier = Modifier.size(75.dp).clip(RoundedCornerShape(16.dp)))
+                if (esDanado) {
+                    Box(Modifier.background(Color.Red, CircleShape).padding(4.dp)) {
+                        Icon(Icons.Default.Warning, null, tint = Color.White, modifier = Modifier.size(12.dp))
+                    }
+                }
+            }
+            Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = producto.nombre, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.DarkGray)
-                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = producto.nombre, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = if (esDanado) Color.Red else Color.DarkGray)
+                Spacer(Modifier.height(4.dp))
                 Text(text = "Unitario: ${nf.format(producto.precio)}", fontSize = 13.sp, color = Color.Gray)
             }
             Column(horizontalAlignment = Alignment.End) {

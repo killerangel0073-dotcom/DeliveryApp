@@ -10,7 +10,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -21,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -446,22 +449,36 @@ fun DashboardContent(
                     )
                 }
 
+                // 🔥 2. CARRUSEL HORIZONTAL DE ACCIONES (Sin amontonarse)
                 item {
-                    Row(
+                    LazyRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        AccionCard("Inventario", Icons.Default.Inventory, Color(0xFF00AAFF), Modifier.weight(1f)) {
-                            onNavigate("PRODUCTOS")
+                        item {
+                            AccionCard("Inventario", Icons.Default.Inventory, Color(0xFF00AAFF), Modifier.width(100.dp)) {
+                                onNavigate("PRODUCTOS")
+                            }
                         }
-                        AccionCard("Cargas", Icons.Default.Category, Color(0xFF4CAF50), Modifier.weight(1f)) {
-                            onNavigate("LISTA PRODUCTOS")
+                        item {
+                            AccionCard("Cargas", Icons.Default.Category, Color(0xFF4CAF50), Modifier.width(100.dp)) {
+                                onNavigate("LISTA PRODUCTOS")
+                            }
                         }
-                        AccionCard("Rutas", Icons.AutoMirrored.Filled.AltRoute, Color(0xFFFF9800), Modifier.weight(1f)) {
-                            onNavigate("ADMIN_RUTAS")
+                        item {
+                            AccionCard("Arqueo", Icons.Default.Analytics, Color(0xFFE91E63), Modifier.width(100.dp)) {
+                                onNavigate("PANTALLA_ARQUEO")
+                            }
                         }
-                        AccionCard("Usuarios", Icons.Default.People, Color(0xFF9C27B0), Modifier.weight(1f)) {
-                            onNavigate("ADMIN_USUARIOS")
+                        item {
+                            AccionCard("Rutas", Icons.AutoMirrored.Filled.AltRoute, Color(0xFFFF9800), Modifier.width(100.dp)) {
+                                onNavigate("ADMIN_RUTAS")
+                            }
+                        }
+                        item {
+                            AccionCard("Usuarios", Icons.Default.People, Color(0xFF9C27B0), Modifier.width(100.dp)) {
+                                onNavigate("ADMIN_USUARIOS")
+                            }
                         }
                     }
                 }

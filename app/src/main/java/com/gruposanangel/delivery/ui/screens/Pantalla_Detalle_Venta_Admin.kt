@@ -12,8 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,6 +36,7 @@ import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import com.gruposanangel.delivery.utilidades.ImprimirTicket58mmCompleto
+import com.gruposanangel.delivery.data.MovimientoInventarioEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,7 +55,7 @@ fun Pantalla_Detalle_Venta_Admin(
     val scope = rememberCoroutineScope()
     val db = AppDatabase.getDatabase(context)
     val firebaseDataSource = FirebaseDataSource()
-    val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+    val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
     val ventaRepository = VentaRepository(db.VentaDao())
     val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
 
@@ -69,6 +69,15 @@ fun Pantalla_Detalle_Venta_Admin(
 
     var ticketState by remember { mutableStateOf<TicketVentaCompleto?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+
+    // --- ESTADOS PARA AJUSTES ---
+    var showBottomSheet by remember { mutableStateOf(false) }
+    var tipoAjuste by remember { mutableStateOf("") } // "CAMBIO" o "DEVOLUCION"
+    var productoRecibido by remember { mutableStateOf<Plantilla_Producto?>(null) }
+    var productoEntregado by remember { mutableStateOf<Plantilla_Producto?>(null) }
+    var cantidadAjuste by remember { mutableStateOf(1) }
+    var motivoAjuste by remember { mutableStateOf("") }
+    val inventoryState by viewModel.uiState.collectAsState()
 
     LaunchedEffect(ticketId) {
         isLoading = true
@@ -192,6 +201,35 @@ fun Pantalla_Detalle_Venta_Admin(
                     HeaderVentaCard(ticket, formatoMoneda, formatoFecha, formatoHora)
                 }
 
+                // 🔹 ACCIONES DE AJUSTE (AUDITORÍA)
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { tipoAjuste = "CAMBIO"; showBottomSheet = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                        ) {
+                            Icon(Icons.Default.Sync, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("CAMBIO", fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = { tipoAjuste = "DEVOLUCION"; showBottomSheet = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF9800))
+                        ) {
+                            Icon(Icons.Default.AssignmentReturn, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("DEVOLUCIÓN", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
                 // 🔹 SECCIÓN PRODUCTOS
                 item {
                     Text(
@@ -208,6 +246,200 @@ fun Pantalla_Detalle_Venta_Admin(
                 
                 item {
                     Spacer(Modifier.height(120.dp)) // Espacio para el bottom bar que ahora es más grande
+                }
+            }
+        }
+    }
+
+    // 🔹 BOTTOM SHEET PARA AJUSTES
+    if (showBottomSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showBottomSheet = false },
+            containerColor = Color.White
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .padding(bottom = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = if (tipoAjuste == "CAMBIO") "REGISTRAR CAMBIO" else "REGISTRAR DEVOLUCIÓN",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    color = if (tipoAjuste == "CAMBIO") Color.Red else Color(0xFFFF9800)
+                )
+                Spacer(Modifier.height(16.dp))
+
+                // Selector de Producto RECIBIDO
+                Text("Producto a quitar (Cliente entrega):", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.align(Alignment.Start))
+                var expandedRecibido by remember { mutableStateOf(false) }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { expandedRecibido = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(productoRecibido?.nombre ?: "Seleccionar producto...", color = Color.DarkGray)
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    DropdownMenu(
+                        expanded = expandedRecibido,
+                        onDismissRequest = { expandedRecibido = false },
+                        modifier = Modifier.fillMaxWidth(0.9f).background(Color.White)
+                    ) {
+                        inventoryState.catalogoCompleto.forEach { prod ->
+                            DropdownMenuItem(
+                                text = { Text(prod.nombre) },
+                                onClick = { 
+                                    productoRecibido = prod
+                                    expandedRecibido = false
+                                    // Si el precio cambia, limpiamos el entregado para obligar a re-seleccionar
+                                    if (productoEntregado?.precio != prod.precio) {
+                                        productoEntregado = null
+                                        cantidadAjuste = 1
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Selector de Producto ENTREGADO (Filtrado por Precio)
+                val habilitarEntregado = productoRecibido != null
+                val productosMismoPrecio = inventoryState.productosEnCarrito.filter { 
+                    it.precio == productoRecibido?.precio && it.id != productoRecibido?.id 
+                }
+
+                Text(
+                    text = "Producto a dejar (Vendedor entrega):", 
+                    fontSize = 12.sp, 
+                    color = if (habilitarEntregado) Color.Gray else Color.LightGray, 
+                    modifier = Modifier.align(Alignment.Start)
+                )
+                var expandedEntregado by remember { mutableStateOf(false) }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { expandedEntregado = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = habilitarEntregado,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        val label = if (!habilitarEntregado) "Primero selecciona producto a quitar" 
+                                   else if (productosMismoPrecio.isEmpty()) "No hay productos del mismo precio"
+                                   else productoEntregado?.nombre ?: "Seleccionar reemplazo..."
+                        
+                        Text(label, color = if (habilitarEntregado) Color.DarkGray else Color.Gray, maxLines = 1)
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    
+                    if (productosMismoPrecio.isNotEmpty()) {
+                        DropdownMenu(
+                            expanded = expandedEntregado,
+                            onDismissRequest = { expandedEntregado = false },
+                            modifier = Modifier.fillMaxWidth(0.9f).background(Color.White)
+                        ) {
+                            productosMismoPrecio.forEach { prod ->
+                                DropdownMenuItem(
+                                    text = { Text("${prod.nombre} (Stock: ${prod.cantidadDisponible})") },
+                                    onClick = { 
+                                        productoEntregado = prod
+                                        expandedEntregado = false
+                                        // Ajustar cantidad si excede el nuevo stock
+                                        if (cantidadAjuste > prod.cantidadDisponible) {
+                                            cantidadAjuste = prod.cantidadDisponible.coerceAtLeast(1)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // Cantidad (Topeada por Stock del Entregado)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Cantidad:", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(16.dp))
+                    IconButton(onClick = { if (cantidadAjuste > 1) cantidadAjuste-- }) { Icon(Icons.Default.Remove, null) }
+                    Text("$cantidadAjuste", fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    IconButton(
+                        onClick = { 
+                            val stockMax = productoEntregado?.cantidadDisponible ?: Int.MAX_VALUE
+                            if (cantidadAjuste < stockMax) cantidadAjuste++ 
+                        },
+                        enabled = productoEntregado != null && cantidadAjuste < (productoEntregado?.cantidadDisponible ?: 0)
+                    ) { 
+                        Icon(
+                            Icons.Default.Add, 
+                            null, 
+                            tint = if (productoEntregado != null && cantidadAjuste < productoEntregado!!.cantidadDisponible) Color.Red else Color.Gray
+                        ) 
+                    }
+                }
+                
+                if (productoEntregado != null) {
+                    Text(
+                        "Stock disponible: ${productoEntregado!!.cantidadDisponible}", 
+                        fontSize = 11.sp, 
+                        color = Color.Red,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // Motivo
+                OutlinedTextField(
+                    value = motivoAjuste,
+                    onValueChange = { motivoAjuste = it },
+                    label = { Text(if (tipoAjuste == "CAMBIO") "Nota adicional" else "Motivo de la devolución") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(Modifier.height(24.dp))
+
+                Button(
+                    onClick = {
+                        if (productoRecibido != null && productoEntregado != null) {
+                            if (cantidadAjuste > (productoEntregado?.cantidadDisponible ?: 0)) {
+                                Toast.makeText(context, "No tienes suficiente stock", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val ventaEntity = ticketState
+                            viewModel.registrarAjusteDoble(
+                                ticketId = ticketId,
+                                clienteId = ventaEntity?.numeroTicket,
+                                productoEntra = productoRecibido!!,
+                                productoSale = productoEntregado!!,
+                                cantidad = cantidadAjuste,
+                                tipoOperacion = tipoAjuste,
+                                motivo = motivoAjuste,
+                                onSuccess = {
+                                    showBottomSheet = false
+                                    productoRecibido = null
+                                    productoEntregado = null
+                                    cantidadAjuste = 1
+                                    motivoAjuste = ""
+                                    Toast.makeText(context, "Operación registrada exitosamente", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        } else {
+                            Toast.makeText(context, "Selecciona ambos productos", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (tipoAjuste == "CAMBIO") Color.Red else Color(0xFFFF9800)
+                    )
+                ) {
+                    Text("CONFIRMAR OPERACIÓN", fontWeight = FontWeight.ExtraBold)
                 }
             }
         }

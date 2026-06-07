@@ -22,7 +22,7 @@ class SincronizarVentasWorker(
         val db = AppDatabase.getDatabase(applicationContext)
         val ventaRepo = VentaRepository(db.VentaDao())
         val firebaseDataSource = FirebaseDataSource()
-        val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+        val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
         val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
 
         return try {
@@ -32,7 +32,19 @@ class SincronizarVentasWorker(
 
             if (uidVendedor.isNullOrEmpty()) {
                 Log.w("SyncWorker", "No se encontró UID del vendedor")
-                return Result.failure() // No reintentar si no hay usuario (error fatal de sesión)
+                return Result.failure()
+            }
+
+            // 🔥 1.1. Sincronizar Ajustes de Inventario (NUEVO)
+            val ajustesPendientes = db.movimientoInventarioDao().obtenerMovimientosPendientes()
+            for (ajuste in ajustesPendientes) {
+                if (isStopped) return Result.retry()
+                try {
+                    // Reutilizamos la lógica del repo para subir a Firestore
+                    inventarioRepo.sincronizarMovimiento(ajuste)
+                } catch (e: Exception) {
+                    Log.e("SyncWorker", "Error sincronizando ajuste ${ajuste.id}")
+                }
             }
 
             // 🔥 2. Consulta Eficiente en Lote (Batch)

@@ -132,4 +132,7 @@ dependencies {
 
     //ticket
     implementation("androidx.core:core-ktx:1.12.0")
+
+    // QR Code Generation (ZXing)
+    implementation("com.google.zxing:core:3.5.3")
 }

@@ -18,9 +18,14 @@ data class InventarioUiState(
     val isLoading: Boolean = true,
     val rutaAsignada: String? = null,
     val productos: List<Plantilla_Producto> = emptyList(),
+    val productosDanados: List<Plantilla_Producto> = emptyList(),
     val notificaciones: List<Notificacion> = emptyList(),
     val error: String? = null,
-    val puestoTrabajo: String? = null
+    val puestoTrabajo: String? = null,
+    val isAdmin: Boolean = false,
+    val listaAlmacenes: List<String> = emptyList(),
+    val almacenSeleccionado: String? = null,
+    val esVistaGlobal: Boolean = false
 )
 
 class InventarioViewModel(
@@ -44,15 +49,25 @@ class InventarioViewModel(
         usuarioRepo.getUsuarioActual()
             .onEach { usuario ->
                 if (usuario != null) {
+                    val adminRoles = listOf("CEO1.1", "Gerente General")
+                    val esAdmin = usuario.puestoTrabajo in adminRoles
                     val nombreAlmacen = usuario.ultimoAlmacenNombre
+                    
                     _uiState.update { it.copy(
                         puestoTrabajo = usuario.puestoTrabajo,
                         rutaAsignada = nombreAlmacen,
+                        almacenSeleccionado = nombreAlmacen,
+                        isAdmin = esAdmin,
                         isLoading = false
                     ) }
                     
+                    if (esAdmin) {
+                        cargarListaAlmacenes()
+                    }
+                    
                     if (!nombreAlmacen.isNullOrEmpty()) {
                         escucharNotificaciones(nombreAlmacen)
+                        cargarStockDanado(nombreAlmacen)
                     }
                 }
             }
@@ -69,21 +84,92 @@ class InventarioViewModel(
         // 🔥 OFFLINE-FIRST: Observar productos desde Room de forma reactiva
         inventarioRepo.obtenerProductosLocal()
             .onEach { entities ->
-                // Filtrar para mostrar solo productos que tengan stock disponible > 0
-                val modelos = entities
-                    .filter { it.cantidadDisponible > 0 } 
-                    .map { entity ->
-                        Plantilla_Producto(
-                            id = entity.id,
-                            nombre = entity.nombre,
-                            precio = entity.precio,
-                            cantidad = entity.cantidadDisponible,
-                            imagenUrl = entity.imagenUrl ?: ""
-                        )
-                    }
-                _uiState.update { it.copy(productos = modelos) }
+                if (!_uiState.value.esVistaGlobal && _uiState.value.almacenSeleccionado == _uiState.value.rutaAsignada) {
+                    val modelos = entities
+                        .filter { it.cantidadDisponible > 0 } 
+                        .map { entity ->
+                            Plantilla_Producto(
+                                id = entity.id,
+                                nombre = entity.nombre,
+                                precio = entity.precio,
+                                cantidad = entity.cantidadDisponible,
+                                imagenUrl = entity.imagenUrl ?: ""
+                            )
+                        }
+                    _uiState.update { it.copy(productos = modelos) }
+                }
             }
             .launchIn(viewModelScope)
+    }
+
+    private fun cargarListaAlmacenes() {
+        viewModelScope.launch {
+            val lista = inventarioRepo.obtenerListaAlmacenes()
+            _uiState.update { it.copy(listaAlmacenes = lista) }
+        }
+    }
+
+    fun seleccionarAlmacen(almacen: String) {
+        _uiState.update { it.copy(isLoading = true, almacenSeleccionado = almacen, esVistaGlobal = false) }
+        viewModelScope.launch {
+            try {
+                val stock = inventarioRepo.obtenerStockAlmacen(almacen)
+                val danado = inventarioRepo.obtenerStockDanado(almacen)
+                
+                // Mapear stock a Plantilla_Producto
+                val catalogo = inventarioRepo.obtenerProductosLocal().first()
+                val productosStock = stock.mapNotNull { (prodId, cant) ->
+                    val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
+                    Plantilla_Producto(prodId, info.nombre, info.precio, cant, 0, info.imagenUrl ?: "")
+                }
+                
+                val productosDanados = danado.mapNotNull { (prodId, cant) ->
+                    val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
+                    Plantilla_Producto(prodId, info.nombre, info.precio, cant, 0, info.imagenUrl ?: "")
+                }
+
+                _uiState.update { it.copy(
+                    productos = productosStock,
+                    productosDanados = productosDanados,
+                    isLoading = false
+                ) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    fun activarVistaGlobal() {
+        _uiState.update { it.copy(isLoading = true, esVistaGlobal = true, almacenSeleccionado = "VISTA GLOBAL") }
+        viewModelScope.launch {
+            try {
+                val globalStock = inventarioRepo.obtenerStockGlobal()
+                val catalogo = inventarioRepo.obtenerProductosLocal().first()
+                
+                val productos = globalStock.mapNotNull { (prodId, cant) ->
+                    val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
+                    Plantilla_Producto(prodId, info.nombre, info.precio, cant, 0, info.imagenUrl ?: "")
+                }.sortedBy { it.nombre }
+
+                _uiState.update { it.copy(productos = productos, productosDanados = emptyList(), isLoading = false) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    private fun cargarStockDanado(almacen: String) {
+        viewModelScope.launch {
+            try {
+                val danado = inventarioRepo.obtenerStockDanado(almacen)
+                val catalogo = inventarioRepo.obtenerProductosLocal().first()
+                val lista = danado.mapNotNull { (prodId, cant) ->
+                    val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
+                    Plantilla_Producto(prodId, info.nombre, info.precio, cant, 0, info.imagenUrl ?: "")
+                }
+                _uiState.update { it.copy(productosDanados = lista) }
+            } catch (e: Exception) { }
+        }
     }
 
     private fun escucharNotificaciones(nombreAlmacen: String) {

@@ -14,7 +14,8 @@ data class MovimientosUiState(
     val isLoading: Boolean = false,
     val stockOrigen: Map<String, Int> = emptyMap(),
     val error: String? = null,
-    val ordenCreadaExito: Boolean = false
+    val ordenCreadaExito: Boolean = false,
+    val listaAlmacenes: List<String> = emptyList()
 )
 
 class MovimientosViewModel(
@@ -48,6 +49,14 @@ class MovimientosViewModel(
         // Aseguramos que el catálogo esté actualizado al entrar
         viewModelScope.launch {
             inventarioRepo.descargarCatalogoProductos()
+            cargarAlmacenes()
+        }
+    }
+
+    private fun cargarAlmacenes() {
+        viewModelScope.launch {
+            val lista = inventarioRepo.obtenerListaAlmacenes()
+            _uiState.update { it.copy(listaAlmacenes = lista) }
         }
     }
 
