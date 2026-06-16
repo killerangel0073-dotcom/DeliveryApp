@@ -55,12 +55,20 @@ class RegistroClienteViewModel(
     fun fetchInitialLocation(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val fused = LocationServices.getFusedLocationProviderClient(context)
-                val location = withTimeoutOrNull(10000) {
-                    fused.getCurrentLocation(
-                        Priority.PRIORITY_HIGH_ACCURACY,
-                        com.google.android.gms.tasks.CancellationTokenSource().token
-                    ).await()
+                // 1. Intentamos usar la ubicación que ya tiene el LocationService (instantáneo)
+                val ubicacionActual = com.gruposanangel.delivery.SegundoPlano.LocationState.ultimaUbicacion.value
+                
+                var location: Location? = ubicacionActual
+
+                // 2. Si no hay, intentamos una petición rápida al GPS
+                if (location == null) {
+                    val fused = LocationServices.getFusedLocationProviderClient(context)
+                    location = withTimeoutOrNull(5000) {
+                        fused.getCurrentLocation(
+                            Priority.PRIORITY_HIGH_ACCURACY,
+                            com.google.android.gms.tasks.CancellationTokenSource().token
+                        ).await()
+                    }
                 }
 
                 if (location != null) {
@@ -74,20 +82,18 @@ class RegistroClienteViewModel(
                         )
                     }
                 } else {
-                    // Fallback Chalma
+                    // Si falla todo, notificamos pero permitimos un reintento o usamos fallback seguro
                     _uiState.update {
                         it.copy(
-                            ubicacionTexto = "Chalma, Veracruz (Ubicación predeterminada)",
-                            ubicacionValida = true,
-                            latitud = 19.4895,
-                            longitud = -96.8289
+                            ubicacionTexto = "No se pudo obtener ubicación exacta. Reintente.",
+                            ubicacionValida = false
                         )
                     }
                 }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
-                        ubicacionTexto = "Error al obtener ubicación",
+                        ubicacionTexto = "Error de GPS. Verifique sus ajustes.",
                         ubicacionValida = false
                     )
                 }

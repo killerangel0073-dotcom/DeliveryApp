@@ -93,6 +93,14 @@ fun Navegador(
             CrearClienteScreen(navController, repository!!)
         }
 
+        composable(
+            route = "editar_cliente/{clienteId}",
+            arguments = listOf(navArgument("clienteId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val clienteId = backStackEntry.arguments?.getString("clienteId") ?: ""
+            EditarClienteScreen(navController, clienteId, repository)
+        }
+
         composable("CREAR_PRODUCTO") {
             CrearProductoScreen(navController)
         }
@@ -116,6 +124,50 @@ fun Navegador(
 
         composable("ADMIN_USUARIOS") {
             Pantalla_Usuarios_Admin(navController)
+        }
+
+        composable(
+            route = "camara_escaneo_licencia/{userId}/{userName}",
+            arguments = listOf(
+                navArgument("userId") { type = NavType.StringType },
+                navArgument("userName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val userId = backStackEntry.arguments?.getString("userId") ?: ""
+            val userName = backStackEntry.arguments?.getString("userName") ?: ""
+            val parentEntry = remember(backStackEntry) { navController.getBackStackEntry("ADMIN_USUARIOS") }
+            val viewModel: UsuariosAdminViewModel = viewModel(parentEntry)
+            
+            PantallaCamaraGenerica(
+                navController = navController,
+                tituloGuia = "Encuadre la Licencia",
+                onPhotoCaptured = { file ->
+                    viewModel.validarLicenciaConIA(file, userId, userName)
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable(
+            route = "camara_escaneo_ine/{userId}/{userName}",
+            arguments = listOf(
+                navArgument("userId") { type = NavType.StringType },
+                navArgument("userName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val userId = backStackEntry.arguments?.getString("userId") ?: ""
+            val userName = backStackEntry.arguments?.getString("userName") ?: ""
+            val parentEntry = remember(backStackEntry) { navController.getBackStackEntry("ADMIN_USUARIOS") }
+            val viewModel: UsuariosAdminViewModel = viewModel(parentEntry)
+            
+            PantallaCamaraGenerica(
+                navController = navController,
+                tituloGuia = "Encuadre el INE (Frente)",
+                onPhotoCaptured = { file ->
+                    viewModel.validarINEConIA(file, userId, userName)
+                    navController.popBackStack()
+                }
+            )
         }
 
         composable("ADMIN_RUTAS") {

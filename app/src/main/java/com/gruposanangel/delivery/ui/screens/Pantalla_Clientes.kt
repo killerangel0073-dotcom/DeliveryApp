@@ -8,6 +8,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -19,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -39,12 +43,12 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
-fun PantallaClientes(navController: NavController, repository: RepositoryCliente?) {
+fun PantallaClientes(navController: NavController, repository: RepositoryCliente?, isAdmin: Boolean = false) {
     val isPreview = LocalInspectionMode.current
     if (isPreview || repository == null) {
         PantallaClientesContent(
             uiState = ClienteUiState(clientes = listOf(Plantilla_Cliente("1", "Tienda A", "Juan", "", true), Plantilla_Cliente("2", "Abarrotes B", "Mary", "", true))),
-            onSearchQueryChanged = {}, onClienteClick = {}, onCarritoClick = {}, onNuevoCliente = {}
+            onSearchQueryChanged = {}, onClienteClick = {}, onCarritoClick = {}, onNuevoCliente = {}, isAdmin = isAdmin, onEditClick = {}
         )
     } else {
         val viewModel: ClienteViewModel = viewModel(factory = object : ViewModelProvider.Factory {
@@ -52,19 +56,29 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
             override fun <T : ViewModel> create(modelClass: Class<T>): T = ClienteViewModel(repository) as T
         })
         val uiState by viewModel.uiState.collectAsState()
+        val context = LocalContext.current
+        
+        LaunchedEffect(Unit) {
+            if (uiState.clientes.isEmpty()) {
+                viewModel.syncData(context)
+            }
+        }
+
         PantallaClientesContent(
             uiState = uiState,
             onSearchQueryChanged = { viewModel.onSearchQueryChanged(it) },
             onClienteClick = { id -> navController.navigate("detalle_cliente/$id?origen=Clientes") },
             onCarritoClick = { id -> navController.navigate("pantalla_ventas/$id") },
-            onNuevoCliente = { navController.navigate("crear_cliente") }
+            onNuevoCliente = { navController.navigate("crear_cliente") },
+            isAdmin = isAdmin,
+            onEditClick = { id -> navController.navigate("editar_cliente/$id") }
         )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (String) -> Unit, onClienteClick: (String) -> Unit, onCarritoClick: (String) -> Unit, onNuevoCliente: () -> Unit) {
+fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (String) -> Unit, onClienteClick: (String) -> Unit, onCarritoClick: (String) -> Unit, onNuevoCliente: () -> Unit, isAdmin: Boolean, onEditClick: (String) -> Unit) {
     Scaffold(
         floatingActionButton = {
             FloatingActionButton(onClick = onNuevoCliente, containerColor = Color.Red, contentColor = Color.White, shape = RoundedCornerShape(16.dp)) {
@@ -94,8 +108,51 @@ fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (Stri
                                 Column(Modifier.weight(1f)) {
                                     Text(cliente.nombreNegocio, fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.Black)
                                     Text(cliente.nombreDueno, color = Color.Gray, fontSize = 13.sp)
+                                    if (cliente.distanciaTexto.isNotEmpty()) {
+                                        val enRango = cliente.distanciaMetros in 0f..200f
+                                        val colorTexto = if (enRango) Color(0xFF2E7D32) else Color.Red
+                                        val colorFondo = if (enRango) Color(0xFFE8F5E9) else Color.Red.copy(alpha = 0.1f)
+
+                                        Spacer(Modifier.height(4.dp))
+                                        Box(
+                                            Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(colorFondo)
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    Icons.Default.LocationOn,
+                                                    null,
+                                                    tint = colorTexto,
+                                                    modifier = Modifier.size(10.dp)
+                                                )
+                                                Spacer(Modifier.width(2.dp))
+                                                Text(
+                                                    cliente.distanciaTexto,
+                                                    color = colorTexto,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
-                                IconButton(onClick = { onCarritoClick(cliente.id) }) { Icon(Icons.Default.ShoppingCart, null, tint = Color.Red, modifier = Modifier.size(28.dp)) }
+                                Surface(
+                                    onClick = { if (isAdmin) onEditClick(cliente.id) else onCarritoClick(cliente.id) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color.Red.copy(alpha = 0.1f),
+                                    modifier = Modifier.size(42.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (isAdmin) Icons.Default.EditNote else Icons.Default.ShoppingCart,
+                                            contentDescription = null,
+                                            tint = Color.Red,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -109,11 +166,11 @@ fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (Stri
 @Composable
 fun PantallaClientesPreview() {
     val clientes = listOf(Plantilla_Cliente("1", "Abarrotes La Pasadita", "Don Chon", "", true))
-    DeliveryTheme { PantallaClientesContent(ClienteUiState(clientes = clientes, isLoading = false), {}, {}, {}, {}) }
+    DeliveryTheme { PantallaClientesContent(ClienteUiState(clientes = clientes, isLoading = false), {}, {}, {}, {}, true, {}) }
 }
 
 @Preview(showBackground = true, showSystemUi = true, name = "Clientes - Cargando")
 @Composable
 fun PantallaClientesLoadingPreview() {
-    DeliveryTheme { PantallaClientesContent(ClienteUiState(isLoading = true), {}, {}, {}, {}) }
+    DeliveryTheme { PantallaClientesContent(ClienteUiState(isLoading = true), {}, {}, {}, {}, false, {}) }
 }

@@ -138,6 +138,30 @@ class LocationService : Service() {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
+
+        // 1. Validar permisos antes de cualquier acción de Foreground
+        if (!tienePermisosUbicacion()) {
+            Log.e(TAG, "❌ Permisos ausentes en onCreate. Abortando servicio.")
+            stopSelf()
+            return
+        }
+
+        try {
+            createLocationChannelIfNeeded()
+            createAlertsChannelIfNeeded()
+            
+            // 🔥 Android 14+ requiere especificar el tipo si está en el manifiesto
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(1, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(1, buildNotification())
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Crash fatal al iniciar startForeground: ${e.message}")
+            stopSelf()
+            return
+        }
+
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         
         val db = AppDatabase.getDatabase(this)
@@ -147,17 +171,6 @@ class LocationService : Service() {
         val prefs = getSharedPreferences("config_gps", Context.MODE_PRIVATE)
         limiteVelocidadActual = prefs.getFloat("limite_velocidad", 70f)
 
-        if (!tienePermisosUbicacion()) {
-            Log.e(TAG, "❌ Sin permisos de ubicación. Cerrando servicio.")
-            stopSelf()
-            return
-        }
-
-        // 1. Centralizamos la creación de canales de una sola vez
-        createLocationChannelIfNeeded()
-        createAlertsChannelIfNeeded()
-
-        startForeground(1, buildNotification())
         adquirirWakeLock()
         requestLocationUpdates()
         registrarBatteryReceiver()
@@ -304,7 +317,7 @@ class LocationService : Service() {
                 }
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY // 🔥 Cambiado de START_STICKY para evitar reinicios automáticos sin permisos
     }
 
 
@@ -543,6 +556,9 @@ class LocationService : Service() {
             // Forzamos que el tiempo del objeto sea el tiempo actual del sistema
             time = System.currentTimeMillis()
         }
+
+        // 🔥 COMPARTIR CON EL RESTO DE LA APP
+        LocationState.updateUbicacion(location)
 
 
 

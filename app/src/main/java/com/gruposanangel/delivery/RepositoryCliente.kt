@@ -40,6 +40,10 @@ class RepositoryCliente(private val dao: ClienteDao) {
     }
 
 
+    suspend fun eliminarLocal(id: String) {
+        dao.deleteById(id)
+    }
+
     suspend fun obtenerClientesLocalPorId(id: String): ClienteEntity? {
         return dao.getClientePorId(id)
     }

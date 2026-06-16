@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -17,8 +18,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -27,7 +31,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.*
-import com.google.maps.android.compose.*
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapType
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerComposable
+import com.google.maps.android.compose.Polyline
+import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.maps.android.compose.rememberMarkerState
+import com.gruposanangel.delivery.R
+import coil.compose.AsyncImage
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryRuta
 import java.text.SimpleDateFormat
@@ -138,6 +152,33 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
                         icon = markerIcon,
                         alpha = 0.9f
                     )
+                }
+
+                // 📸 MARCADORES DE VENTAS (Thumbnail del Cliente)
+                uiState.ventas.forEach { venta ->
+                    MarkerComposable(
+                        state = rememberMarkerState(position = venta.latLng),
+                        title = venta.clienteNombre,
+                        snippet = "Venta Total: $${venta.total}"
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .shadow(8.dp, CircleShape)
+                                .background(if (venta.fueraDeRango) Color.Red else Color.White, CircleShape)
+                                .padding(3.dp)
+                                .clip(CircleShape)
+                        ) {
+                            AsyncImage(
+                                model = venta.fotoUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                                placeholder = painterResource(R.drawable.repartidor),
+                                error = painterResource(R.drawable.repartidor)
+                            )
+                        }
+                    }
                 }
             }
 

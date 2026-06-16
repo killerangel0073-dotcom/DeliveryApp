@@ -11,21 +11,25 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
       return res.status(405).send({ error: 'Método no permitido' });
     }
 
-    const {
-      ventaLocalId, // Este ahora es el UUID generado por el móvil
-      clienteId,
-      clienteNombre,
-      productos,
-      metodoPago,
-      vendedorId,
-      almacenVendedorId
-    } = req.body;
+      const {
+        ventaLocalId,
+        clienteId,
+        clienteNombre,
+        productos,
+        metodoPago,
+        vendedorId,
+        almacenVendedorId,
+        fotoEvidenciaVisita,
+        fueraDeRango, // 🔥
+        latitudVenta, // 🔥
+        longitudVenta // 🔥
+      } = req.body;
 
-    if (!ventaLocalId || !clienteId || !clienteNombre || !Array.isArray(productos) || productos.length === 0 || !metodoPago || !vendedorId || !almacenVendedorId) {
-      return res.status(400).send({ error: 'Datos de venta incompletos' });
-    }
+      if (!ventaLocalId || !clienteId || !clienteNombre || !Array.isArray(productos) || productos.length === 0 || !metodoPago || !vendedorId || !almacenVendedorId) {
+        return res.status(400).send({ error: 'Datos de venta incompletos' });
+      }
 
-    const almacenIdLimpio = almacenVendedorId.trim();
+      const almacenIdLimpio = almacenVendedorId.trim();
 
     // 🔥 BLINDAJE DE IDEMPOTENCIA: Usamos el ID local como ID de documento en Firestore.
     // Si la función se reintenta con el mismo UUID, Firestore simplemente sobrescribirá (o fallará la transacción si el stock cambió),
@@ -85,7 +89,11 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
         vendedorId,
         sincronizado: true,
         estado: 'pagada',
-        comentarios: 'Registro Idempotente'
+        comentarios: 'Registro Idempotente',
+        fotoEvidenciaVisita: fotoEvidenciaVisita || null,
+        fueraDeRango: fueraDeRango || false, // 🔥
+        latitudVenta: latitudVenta || 0, // 🔥
+        longitudVenta: longitudVenta || 0 // 🔥
       });
 
       // 🔹 Agregar productos y actualizar stock

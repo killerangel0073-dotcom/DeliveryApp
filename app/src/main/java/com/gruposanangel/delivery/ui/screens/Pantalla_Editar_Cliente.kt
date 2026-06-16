@@ -16,6 +16,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,52 +50,74 @@ import com.gruposanangel.delivery.ui.theme.DeliveryTheme
 import kotlinx.coroutines.launch
 
 @Composable
-fun CrearClienteScreen(navController: NavController, repository: RepositoryCliente?) {
+fun EditarClienteScreen(navController: NavController, clienteId: String, repository: RepositoryCliente?) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val isPreview = LocalInspectionMode.current
     
-    val vm: RegistroClienteViewModel? = if (!isPreview && repository != null) {
+    val vm: EditarClienteViewModel? = if (!isPreview && repository != null) {
         viewModel(factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = RegistroClienteViewModel(repository) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = EditarClienteViewModel(repository, clienteId) as T
         })
     } else null
 
-    val uiState by vm?.uiState?.collectAsState() ?: remember { mutableStateOf(RegistroUiState()) }
-
-    // 🔥 NUEVO: Disparar la obtención de ubicación al entrar
-    LaunchedEffect(Unit) {
-        vm?.fetchInitialLocation(context)
-    }
+    val uiState by vm?.uiState?.collectAsState() ?: remember { mutableStateOf(EditarClienteUiState()) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     val launcherCamera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp -> bmp?.let { vm?.let { v -> val file = v.createImageFile(context); v.saveBitmap(it, file); v.onImageSelected(file, it) } } }
 
-    LaunchedEffect(uiState.status) { if (uiState.status is RegistroUiStatus.Success) { Toast.makeText(context, "Cliente registrado", Toast.LENGTH_SHORT).show(); navController.popBackStack() } }
+    LaunchedEffect(uiState.status) { 
+        if (uiState.status is RegistroUiStatus.Success) { 
+            Toast.makeText(context, "Cliente actualizado", Toast.LENGTH_SHORT).show()
+            navController.popBackStack() 
+        } else if (uiState.status is RegistroUiStatus.Error) {
+            Toast.makeText(context, (uiState.status as RegistroUiStatus.Error).message, Toast.LENGTH_LONG).show()
+        }
+    }
 
-    CrearClienteContent(
-        uiState = uiState,
-        onBack = { navController.popBackStack() },
-        onTakePhoto = { launcherCamera.launch(null) },
-        onGuardar = { n, d, t, c, e -> vm?.guardarCliente(context, n, d, t, c, e) },
-        onRetryLocation = { vm?.fetchInitialLocation(context) }
-    )
+    if (uiState.isLoadingData) {
+        Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = Color.Red) }
+    } else {
+        EditarClienteContent(
+            uiState = uiState,
+            onBack = { navController.popBackStack() },
+            onTakePhoto = { launcherCamera.launch(null) },
+            onGuardar = { n, d, t, c, e -> vm?.guardarCambios(context, n, d, t, c, e) },
+            onEliminar = { showDeleteDialog = true }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Eliminar Cliente") },
+            text = { Text("¿Estás seguro de que deseas eliminar este cliente? Esta acción no se puede deshacer.") },
+            confirmButton = {
+                Button(onClick = { vm?.eliminarCliente(context); showDeleteDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
+                    Text("ELIMINAR")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("CANCELAR") }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CrearClienteContent(
-    uiState: RegistroUiState,
+fun EditarClienteContent(
+    uiState: EditarClienteUiState,
     onBack: () -> Unit,
     onTakePhoto: () -> Unit,
     onGuardar: (String, String, String, String, String) -> Unit,
-    onRetryLocation: () -> Unit
+    onEliminar: () -> Unit
 ) {
-    var nombreNegocio by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
-    var nombreDueno by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
-    var telefono by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
-    var correo by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
-    var tipoExhibidor by rememberSaveable { mutableStateOf("No asignado") }
+    var nombreNegocio by remember(uiState.cliente) { mutableStateOf(TextFieldValue(uiState.cliente?.nombreNegocio ?: "")) }
+    var nombreDueno by remember(uiState.cliente) { mutableStateOf(TextFieldValue(uiState.cliente?.nombreDueno ?: "")) }
+    var telefono by remember(uiState.cliente) { mutableStateOf(TextFieldValue(uiState.cliente?.telefono ?: "")) }
+    var correo by remember(uiState.cliente) { mutableStateOf(TextFieldValue(uiState.cliente?.correo ?: "")) }
+    var tipoExhibidor by remember(uiState.cliente) { mutableStateOf(uiState.cliente?.tipoExhibidor ?: "No asignado") }
     var expanded by remember { mutableStateOf(false) }
 
     val isLoading = uiState.status is RegistroUiStatus.Loading
@@ -103,7 +127,22 @@ fun CrearClienteContent(
             Card(Modifier.fillMaxWidth().padding(vertical = 8.dp), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(3.dp)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red) }
-                    Text("NUEVO CLIENTE", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color.DarkGray)
+                    Text("EDITAR CLIENTE", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color.DarkGray)
+                    Surface(
+                        onClick = onEliminar,
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.Red.copy(alpha = 0.1f),
+                        modifier = Modifier.size(42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = null,
+                                tint = Color.Red,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -127,46 +166,11 @@ fun CrearClienteContent(
                             listOf("No asignado", "Mesa", "Normal", "Premium").forEach { opt -> DropdownMenuItem(text = { Text(opt) }, onClick = { tipoExhibidor = opt; expanded = false }) }
                         }
                     }
-                    
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        ModernOutlinedField(
-                            label = "Ubicación GPS", 
-                            value = TextFieldValue(uiState.ubicacionTexto), 
-                            icon = Icons.Outlined.GpsFixed, 
-                            onValueChange = {}, 
-                            readOnly = true
-                        )
-                        if (!uiState.ubicacionValida && !isLoading) {
-                            IconButton(
-                                onClick = onRetryLocation,
-                                modifier = Modifier.padding(end = 8.dp)
-                            ) {
-                                Icon(Icons.Outlined.Refresh, "Reintentar", tint = Color.Red)
-                            }
-                        }
-                    }
                 }
             }
             Spacer(Modifier.height(24.dp))
             if (isLoading) { CircularProgressIndicator(color = Color.Red) }
-            else { Button(onClick = { onGuardar(nombreNegocio.text, nombreDueno.text, telefono.text, correo.text, tipoExhibidor) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("GUARDAR CLIENTE", fontWeight = FontWeight.ExtraBold) } }
+            else { Button(onClick = { onGuardar(nombreNegocio.text, nombreDueno.text, telefono.text, correo.text, tipoExhibidor) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("GUARDAR CAMBIOS", fontWeight = FontWeight.ExtraBold) } }
         }
     }
-}
-
-@Composable
-fun ModernOutlinedField(label: String, value: TextFieldValue, icon: ImageVector, onValueChange: (TextFieldValue) -> Unit, keyboardType: KeyboardType = KeyboardType.Text, maxLines: Int = 1, readOnly: Boolean = false) {
-    OutlinedTextField(value = value, onValueChange = onValueChange, label = { Text(label) }, leadingIcon = { Icon(icon, null, tint = if (readOnly) Color.Gray else Color.Red) }, singleLine = maxLines == 1, maxLines = maxLines, readOnly = readOnly, keyboardOptions = KeyboardOptions(keyboardType = keyboardType), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red, disabledBorderColor = Color(0xFFEEEEEE), disabledTextColor = Color.DarkGray, disabledLabelColor = Color.Gray), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp))
-}
-
-@Preview(showBackground = true, showSystemUi = true, name = "Crear Cliente - Formulario")
-@Composable
-fun CrearClientePreview() {
-    DeliveryTheme { CrearClienteContent(RegistroUiState(), {}, {}, {_,_,_,_,_ ->}, {}) }
-}
-
-@Preview(showBackground = true, showSystemUi = true, name = "Crear Cliente - Cargando")
-@Composable
-fun CrearClienteLoadingPreview() {
-    DeliveryTheme { CrearClienteContent(RegistroUiState(status = RegistroUiStatus.Loading), {}, {}, {_,_,_,_,_ ->}, {}) }
 }

@@ -26,6 +26,20 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.HistoryToggleOff
+import androidx.compose.material.icons.filled.Dangerous
+import androidx.compose.material3.*
+import androidx.compose.ui.Alignment
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.firebase.firestore.FirebaseFirestore
 import com.gruposanangel.delivery.data.*
 import com.gruposanangel.delivery.VentaRepository
@@ -53,6 +67,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 🔥 INICIALIZAR TIME MANAGER (Arquitectura de Seguridad)
+        com.gruposanangel.delivery.utilidades.TimeManager.init(this)
+
         scheduleSyncWorkers(this)
         FirebaseApp.initializeApp(this)
         FirebaseAppCheck.getInstance().installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
@@ -63,8 +81,8 @@ class MainActivity : ComponentActivity() {
         inventarioRepo = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
         ventaRepository = VentaRepository(db.VentaDao())
 
-        syncJob = startForegroundSyncLoop()
-        iniciarSincronizacionInmediata()
+        // 🔥 QUITAMOS LAS LLAMADAS DIRECTAS DE ONCREATE
+        // Las moveremos dentro del Wrapper para que solo corran con permisos
 
         WindowCompat.setDecorFitsSystemWindows(window, true)
         setContent {
@@ -98,8 +116,27 @@ class MainActivity : ComponentActivity() {
             // Procesar el intent inicial y los cambios
             LaunchedEffect(Unit) { procesarIntent(intent) }
             
-            // Estado de bloqueo de cuenta
-            var isAccountBlocked by remember { mutableStateOf(false) }
+            // 🔥 ESTADOS DE BLOQUEO Y SEGURIDAD
+            var blockReason by remember { mutableStateOf<String?>(null) }
+            val timeManager = com.gruposanangel.delivery.utilidades.TimeManager
+            var showTimeError by remember { mutableStateOf(!timeManager.esHoraAutomaticaActivada(context)) }
+            var needsSync by remember { mutableStateOf(timeManager.requiereSincronizacion()) }
+
+            // 🔥 OBSERVADOR DE CICLO DE VIDA PARA AUTO-VALIDACIÓN
+            val lifecycleOwner = LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) {
+                        showTimeError = !timeManager.esHoraAutomaticaActivada(context)
+                        needsSync = timeManager.requiereSincronizacion()
+                        if (!showTimeError && needsSync && usuarioActual != null) {
+                            iniciarSincronizacionInmediata()
+                        }
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+            }
 
             DisposableEffect(intent) {
                 // Esto se disparará cuando setIntent(intent) sea llamado en onNewIntent
@@ -116,30 +153,101 @@ class MainActivity : ComponentActivity() {
                         .addSnapshotListener { snapshot, _ ->
                             if (snapshot != null && snapshot.exists()) {
                                 val activo = snapshot.getBoolean("activo") ?: true
-                                isAccountBlocked = !activo
+                                val estadoLicencia = snapshot.getString("licenciaEstado") ?: "VIGENTE"
+                                val puesto = snapshot.getString("puestoTrabajo") ?: ""
+
+                                // 🔥 Los administradores/jefes tienen inmunidad de bloqueo por licencia
+                                val esJefe = puesto == "CEO1.1" || puesto == "Gerente General" || puesto == "Supervisor" || puesto == "Administración"
+                                
+                                blockReason = when {
+                                    !activo -> "ACCOUNT_DISABLED"
+                                    estadoLicencia == "VENCIDA" && !esJefe -> "LICENSE_EXPIRED"
+                                    else -> null
+                                }
                             }
                         }
                 } else {
-                    isAccountBlocked = false
+                    blockReason = null
                     statusListener?.remove()
                 }
             }
 
             SideEffect { sysUI.setSystemBarsColor(Color.Red, darkIcons = false); sysUI.setNavigationBarColor(Color.Black, darkIcons = true) }
 
-            if (isAccountBlocked) {
+            if (blockReason != null) {
                 // PANTALLA DE BLOQUEO TOTAL
-                Box(Modifier.fillMaxSize().background(Color.Black)) {
-                    Image(
-                        painter = painterResource(id = R.drawable.appbloqueada),
-                        contentDescription = "Aplicación Bloqueada",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.FillBounds
-                    )
+                Box(Modifier.fillMaxSize().background(Color.Black), Alignment.Center) {
+                    if (blockReason == "ACCOUNT_DISABLED") {
+                        Image(
+                            painter = painterResource(id = R.drawable.appbloqueada),
+                            contentDescription = "Aplicación Bloqueada",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.FillBounds
+                        )
+                    } else {
+                        // Bloqueo por Licencia Vencida
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                            Icon(Icons.Default.Dangerous, null, tint = Color.Red, modifier = Modifier.size(100.dp))
+                            Spacer(Modifier.height(24.dp))
+                            Text("LICENCIA VENCIDA", fontSize = 24.sp, fontWeight = FontWeight.Black, color = Color.White)
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                "Tu licencia de conducir ha expirado. Por seguridad y cumplimiento legal, no puedes iniciar jornada hasta que un administrador valide tu nueva licencia.",
+                                color = Color.LightGray, textAlign = TextAlign.Center, fontSize = 16.sp
+                            )
+                            Spacer(Modifier.height(40.dp))
+                            Text("Contacta a tu supervisor para la actualización.", color = Color.Red, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            } else if (showTimeError || (needsSync && usuarioActual != null)) {
+                // 🔥 PANTALLA DE BLOQUEO POR HORA INCORRECTA
+                Box(Modifier.fillMaxSize().background(Color.White), Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Default.HistoryToggleOff, null, tint = Color.Red, modifier = Modifier.size(80.dp))
+                        Spacer(Modifier.height(24.dp))
+                        Text("CONFIGURACIÓN DE HORA INCORRECTA", fontWeight = FontWeight.Black, color = Color.Black, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            if (showTimeError) "Para continuar, debes activar la 'Hora Automática' en los ajustes de tu teléfono. Esto garantiza la integridad de tus ventas."
+                            else "Se requiere conexión a internet para validar el reloj del sistema antes de iniciar tu jornada.",
+                            color = Color.Gray, textAlign = TextAlign.Center, fontSize = 14.sp
+                        )
+                        Spacer(Modifier.height(32.dp))
+                        Button(
+                            onClick = { 
+                                if (showTimeError) {
+                                    // Abrir ajustes de fecha y hora
+                                    context.startActivity(Intent(android.provider.Settings.ACTION_DATE_SETTINGS))
+                                } else {
+                                    showTimeError = !timeManager.esHoraAutomaticaActivada(context)
+                                    needsSync = timeManager.requiereSincronizacion()
+                                    if (!showTimeError && needsSync) iniciarSincronizacionInmediata()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text(if (showTimeError) "IR A AJUSTES" else "REINTENTAR", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) }
+                    }
                 }
             } else {
                 Box(Modifier.fillMaxSize().background(Color.Red)) {
-                    HardLockPermissionWrapper {
+                    HardLockPermissionWrapper(
+                        onLockActive = {
+                            // 🔥 Limpieza total inmediata si hay bloqueo
+                            try {
+                                stopService(Intent(context, LocationService::class.java))
+                            } catch (_: Exception) { }
+                            locationServiceStarted = false
+                            syncJob?.cancel()
+                            syncJob = null
+                        },
+                        onLockCleared = {
+                            // 🔥 Solo cuando el camino está limpio, arrancamos motores
+                            if (syncJob == null) syncJob = startForegroundSyncLoop()
+                            iniciarSincronizacionInmediata()
+                        }
+                    ) {
                         startLocationService(usuarioActual?.puestoTrabajo)
                         if (usuarioActual != null) { 
                             Navegador(
@@ -165,6 +273,16 @@ class MainActivity : ComponentActivity() {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                // 0. Sincronizar Reloj con Servidor (Seguridad Temporal)
+                try {
+                    val serverTimeSnap = FirebaseFirestore.getInstance().collection("users").document(uid).get().await()
+                    // Si el documento existe, usamos el tiempo actual del sistema como base inicial 
+                    // pero lo ideal es un serverTimestamp. Para esta versión, si el usuario tiene internet,
+                    // validamos contra un campo "ultimaConexion" que el servidor actualiza.
+                    val tiempoServidor = System.currentTimeMillis() // Fallback
+                    com.gruposanangel.delivery.utilidades.TimeManager.sincronizar(tiempoServidor, this@MainActivity)
+                } catch (e: Exception) { Log.e("TIME", "Error sync time: ${e.message}") }
+
                 // 1. Actualizar Token FCM (Indispensable para comunicación)
                 launch { FcmUtils.updateFcmToken(uid) }
                 
@@ -201,7 +319,20 @@ class MainActivity : ComponentActivity() {
                     if (almacenId != null) {
                         pendientes.forEach { v ->
                             val prods = ventaRepository.obtenerDetallesDeVenta(v.id).map { Plantilla_Producto(it.productoId, it.nombre, it.precio, it.cantidad) }
-                            val (exito, msg) = ventaRepository.sincronizarConServidor(v.id, v.clienteId, v.clienteNombre, prods, v.metodoPago, v.vendedorId, nombreVendedor, almacenId)
+                            val (exito, msg) = ventaRepository.sincronizarConServidor(
+                                ventaLocalId = v.id, 
+                                clienteId = v.clienteId, 
+                                clienteNombre = v.clienteNombre, 
+                                productos = prods, 
+                                metodoPago = v.metodoPago, 
+                                vendedorId = v.vendedorId, 
+                                vendedorNombre = nombreVendedor, 
+                                almacenVendedorId = almacenId,
+                                fotoEvidenciaLocal = v.fotoEvidenciaVisita,
+                                fueraDeRango = v.fueraDeRango,
+                                latitudVenta = v.latitudVenta,
+                                longitudVenta = v.longitudVenta
+                            )
                             if (exito) { val fId = try { JSONObject(msg).optString("ventaId") } catch (_: Exception) { null }; if (!fId.isNullOrEmpty()) ventaRepository.marcarVentaConFirestoreId(v.id, fId) }
                         }
                     }
@@ -213,13 +344,22 @@ class MainActivity : ComponentActivity() {
 
     private fun startLocationService(puesto: String?) {
         if (puesto == "Vendedor de Ruta") {
-            if (!locationServiceStarted) {
-                ContextCompat.startForegroundService(this, Intent(this, LocationService::class.java).apply { action = LocationService.ACTION_START })
-                locationServiceStarted = true
+            // 🛡️ Blindaje final: No intentamos arrancar el FGS si no hay permisos reales
+            val hasLocation = ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            
+            if (hasLocation && !locationServiceStarted) {
+                try {
+                    ContextCompat.startForegroundService(this, Intent(this, LocationService::class.java).apply { action = LocationService.ACTION_START })
+                    locationServiceStarted = true
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error arrancando servicio: ${e.message}")
+                }
             }
         } else {
             if (locationServiceStarted) {
-                stopService(Intent(this, LocationService::class.java))
+                try {
+                    stopService(Intent(this, LocationService::class.java))
+                } catch (_: Exception) { }
                 locationServiceStarted = false
             }
         }

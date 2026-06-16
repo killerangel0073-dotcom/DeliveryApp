@@ -140,26 +140,29 @@ class SecurityMonitor(private val context: Context) {
  */
 @Composable
 fun HardLockPermissionWrapper(
+    onLockActive: () -> Unit = {},
+    onLockCleared: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    // Usamos context.applicationContext para el monitor para evitar fugas y asegurar persistencia tras recreación
     val monitor = remember { SecurityMonitor(context.applicationContext) }
     
-    // Estado inicial nulo para evitar crash en inicialización estática
-    var currentBlock by remember { mutableStateOf<SecurityBlock?>(null) }
+    var currentBlock by remember { mutableStateOf(monitor.getNextBlockingAction()) }
 
-    // Validación inicial perezosa al entrar a Compose
-    LaunchedEffect(Unit) {
-        currentBlock = monitor.getNextBlockingAction()
+    // Disparamos callbacks según el estado inicial
+    LaunchedEffect(currentBlock) {
+        if (currentBlock != null) onLockActive() else onLockCleared()
     }
 
     // Monitoreo constante del ciclo de vida y eventos del sistema
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                currentBlock = monitor.getNextBlockingAction()
+                val next = monitor.getNextBlockingAction()
+                if (next != currentBlock) {
+                    currentBlock = next
+                }
             }
         }
 
@@ -182,11 +185,10 @@ fun HardLockPermissionWrapper(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        content()
-
-        currentBlock?.let { block ->
-            PermissionLockScreen(block) {
-                // Re-validación manual disparada por el botón del usuario
+        if (currentBlock == null) {
+            content()
+        } else {
+            PermissionLockScreen(currentBlock!!) {
                 currentBlock = monitor.getNextBlockingAction()
             }
         }

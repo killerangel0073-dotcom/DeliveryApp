@@ -10,6 +10,7 @@ import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.ProductoDao
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.VentaDao
+import com.gruposanangel.delivery.data.VentaDetalleEntity
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -37,7 +38,8 @@ data class ArqueoUiState(
     val errorAutorizacion: String? = null,
     val reporteGuardado: Boolean = false,
     val autorizadoPor: String? = null,
-    val nombreVendedor: String = ""
+    val nombreVendedor: String = "",
+    val fechaUltimoArqueo: Long = 0L
 )
 
 data class ProductoArqueo(
@@ -46,7 +48,7 @@ data class ProductoArqueo(
     val precio: Double,
     val stockTeorico: Int,
     val stockInicialBitacora: Int = 0,
-    val cargasPorDia: List<Int> = listOf(0, 0, 0, 0, 0, 0), // L, M, M, J, V, S
+    val cargasPorDia: List<Int> = listOf(0, 0, 0, 0, 0, 0, 0), // L, M, M, J, V, S, D
     var stockReal: String = "",
     val imagenUrl: String = ""
 ) {
@@ -70,25 +72,59 @@ class ArqueoViewModel(
     private val _uiState = MutableStateFlow(ArqueoUiState())
     val uiState: StateFlow<ArqueoUiState> = _uiState.asStateFlow()
 
+    private val stockInicialRealMap = mutableMapOf<String, Int>()
+    private var fechaUltimoArqueoTS = 0L
+
     init {
-        cargarDatosResumen()
-        observarProductosArqueo()
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            buscarUltimoArqueo()
+            cargarDatosResumen()
+            observarProductosArqueo()
+        }
+    }
+
+    private suspend fun buscarUltimoArqueo() {
+        try {
+            val dbFirestore = FirebaseFirestore.getInstance()
+            val query = dbFirestore.collection("reportes_arqueo")
+                .whereEqualTo("vendedorId", vendedorId)
+                .orderBy("fecha", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(1)
+                .get()
+                .await()
+
+            if (!query.isEmpty) {
+                val doc = query.documents.first()
+                fechaUltimoArqueoTS = doc.getTimestamp("fecha")?.toDate()?.time ?: 0L
+                val detalle = doc.get("detalle") as? List<Map<String, Any>>
+                detalle?.forEach { item ->
+                    val id = item["id"] as? String
+                    val real = (item["r"] as? Number)?.toInt() ?: 0
+                    if (id != null) stockInicialRealMap[id] = real
+                }
+            }
+            _uiState.update { it.copy(fechaUltimoArqueo = fechaUltimoArqueoTS) }
+        } catch (e: Exception) {
+            Log.e("ARQUEO", "Error buscando último arqueo: ${e.message}")
+        }
     }
 
     private fun cargarDatosResumen() {
         viewModelScope.launch {
             try {
-                _uiState.update { it.copy(isLoading = true) }
-                
                 val calendar = Calendar.getInstance()
                 calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
                 calendar.set(Calendar.HOUR_OF_DAY, 0); calendar.set(Calendar.MINUTE, 0); calendar.set(Calendar.SECOND, 0)
                 val inicioSemana = calendar.timeInMillis
 
-                // 🔥 Sincronizamos las ventas del servidor antes de mostrar el resumen
-                ventaRepo.sincronizarVentasPeriodo(vendedorId, inicioSemana, System.currentTimeMillis())
+                // El punto de partida real para esta auditoría es el último arqueo
+                val startPoint = if (fechaUltimoArqueoTS > 0) fechaUltimoArqueoTS else inicioSemana
 
-                val ventas = ventaDao.obtenerVentasPorPeriodo(vendedorId, inicioSemana, System.currentTimeMillis())
+                // 1. Sincronizamos las ventas del servidor antes de mostrar el resumen
+                ventaRepo.sincronizarVentasPeriodo(vendedorId, startPoint, System.currentTimeMillis())
+
+                val ventas = ventaDao.obtenerVentasPorPeriodo(vendedorId, startPoint, System.currentTimeMillis())
                 var totalVUnidades = 0; var valorVSemana = 0.0
                 ventas.forEach { v ->
                     val detalles = ventaDao.obtenerDetallesPorVenta(v.id)
@@ -96,11 +132,31 @@ class ArqueoViewModel(
                     valorVSemana += detalles.sumOf { it.cantidad * it.precio }
                 }
 
+                val movimientos = inventarioRepo.obtenerMovimientosDesde(vendedorId, startPoint)
+                val totalCargasSemana = movimientos.filter { it.tipo == "CARGA_INVENTARIO" }.sumOf { it.cantidad }
+                val totalDevoluciones = movimientos.filter { it.tipo == "ENTRADA_MALO_DEVOLUCION" }.sumOf { it.cantidad }
+
+                // Entradas y Salidas que afectan el stock bueno
+                val totalEntradasBueno = movimientos.filter { 
+                    it.tipo == "CARGA_INVENTARIO" || it.tipo == "ENTRADA_CAMBIO_BUENO"
+                }.sumOf { it.cantidad }
+                
+                val totalSalidasBueno = totalVUnidades + movimientos.filter { 
+                    it.tipo == "SALIDA_CAMBIO_BUENO" || it.tipo == "SALIDA_REPOSICION_BUENO" 
+                }.sumOf { it.cantidad }
+
                 val invActual = productoDao.getAllProductosFlow().first().filter { it.id.contains("_") }
                 val piezasActuales = invActual.sumOf { it.cantidadDisponible }
                 val valorActual = invActual.sumOf { it.cantidadDisponible * it.precio }
                 
                 val usuarioActual = usuarioRepo.obtenerUsuarioActual()
+
+                // El INICIAL es la suma del último arqueo real, o reconstrucción si no hay
+                val stockInicialCalculado = if (stockInicialRealMap.isNotEmpty()) {
+                    stockInicialRealMap.values.sum()
+                } else {
+                    piezasActuales - totalEntradasBueno + totalSalidasBueno
+                }
 
                 _uiState.update { it.copy(
                     totalVentasSemana = ventas.sumOf { it.total },
@@ -109,10 +165,16 @@ class ArqueoViewModel(
                     ingresoTotal = 1800.0 + (ventas.sumOf { it.total } * 0.03),
                     ticketPromedio = if (ventas.isNotEmpty()) ventas.sumOf { it.total } / ventas.size else 0.0,
                     clientesVisitados = ventas.map { it.clienteId }.distinct().size,
-                    stockInicial = piezasActuales + totalVUnidades,
+                    stockInicial = stockInicialCalculado,
+                    totalCargasSemana = totalCargasSemana,
                     totalVentasUnidades = totalVUnidades,
+                    totalDevoluciones = totalDevoluciones,
                     saldoTeoricoCalculado = piezasActuales,
-                    valorStockInicial = valorActual + valorVSemana,
+                    valorStockInicial = if (stockInicialRealMap.isNotEmpty()) {
+                        invActual.sumOf { p -> (stockInicialRealMap[p.id] ?: 0) * p.precio }
+                    } else {
+                        valorActual + valorVSemana
+                    },
                     valorVentasSemana = valorVSemana,
                     saldoValorTeoricoCalculado = valorActual
                 ) }
@@ -122,19 +184,71 @@ class ArqueoViewModel(
 
     private fun observarProductosArqueo() {
         productoDao.getAllProductosFlow().onEach { productos ->
+            val calendar = Calendar.getInstance()
+            calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            calendar.set(Calendar.HOUR_OF_DAY, 0); calendar.set(Calendar.MINUTE, 0); calendar.set(Calendar.SECOND, 0)
+            val inicioSemana = calendar.timeInMillis
+
+            // Punto de partida para CARGAS: fecha del último arqueo
+            val startPoint = if (fechaUltimoArqueoTS > 0) fechaUltimoArqueoTS else inicioSemana
+
+            val movimientos = inventarioRepo.obtenerMovimientosDesde(vendedorId, inicioSemana)
+            val ventas = ventaDao.obtenerVentasPorPeriodo(vendedorId, inicioSemana, System.currentTimeMillis())
+            
+            val detallesVentas = mutableListOf<VentaDetalleEntity>()
+            ventas.forEach { v -> detallesVentas.addAll(ventaDao.obtenerDetallesPorVenta(v.id)) }
+
             val lista = productos.filter { it.id.contains("_") }.map { p ->
                 val previo = _uiState.value.productosArqueo.find { it.id == p.id }?.stockReal ?: ""
+                val baseId = p.productoId
                 
-                // Simulación de cargas diarias para la tabla (En producción vendría de MovimientoInventarioDao)
-                val cargasSimuladas = listOf(0, 0, 0, 0, 0, 0) 
+                // Cargas Posteriores al último arqueo
+                val movsCarga = movimientos.filter { m ->
+                    m.productoId == baseId && 
+                    m.tipo == "CARGA_INVENTARIO" && 
+                    m.timestamp > startPoint
+                }
                 
+                val cargasDia = MutableList(7) { 0 }
+                movsCarga.forEach { m ->
+                    val calMov = Calendar.getInstance().apply { timeInMillis = m.timestamp }
+                    val index = when (calMov.get(Calendar.DAY_OF_WEEK)) {
+                        Calendar.MONDAY -> 0
+                        Calendar.TUESDAY -> 1
+                        Calendar.WEDNESDAY -> 2
+                        Calendar.THURSDAY -> 3
+                        Calendar.FRIDAY -> 4
+                        Calendar.SATURDAY -> 5
+                        Calendar.SUNDAY -> 6
+                        else -> -1
+                    }
+                    if (index != -1) cargasDia[index] += m.cantidad
+                }
+
+                // El INICIAL viene del último arqueo real (Checkpoint)
+                val inicialDesdeArqueo = stockInicialRealMap[p.id]
+                
+                val inicial = if (inicialDesdeArqueo != null) {
+                    inicialDesdeArqueo
+                } else {
+                    // Respaldo: Reconstrucción teórica desde inicio de semana
+                    val totalEntradasBueno = movimientos.filter { 
+                        it.productoId == baseId && (it.tipo == "CARGA_INVENTARIO" || it.tipo == "ENTRADA_CAMBIO_BUENO") 
+                    }.sumOf { it.cantidad }
+                    
+                    val totalSalidasBueno = (detallesVentas.filter { it.productoId == baseId || it.stockId == p.id }.sumOf { it.cantidad }) +
+                                           movimientos.filter { it.productoId == baseId && (it.tipo == "SALIDA_CAMBIO_BUENO" || it.tipo == "SALIDA_REPOSICION_BUENO") }.sumOf { it.cantidad }
+                    
+                    p.cantidadDisponible - totalEntradasBueno + totalSalidasBueno
+                }
+
                 ProductoArqueo(
                     id = p.id, 
                     nombre = p.nombre, 
                     precio = p.precio, 
                     stockTeorico = p.cantidadDisponible,
-                    stockInicialBitacora = p.cantidadDisponible, // Simplificado
-                    cargasPorDia = cargasSimuladas,
+                    stockInicialBitacora = inicial,
+                    cargasPorDia = cargasDia,
                     stockReal = previo, 
                     imagenUrl = p.imagenUrl ?: ""
                 )
@@ -152,7 +266,6 @@ class ArqueoViewModel(
             _uiState.update { it.copy(isLoading = true, errorAutorizacion = null) }
             try {
                 val db = FirebaseFirestore.getInstance()
-                // 🛡️ CORRECCIÓN: Usamos "contraseña" con 'ñ' para coincidir con tu Firestore
                 val userQuery = db.collection("users")
                     .whereEqualTo("contraseña", pass.trim())
                     .whereEqualTo("activo", true)

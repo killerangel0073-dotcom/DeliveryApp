@@ -60,27 +60,36 @@ class DetalleCargaViewModel(
         viewModelScope.launch {
             try {
                 val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
-                val nombreAlmacen = inventarioRepo.getAlmacenVendedor(uid)
+                val nombreAlmacen = inventarioRepo.getAlmacenVendedor(uid) ?: "Almacen Principal"
 
-                // 🔥 Enriquecer los datos en la nube antes de disparar la Cloud Function
-                val productosData = state.productos.map { p ->
-                    mapOf(
-                        "productoId" to p.id,
-                        "nombre" to p.nombre,
-                        "precio" to p.precio,
-                        "imagenUrl" to p.imagenUrl,
-                        "cantidad" to p.cantidad
+                // 🔥 ESTRATEGIA ARQUITECTÓNICA: Movimiento de Carga
+                // Creamos un registro de movimiento por cada producto cargado para auditoría
+                state.productos.forEach { p ->
+                    val movimiento = com.gruposanangel.delivery.data.MovimientoInventarioEntity(
+                        id = java.util.UUID.randomUUID().toString(),
+                        productoId = p.id,
+                        nombreProducto = p.nombre,
+                        cantidad = p.cantidad,
+                        tipo = "CARGA_INVENTARIO",
+                        vendedorId = uid,
+                        almacenNombre = nombreAlmacen,
+                        clienteId = null,
+                        referenciaId = state.carga.id, // ID de la orden de transferencia
+                        sincronizado = false
                     )
+                    // Persistimos el movimiento y actualizamos el stock localmente de forma atómica
+                    inventarioRepo.registrarMovimientoCarga(movimiento, p)
                 }
 
-                val docRef = db.collection("ordenesTransferencia").document(state.carga.id)
-                db.runTransaction { transaction ->
-                    transaction.update(docRef, "productos", productosData)
-                    transaction.update(docRef, "estado", "ACEPTADA")
-                    null
-                }.await()
+                // 2. Intentamos marcar en la nube como aceptada (Idempotencia por ID de carga)
+                try {
+                    db.collection("ordenesTransferencia").document(state.carga.id)
+                        .update("estado", "ACEPTADA").await()
+                } catch (e: Exception) {
+                    // Si falla el internet, no importa. El Worker de Inventario 
+                    // intentará subir los MovimientoInventarioEntity después.
+                }
 
-                inventarioRepo.aplicarCargaLocal(state.productos, nombreAlmacen)
                 _uiState.update { it.copy(isLoading = false, aceptadaExito = true) }
             } catch (e: Exception) { _uiState.update { it.copy(isLoading = false, error = e.message) } }
         }

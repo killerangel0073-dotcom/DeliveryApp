@@ -23,6 +23,18 @@ data class UsuarioEntity(
     val ultimaRutaId: String? = null,
     val ultimaRutaNombre: String? = null,
     val ultimoAlmacenId: String? = null,
-    val ultimoAlmacenNombre: String? = null
+    val ultimoAlmacenNombre: String? = null,
+
+    // --- AUDITORÍA DE LICENCIA (IA VALIDATION) ---
+    val licenciaFotoUrl: String? = null,
+    val licenciaVencimiento: Long? = null,
+    val licenciaEstado: String? = "PENDIENTE", // "VIGENTE", "VENCIDA", "RECHAZADA"
+    val licenciaUltimaRevision: Long? = null,
+
+    // --- AUDITORÍA DE INE (IA VALIDATION) ---
+    val ineFotoUrl: String? = null,
+    val ineVencimiento: Long? = null,
+    val ineEstado: String? = "PENDIENTE", // "VIGENTE", "VENCIDA", "RECHAZADA"
+    val ineUltimaRevision: Long? = null
 )
 

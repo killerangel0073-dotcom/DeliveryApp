@@ -136,11 +136,22 @@ class DashboardAdminViewModel(
                             id = doc.id,
                             clienteId = doc.getString("clienteId") ?: "",
                             clienteNombre = doc.getString("clienteNombre") ?: "Cliente",
+                            clienteImagenUrl = doc.getString("clienteImagenUrl"),
                             total = (doc.get("total") as? Number)?.toDouble() ?: 0.0,
                             metodoPago = doc.getString("metodoPago") ?: "",
                             vendedorId = doc.getString("vendedorId") ?: "",
+                            vendedorNombre = doc.getString("vendedorNombre"),
+                            almacenId = doc.getString("almacenId"),
                             fecha = doc.getTimestamp("fecha")?.toDate()?.time ?: 0L,
-                            sincronizado = true
+                            horaDispositivo = doc.getLong("horaDispositivo") ?: 0L,
+                            horaVerificada = doc.getLong("horaVerificada") ?: 0L,
+                            alertaTiempo = doc.getBoolean("alertaTiempo") ?: false,
+                            latitudVenta = doc.getDouble("latitudVenta") ?: 0.0,
+                            longitudVenta = doc.getDouble("longitudVenta") ?: 0.0,
+                            fueraDeRango = doc.getBoolean("fueraDeRango") ?: false,
+                            fotoEvidenciaVisita = doc.getString("fotoEvidenciaVisita"),
+                            sincronizado = true,
+                            firestoreId = doc.id
                         )
                     })
                 }

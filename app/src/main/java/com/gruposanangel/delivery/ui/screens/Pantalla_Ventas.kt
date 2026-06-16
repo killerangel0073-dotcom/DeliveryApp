@@ -1,12 +1,15 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.bluetooth.BluetoothDevice
+import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -59,6 +62,7 @@ import com.gruposanangel.delivery.utilidades.ImprimirTicket58mmCompleto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.NumberFormat
 import java.util.*
 
@@ -93,9 +97,98 @@ fun PantallaVentas(
     val snackbarHostState = remember { SnackbarHostState() }
     var cliente by remember { mutableStateOf<ClienteEntity?>(null) }
     var nombreVendedor by remember { mutableStateOf("Cargando...") }
+    var showSuccessScreen by remember { mutableStateOf(false) }
 
     // Control de tiempo para evitar múltiples avisos seguidos de stock
     var ultimoAvisoStock by remember { mutableLongStateOf(0L) }
+
+    val handleBack: () -> Unit = {
+        if (!navController.popBackStack()) {
+            val dest = if (origen == "Mapa") "delivery?screen=    Mapa    " else "delivery?screen=Clientes"
+            navController.navigate(dest) { launchSingleTop = true }
+        }
+    }
+
+    val navegarARuta: () -> Unit = {
+        navController.navigate("delivery?screen=  Ruta  ") {
+            popUpTo(navController.graph.startDestinationId) { inclusive = false }
+            launchSingleTop = true
+        }
+    }
+
+    val irAInicio: () -> Unit = {
+        navController.navigate("delivery?screen=Inicio") {
+            popUpTo(navController.graph.startDestinationId) { inclusive = false }
+            launchSingleTop = true
+        }
+    }
+
+    fun finalizarVentaProceso(fotoPath: String? = null) {
+        ventaViewModel.procesarVenta(
+            clienteId = cliente?.id ?: "", 
+            clienteNombre = cliente?.nombreNegocio ?: "Negocio", 
+            clienteFotoUrl = cliente?.fotografiaUrl, 
+            metodoPago = "Efectivo",
+            fotoEvidenciaUrl = fotoPath
+        ) { exito, msg, idDeVentaGenerado ->
+            scope.launch {
+                if (exito) {
+                    // 🔥 MOSTRAR PANTALLA DE ÉXITO
+                    showSuccessScreen = true
+
+                    if (impresoraBluetooth != null) {
+                        val productosAImprimir = uiState.productosEnCarrito.filter { it.cantidad > 0 }
+                        scope.launch(Dispatchers.IO) {
+                            try {
+                                ImprimirTicket58mmCompleto(
+                                    device = impresoraBluetooth,
+                                    context = context,
+                                    logoDrawableId = R.drawable.logo,
+                                    cliente = cliente?.nombreNegocio ?: "Negocio",
+                                    productos = productosAImprimir,
+                                    ventaId = idDeVentaGenerado,
+                                    fechaVenta = Date(),
+                                    totalVenta = uiState.totalVenta,
+                                    vendedorNombre = nombreVendedor,
+                                    metodoPago = "Efectivo"
+                                )
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Esperar un poco para que se vea la animación y luego navegar
+                    kotlinx.coroutines.delay(1800)
+                    navegarARuta()
+                } else {
+                    snackbarHostState.showSnackbar(msg)
+                }
+            }
+        }
+    }
+
+    val launcherEvidencia = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp ->
+        bmp?.let {
+            // Guardar foto de evidencia temporalmente
+            scope.launch(Dispatchers.IO) {
+                val file = File(context.cacheDir, "evidencia_${System.currentTimeMillis()}.jpg")
+                try {
+                    java.io.FileOutputStream(file).use { out -> 
+                        it.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, out) 
+                    }
+                    withContext(Dispatchers.Main) {
+                        // Proceder con la venta usando la foto como prueba
+                        finalizarVentaProceso(file.absolutePath)
+                    }
+                } catch (e: Exception) {
+                    Log.e("Ventas", "Error guardando evidencia", e)
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         val usuario = repoUsuario.obtenerUsuarioActual()
@@ -106,20 +199,20 @@ fun PantallaVentas(
         if (!isPreview) {
             cliente = repository?.obtenerClientesLocalPorId(clienteId)
             ventaViewModel.verificarRutaAsignadaLocal(FirebaseAuth.getInstance().currentUser?.uid ?: "")
-        }
-    }
-
-    val handleBack: () -> Unit = {
-        if (!navController.popBackStack()) {
-            val dest = if (origen == "Mapa") "delivery?screen=    Mapa    " else "delivery?screen=Clientes"
-            navController.navigate(dest) { launchSingleTop = true }
+            
+            // 🔥 Monitorear cercanía al cliente
+            cliente?.let { 
+                ventaViewModel.monitorearGeocerca(it.ubicacionLat, it.ubicacionLon)
+            }
         }
     }
 
     PantallaVentasContent(
         uiState = uiState,
         cliente = cliente,
+        showSuccess = showSuccessScreen,
         onBack = handleBack,
+        onIrAInicio = irAInicio,
         onSumar = { p -> 
             val index = uiState.productosEnCarrito.indexOfFirst { it.id == p.id }
             if (index != -1) {
@@ -149,37 +242,11 @@ fun PantallaVentas(
             if (index != -1) ventaViewModel.actualizarCantidad(index, n)
         },
         onFinalizar = {
-            ventaViewModel.procesarVenta(cliente?.id ?: "", cliente?.nombreNegocio ?: "Negocio", cliente?.fotografiaUrl, "Efectivo") { exito, msg, idDeVentaGenerado ->
-                scope.launch {
-                    if (exito) {
-                        if (impresoraBluetooth != null) {
-                            val productosAImprimir = uiState.productosEnCarrito.filter { it.cantidad > 0 }
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    ImprimirTicket58mmCompleto(
-                                        device = impresoraBluetooth,
-                                        context = context,
-                                        logoDrawableId = R.drawable.logo,
-                                        cliente = cliente?.nombreNegocio ?: "Negocio",
-                                        productos = productosAImprimir,
-                                        ventaId = idDeVentaGenerado,
-                                        fechaVenta = Date(),
-                                        totalVenta = uiState.totalVenta,
-                                        vendedorNombre = nombreVendedor,
-                                        metodoPago = "Efectivo"
-                                    )
-                                } catch (e: Exception) {
-                                    withContext(Dispatchers.Main) {
-                                        Toast.makeText(context, "Error al imprimir: ${e.message}", Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            }
-                        }
-                        handleBack()
-                    } else {
-                        snackbarHostState.showSnackbar(msg)
-                    }
-                }
+            if (uiState.requiereFotoEvidencia) {
+                // Si el GPS dice que estamos lejos o no es preciso, pedimos foto forzosa
+                launcherEvidencia.launch(null)
+            } else {
+                finalizarVentaProceso()
             }
         },
         snackbarHostState = snackbarHostState
@@ -190,7 +257,9 @@ fun PantallaVentas(
 fun PantallaVentasContent(
     uiState: VentaUiState, 
     cliente: ClienteEntity?, 
+    showSuccess: Boolean = false,
     onBack: () -> Unit, 
+    onIrAInicio: () -> Unit = {},
     onSumar: (Plantilla_Producto) -> Unit, 
     onRestar: (Plantilla_Producto) -> Unit, 
     onCantidadCambiada: (Plantilla_Producto, Int) -> Unit, 
@@ -200,69 +269,180 @@ fun PantallaVentasContent(
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     var mostrarConfirm by remember { mutableStateOf(false) }
     
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = Color.White,
-        bottomBar = { 
-            AnimatedVisibility(
-                visible = uiState.totalVenta > 0,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                CardTotalVentaPro(
-                    total = uiState.totalVenta, 
-                    formato = formatoMoneda, 
-                    onFinalizar = { mostrarConfirm = true }
-                )
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            containerColor = Color.White,
+            bottomBar = { 
+                AnimatedVisibility(
+                    visible = uiState.totalVenta > 0 && uiState.enRuta,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
+                    CardTotalVentaPro(
+                        total = uiState.totalVenta, 
+                        formato = formatoMoneda, 
+                        onFinalizar = { mostrarConfirm = true }
+                    )
+                }
             }
-        }
-    ) { padding ->
-        Column(modifier = Modifier.padding(padding)) {
-            // 🔝 Header Moderno con Foto del Cliente Gigante
-            ModernSalesHeader(cliente, onBack)
+        ) { padding ->
+            Column(modifier = Modifier.padding(padding)) {
+                // 🔝 Header Moderno con Foto del Cliente Gigante y Geocerca
+                ModernSalesHeader(
+                    cliente = cliente, 
+                    distanciaMetros = uiState.distanciaAlClienteMetros,
+                    estaEnRango = uiState.estaEnRango,
+                    onBack = onBack
+                )
 
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 120.dp)
-            ) {
-                when (uiState.estadoRuta) {
-                    is EstadoRuta.Cargando -> item { 
-                        Box(Modifier.fillMaxWidth().height(200.dp), Alignment.Center) { 
-                            CircularProgressIndicator(color = RojoDelisa) 
-                        } 
-                    }
-                    is EstadoRuta.ConRuta -> {
-                        if (uiState.productosEnCarrito.isEmpty()) {
-                            item { EmptyStateProductos(false) }
-                        } else {
-                            itemsIndexed(uiState.productosEnCarrito, key = { _, p -> p.id }) { _, producto ->
-                                ItemVentaProductoModerno(
-                                    producto = producto, 
-                                    formato = formatoMoneda, 
-                                    onSumar = { onSumar(producto) }, 
-                                    onRestar = { onRestar(producto) }
-                                )
+                if (!uiState.enRuta) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.White),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Block,
+                                contentDescription = null,
+                                tint = RojoDelisa,
+                                modifier = Modifier.size(80.dp)
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                "JORNADA NO INICIADA",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                color = NegroPremium,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Debes deslizar el botón de inicio en el Dashboard para poder realizar ventas.",
+                                fontSize = 14.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(24.dp))
+                            Button(
+                                onClick = onIrAInicio,
+                                colors = ButtonDefaults.buttonColors(containerColor = NegroPremium),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("REGRESAR AL DASHBOARD")
                             }
                         }
                     }
-                    else -> item { 
-                        Text("Inventario no disponible", Modifier.padding(20.dp), color = Color.Gray) 
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 120.dp)
+                    ) {
+                        when (uiState.estadoRuta) {
+                            is EstadoRuta.Cargando -> item { 
+                                Box(Modifier.fillMaxWidth().height(200.dp), Alignment.Center) { 
+                                    CircularProgressIndicator(color = RojoDelisa) 
+                                } 
+                            }
+                            is EstadoRuta.ConRuta -> {
+                                if (uiState.productosEnCarrito.isEmpty()) {
+                                    item { EmptyStateProductos(false) }
+                                } else {
+                                    itemsIndexed(uiState.productosEnCarrito, key = { _, p -> p.id }) { _, producto ->
+                                        ItemVentaProductoModerno(
+                                            producto = producto, 
+                                            formato = formatoMoneda, 
+                                            onSumar = { onSumar(producto) }, 
+                                            onRestar = { onRestar(producto) }
+                                        )
+                                    }
+                                }
+                            }
+                            else -> item { 
+                                Text("Inventario no disponible", Modifier.padding(20.dp), color = Color.Gray) 
+                            }
+                        }
                     }
                 }
             }
+
+            if (uiState.estaProcesando) { 
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(0.2f)).zIndex(100f), Alignment.Center) { 
+                    CircularProgressIndicator(color = RojoDelisa) 
+                } 
+            }
         }
 
-        if (uiState.estaProcesando) { 
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(0.2f)).zIndex(100f), Alignment.Center) { 
-                CircularProgressIndicator(color = RojoDelisa) 
-            } 
+        // 🔥 PANTALLA DE ÉXITO (OPCIÓN 2)
+        AnimatedVisibility(
+            visible = showSuccess,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+            modifier = Modifier.zIndex(200f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Animación de escala para el check
+                    val scale by animateFloatAsState(
+                        targetValue = if (showSuccess) 1.2f else 0.8f,
+                        animationSpec = spring(dampingRatio = 0.4f, stiffness = Spring.StiffnessLow),
+                        label = "successScale"
+                    )
+
+                    Surface(
+                        modifier = Modifier
+                            .size(120.dp)
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            },
+                        shape = CircleShape,
+                        color = Color(0xFFE8F5E9)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.CheckCircle, 
+                                contentDescription = null, 
+                                tint = Color(0xFF2E7D32),
+                                modifier = Modifier.size(80.dp)
+                            )
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(24.dp))
+                    
+                    Text(
+                        "¡VENTA EXITOSA!", 
+                        fontSize = 24.sp, 
+                        fontWeight = FontWeight.Black, 
+                        color = NegroPremium
+                    )
+                    
+                    Text(
+                        "Redirigiendo a tu ruta...", 
+                        fontSize = 14.sp, 
+                        color = Color.Gray,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
     }
     
     if (mostrarConfirm) { 
         DialogoConfirmacion(
-            titulo = "Cobrar Venta", 
-            mensaje = "¿Realizar venta por ${formatoMoneda.format(uiState.totalVenta)}?", 
+            titulo = "CONFIRMAR COBRO", 
+            mensaje = "${cliente?.nombreNegocio}\nVenta por ${formatoMoneda.format(uiState.totalVenta)} pesos",
             onConfirmar = { mostrarConfirm = false; onFinalizar() }, 
             onCancelar = { mostrarConfirm = false }
         ) 
@@ -272,6 +452,8 @@ fun PantallaVentasContent(
 @Composable
 fun ModernSalesHeader(
     cliente: ClienteEntity?, 
+    distanciaMetros: Float,
+    estaEnRango: Boolean,
     onBack: () -> Unit
 ) {
     Surface(
@@ -280,49 +462,83 @@ fun ModernSalesHeader(
         shadowElevation = 4.dp,
         shape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) { 
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RojoDelisa) 
+        Column {
+            Row(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) { 
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RojoDelisa) 
+                }
+                
+                Spacer(Modifier.width(8.dp))
+
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = cliente?.nombreNegocio ?: "Cargando...", 
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Black, 
+                        color = NegroPremium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = cliente?.nombreDueno ?: "Titular no registrado", 
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Gray,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(Modifier.width(16.dp))
+
+                AsyncImage(
+                    model = cliente?.fotografiaUrl, 
+                    placeholder = painterResource(R.drawable.repartidor), 
+                    error = painterResource(R.drawable.repartidor), 
+                    contentDescription = null, 
+                    modifier = Modifier
+                        .size(80.dp) 
+                        .clip(RoundedCornerShape(20.dp))
+                        .border(2.dp, RojoDelisa.copy(alpha = 0.1f), RoundedCornerShape(20.dp)), 
+                    contentScale = ContentScale.Crop
+                )
             }
             
-            Spacer(Modifier.width(8.dp))
-
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = cliente?.nombreNegocio ?: "Cargando...", 
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black, 
-                    color = NegroPremium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = cliente?.nombreDueno ?: "Titular no registrado", 
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray,
-                    fontWeight = FontWeight.Medium
-                )
+            // 🔥 INDICADOR DE GEOCERCA
+            if (cliente != null && distanciaMetros >= 0) {
+                Surface(
+                    color = if (estaEnRango) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 24.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = if (estaEnRango) Icons.Default.LocationOn else Icons.Default.LocationOff,
+                            contentDescription = null,
+                            tint = if (estaEnRango) Color(0xFF2E7D32) else RojoDelisa,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        val distTexto = if (distanciaMetros < 1000) "${distanciaMetros.toInt()}m" 
+                                       else String.format(Locale.US, "%.1f km", distanciaMetros / 1000f)
+                        
+                        Text(
+                            text = if (estaEnRango) "ESTÁS EN LA UBICACIÓN DEL CLIENTE" 
+                                   else "FUERA DE RANGO: $distTexto (SE REQUERIRÁ FOTO)",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (estaEnRango) Color(0xFF2E7D32) else RojoDelisa,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
             }
-
-            Spacer(Modifier.width(16.dp))
-
-            // Imagen del cliente a la derecha y más grande
-            AsyncImage(
-                model = cliente?.fotografiaUrl, 
-                placeholder = painterResource(R.drawable.repartidor), 
-                error = painterResource(R.drawable.repartidor), 
-                contentDescription = null, 
-                modifier = Modifier
-                    .size(100.dp) 
-                    .clip(RoundedCornerShape(24.dp))
-                    .border(2.dp, RojoDelisa.copy(alpha = 0.1f), RoundedCornerShape(24.dp)), 
-                contentScale = ContentScale.Crop
-            )
         }
     }
 }
@@ -336,125 +552,159 @@ fun ItemVentaProductoModerno(
 ) {
     val enCarrito = producto.cantidad > 0
     
+    // 🎭 Animación de escala y elevación
+    val scale by animateFloatAsState(
+        targetValue = if (enCarrito) 1.02f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "scale"
+    )
+    
+    val elevation by animateDpAsState(
+        targetValue = if (enCarrito) 6.dp else 1.dp,
+        label = "elevation"
+    )
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (enCarrito) RojoDelisa.copy(0.04f) else Color.White
+            containerColor = if (enCarrito) Color.White else Color.White
         ),
-        elevation = CardDefaults.cardElevation(if (enCarrito) 2.dp else 1.dp)
+        border = if (enCarrito) BorderStroke(1.5.dp, RojoDelisa.copy(alpha = 0.5f)) else null,
+        elevation = CardDefaults.cardElevation(elevation)
     ) {
-        Row(
-            modifier = Modifier
-                .padding(12.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Imagen con Badge de cantidad GIGANTE
-            Box {
-                AsyncImage(
-                    model = producto.imagenUrl, 
-                    placeholder = painterResource(R.drawable.repartidor), 
-                    error = painterResource(R.drawable.repartidor), 
-                    contentDescription = null, 
+        Box {
+            // Barra de acento lateral moderna
+            if (enCarrito) {
+                Box(
                     modifier = Modifier
-                        .size(90.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xFFF5F5F5)), 
-                    contentScale = ContentScale.Crop
+                        .align(Alignment.CenterStart)
+                        .fillMaxHeight()
+                        .width(6.dp)
+                        .background(
+                            brush = Brush.verticalGradient(listOf(RojoDelisa, RojoDelisa.copy(0.6f))),
+                            shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp)
+                        )
                 )
-                if (enCarrito) {
-                    Surface(
-                        color = RojoDelisa,
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .offset((-10).dp, (-10).dp)
-                            .size(42.dp), // Círculo aún más grande
-                        shadowElevation = 8.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
+            }
+
+                Row(
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .padding(start = if (enCarrito) 8.dp else 0.dp) // Espacio para la barra
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Imagen con Badge de cantidad GIGANTE
+                    Box {
+                        AsyncImage(
+                            model = producto.imagenUrl, 
+                            placeholder = painterResource(R.drawable.repartidor), 
+                            error = painterResource(R.drawable.repartidor), 
+                            contentDescription = null, 
+                            modifier = Modifier
+                                .size(90.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0xFFF5F5F5)), 
+                            contentScale = ContentScale.Crop
+                        )
+                        if (enCarrito) {
+                            Surface(
+                                color = RojoDelisa,
+                                shape = CircleShape,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .offset((-10).dp, (-10).dp)
+                                    .size(42.dp), // Círculo aún más grande
+                                shadowElevation = 8.dp
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "${producto.cantidad}", 
+                                        color = Color.White, 
+                                        fontSize = 18.sp, // Número más grande
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.width(16.dp))
+                    
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = producto.nombre, 
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold, 
+                            color = NegroPremium,
+                            maxLines = 2,
+                            lineHeight = 20.sp
+                        )
+                        
+                        Spacer(Modifier.height(4.dp))
+                        
+                        Text(
+                            text = "${formato.format(producto.precio)} / pza", 
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // Indicador de Stock Pill
+                        Surface(
+                            color = if (producto.cantidadDisponible < 5) RojoDelisa.copy(0.12f) else Color(0xFFE8F5E9),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
                             Text(
-                                text = "${producto.cantidad}", 
-                                color = Color.White, 
-                                fontSize = 18.sp, // Número más grande
-                                fontWeight = FontWeight.Black
+                                text = "${producto.cantidadDisponible} Disponibles", 
+                                fontSize = 13.sp, // Aumentado de 10.sp a 13.sp
+                                fontWeight = FontWeight.Black, 
+                                color = if (producto.cantidadDisponible < 5) RojoDelisa else Color(0xFF2E7D32),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                             )
                         }
                     }
-                }
-            }
 
-            Spacer(Modifier.width(16.dp))
-            
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = producto.nombre, 
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold, 
-                    color = NegroPremium,
-                    maxLines = 2,
-                    lineHeight = 20.sp
-                )
-                
-                Spacer(Modifier.height(4.dp))
-                
-                Text(
-                    text = "${formato.format(producto.precio)} / pza", 
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                // Indicador de Stock Pill
-                Surface(
-                    color = if (producto.cantidadDisponible < 5) RojoDelisa.copy(0.12f) else Color(0xFFE8F5E9),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text(
-                        text = "${producto.cantidadDisponible} Disponibles", 
-                        fontSize = 13.sp, // Aumentado de 10.sp a 13.sp
-                        fontWeight = FontWeight.Black, 
-                        color = if (producto.cantidadDisponible < 5) RojoDelisa else Color(0xFF2E7D32),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            // Contador Vertical Premium Minimalista (Sin número central)
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                IconButton(
-                    onClick = onSumar,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(RojoDelisa, RoundedCornerShape(12.dp))
-                ) {
-                    Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(24.dp))
-                }
-                
-                IconButton(
-                    onClick = onRestar,
-                    enabled = enCarrito,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(
-                            if (enCarrito) Color(0xFFF1F2F6) else Color.Transparent, 
-                            RoundedCornerShape(12.dp)
+                    // Contador Vertical Premium Minimalista (Sin número central)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        IconButton(
+                            onClick = onSumar,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(RojoDelisa, RoundedCornerShape(12.dp))
+                        ) {
+                            Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                        }
+                        
+                        IconButton(
+                            onClick = onRestar,
+                            enabled = enCarrito,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(
+                                    if (enCarrito) Color(0xFFF1F2F6) else Color.Transparent, 
+                                    RoundedCornerShape(12.dp)
+                                )
+                        ) {
+                            Icon(
+                                Icons.Default.Remove, 
+                                null, 
+                                tint = if (enCarrito) NegroPremium else Color.LightGray,
+                                modifier = Modifier.size(24.dp)
                         )
-                ) {
-                    Icon(
-                        Icons.Default.Remove, 
-                        null, 
-                        tint = if (enCarrito) NegroPremium else Color.LightGray,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    }
                 }
             }
         }

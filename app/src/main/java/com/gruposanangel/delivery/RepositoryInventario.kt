@@ -89,13 +89,12 @@ class RepositoryInventario(
             val idPK = "${a.productoId}_$almacen"
 
             when (a.tipo) {
-                "ENTRADA_CAMBIO_BUENO" -> {
+                "ENTRADA_CAMBIO_BUENO", "CARGA_INVENTARIO" -> {
                     mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) + a.cantidad
                 }
                 "SALIDA_CAMBIO_BUENO", "SALIDA_REPOSICION_BUENO" -> {
                     mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) - a.cantidad
                 }
-                // ENTRADA_MALO_DEVOLUCION no afecta al stock de producto "bueno"
             }
         }
         return mapaImpacto
@@ -202,6 +201,28 @@ class RepositoryInventario(
     fun stopEscuchaFirebase() { listenerRegistration?.remove(); listenerRegistration = null }
 
     // --- LÓGICA DE AJUSTES Y ARQUEO (CORREGIDA: SIEMPRE ACTUALIZAR ALMACÉN DEL VENDEDOR) ---
+
+    suspend fun registrarMovimientoCarga(movimiento: MovimientoInventarioEntity, plantilla: Plantilla_Producto) {
+        withContext(Dispatchers.IO) {
+            // 1. Guardar el registro del movimiento para auditoría (Arqueo)
+            movimientoInventarioDao?.insertarMovimiento(movimiento)
+            
+            // 2. Actualizar el stock disponible localmente de inmediato
+            val idReal = if (!movimiento.almacenNombre.isNullOrEmpty() && !movimiento.productoId.contains("_")) 
+                "${movimiento.productoId}_${movimiento.almacenNombre}" 
+            else 
+                movimiento.productoId
+
+            sumarStockLocal(idReal, movimiento.cantidad, plantilla, movimiento.productoId)
+            
+            // 3. Intentar sincronizar (Si falla, el Worker lo hará después)
+            try {
+                sincronizarMovimiento(movimiento)
+            } catch (e: Exception) {
+                Log.w(TAG, "Carga guardada localmente, sincronización pendiente.")
+            }
+        }
+    }
 
     suspend fun registrarDobleMovimiento(
         tipoOperacion: String,
@@ -310,6 +331,10 @@ class RepositoryInventario(
             Log.e(TAG, "Error subiendo ajuste: ${e.message}")
             throw e
         }
+    }
+
+    suspend fun obtenerMovimientosDesde(vendedorId: String, inicio: Long): List<MovimientoInventarioEntity> {
+        return movimientoInventarioDao?.obtenerMovimientosDesde(vendedorId, inicio) ?: emptyList()
     }
 
     suspend fun calcularSaldoTeorico(vendedorId: String, fechaInicio: Long): Map<String, Int> {

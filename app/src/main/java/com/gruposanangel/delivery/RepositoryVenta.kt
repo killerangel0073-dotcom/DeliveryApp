@@ -86,7 +86,9 @@ class VentaRepository(private val ventaDao: VentaDao) {
                 sincronizado = ventaLocal.sincronizado,
                 fotoCliente = fotoFinal,
                 productos = productos,
-                vendedorNombre = vendedorNombre
+                vendedorNombre = vendedorNombre,
+                fueraDeRango = ventaLocal.fueraDeRango,
+                fotoEvidenciaUrl = ventaLocal.fotoEvidenciaVisita
             )
         }
 
@@ -154,7 +156,9 @@ class VentaRepository(private val ventaDao: VentaDao) {
                 sincronizado = true,
                 fotoCliente = fotoUrl,
                 productos = productos,
-                vendedorNombre = vendedorNombre
+                vendedorNombre = vendedorNombre,
+                fueraDeRango = doc.getBoolean("fueraDeRango") ?: false,
+                fotoEvidenciaUrl = doc.getString("fotoEvidenciaVisita")
             )
         } catch (e: Exception) {
             Log.e("VentaRepo", "Error crítico buscando ticket en Firestore", e)
@@ -219,7 +223,16 @@ class VentaRepository(private val ventaDao: VentaDao) {
                             total = (doc.get("total") as? Number)?.toDouble() ?: 0.0,
                             metodoPago = doc.getString("metodoPago") ?: "Efectivo",
                             vendedorId = vId,
+                            vendedorNombre = doc.getString("vendedorNombre"),
+                            almacenId = doc.getString("almacenId") ?: doc.getString("almacenVendedorId"),
                             fecha = fechaFinal,
+                            horaDispositivo = doc.getLong("horaDispositivo") ?: fechaFinal,
+                            horaVerificada = doc.getLong("horaVerificada") ?: fechaFinal,
+                            alertaTiempo = doc.getBoolean("alertaTiempo") ?: false,
+                            latitudVenta = doc.getDouble("latitudVenta") ?: 0.0,
+                            longitudVenta = doc.getDouble("longitudVenta") ?: 0.0,
+                            fueraDeRango = doc.getBoolean("fueraDeRango") ?: false,
+                            fotoEvidenciaVisita = doc.getString("fotoEvidenciaVisita"),
                             sincronizado = true,
                             firestoreId = doc.id
                         )
@@ -231,6 +244,7 @@ class VentaRepository(private val ventaDao: VentaDao) {
                                 detalles.add(VentaDetalleEntity(
                                     ventaId = localId,
                                     productoId = pDoc.id,
+                                    stockId = null,
                                     nombre = pDoc.getString("nombre") ?: "Producto",
                                     precio = (pDoc.get("precio") as? Number)?.toDouble() ?: 0.0,
                                     cantidad = (pDoc.getLong("cantidad") ?: 0L).toInt()
@@ -300,7 +314,16 @@ class VentaRepository(private val ventaDao: VentaDao) {
                         total = (doc.get("total") as? Number)?.toDouble() ?: 0.0,
                         metodoPago = doc.getString("metodoPago") ?: "Efectivo",
                         vendedorId = vId,
+                        vendedorNombre = doc.getString("vendedorNombre"),
+                        almacenId = doc.getString("almacenId") ?: doc.getString("almacenVendedorId"),
                         fecha = fechaFinal,
+                        horaDispositivo = doc.getLong("horaDispositivo") ?: fechaFinal,
+                        horaVerificada = doc.getLong("horaVerificada") ?: fechaFinal,
+                        alertaTiempo = doc.getBoolean("alertaTiempo") ?: false,
+                        latitudVenta = doc.getDouble("latitudVenta") ?: 0.0,
+                        longitudVenta = doc.getDouble("longitudVenta") ?: 0.0,
+                        fueraDeRango = doc.getBoolean("fueraDeRango") ?: false,
+                        fotoEvidenciaVisita = doc.getString("fotoEvidenciaVisita"),
                         sincronizado = true,
                         firestoreId = doc.id
                     )
@@ -334,9 +357,21 @@ class VentaRepository(private val ventaDao: VentaDao) {
         productos: List<Plantilla_Producto>,
         total: Double,
         metodoPago: String,
-        vendedorId: String
+        vendedorId: String,
+        vendedorNombre: String? = null,
+        almacenId: String? = null,
+        latitud: Double = 0.0,
+        longitud: Double = 0.0,
+        fueraDeRango: Boolean = false,
+        fotoEvidencia: String? = null
     ): String = withContext(Dispatchers.IO) {
         val idLocal = UUID.randomUUID().toString()
+        
+        // 🔥 Auditoría de Tiempo Blindada
+        val horaDispositivo = System.currentTimeMillis()
+        val horaRealVerificada = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
+        val alertaTiempo = Math.abs(horaRealVerificada - horaDispositivo) > 300_000 // Discrepancia > 5 min
+
         val venta = VentaEntity(
             id = idLocal,
             clienteId = clienteId,
@@ -345,14 +380,27 @@ class VentaRepository(private val ventaDao: VentaDao) {
             total = total,
             metodoPago = metodoPago,
             vendedorId = vendedorId,
-            fecha = System.currentTimeMillis(),
+            vendedorNombre = vendedorNombre,
+            almacenId = almacenId,
+            fecha = horaRealVerificada, 
+            horaDispositivo = horaDispositivo,
+            horaVerificada = horaRealVerificada,
+            alertaTiempo = alertaTiempo,
+            latitudVenta = latitud,
+            longitudVenta = longitud,
+            fueraDeRango = fueraDeRango,
+            fotoEvidenciaVisita = fotoEvidencia,
             sincronizado = false
         )
 
         val detalles = productos.map { producto ->
+            // 🔥 Aseguramos ID limpio para Firestore
+            val idLimpio = producto.id.split("_")[0] 
+            
             VentaDetalleEntity(
                 ventaId = idLocal,
-                productoId = producto.id,
+                productoId = idLimpio,
+                stockId = producto.id, // Guardamos el original para referencia local
                 nombre = producto.nombre,
                 precio = producto.precio,
                 cantidad = producto.cantidad
@@ -391,16 +439,45 @@ class VentaRepository(private val ventaDao: VentaDao) {
         metodoPago: String,
         vendedorId: String,
         vendedorNombre: String,
-        almacenVendedorId: String
+        almacenVendedorId: String,
+        fotoEvidenciaLocal: String? = null,
+        fueraDeRango: Boolean = false, // 🔥
+        latitudVenta: Double = 0.0,    // 🔥
+        longitudVenta: Double = 0.0    // 🔥
     ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         val url = "https://us-central1-appventas--san-angel.cloudfunctions.net/registrarVenta"
         val client = OkHttpClient()
+
+        // 🛡️ SUBIDA DE IMAGEN A FIREBASE STORAGE
+        var fotoUrlFinal = ""
+        if (!fotoEvidenciaLocal.isNullOrEmpty()) {
+            val file = java.io.File(fotoEvidenciaLocal)
+            if (file.exists()) {
+                try {
+                    Log.d("VentaRepo", "📸 Iniciando subida de foto: ${file.absolutePath}")
+                    val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance().reference
+                        .child("evidencias_visita/${ventaLocalId}.jpg")
+                    
+                    val fileUri = android.net.Uri.fromFile(file)
+                    storageRef.putFile(fileUri).await()
+                    fotoUrlFinal = storageRef.downloadUrl.await().toString()
+                    Log.d("VentaRepo", "✅ Foto de evidencia subida exitosamente: $fotoUrlFinal")
+                } catch (e: Exception) {
+                    Log.e("VentaRepo", "❌ Error subiendo foto a Storage: ${e.message}", e)
+                }
+            }
+        }
+
         try {
             val json = JSONObject().apply {
                 put("ventaLocalId", ventaLocalId)
                 put("clienteId", clienteId)
                 put("clienteNombre", clienteNombre)
                 put("vendedorNombre", vendedorNombre)
+                put("fotoEvidenciaVisita", fotoUrlFinal)
+                put("fueraDeRango", fueraDeRango) // 🔥
+                put("latitudVenta", latitudVenta) // 🔥
+                put("longitudVenta", longitudVenta) // 🔥
                 put("productos", JSONArray().apply {
                     productos.forEach { p ->
                         put(

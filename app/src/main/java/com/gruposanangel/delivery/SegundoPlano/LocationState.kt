@@ -1,5 +1,6 @@
 package com.gruposanangel.delivery.SegundoPlano
 
+import android.location.Location
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -15,6 +16,10 @@ object LocationState {
     private val _velocidad = MutableStateFlow(VelocidadState())
     val velocidad = _velocidad.asStateFlow()
 
+    // 🔥 NUEVO: Estado para compartir la ubicación actual en toda la App
+    private val _ultimaUbicacion = MutableStateFlow<Location?>(null)
+    val ultimaUbicacion = _ultimaUbicacion.asStateFlow()
+
     // 3. Actualizamos la función para que guarde el tiempo actual automáticamente
     fun updateVelocidad(valor: Float) {
         _velocidad.value = VelocidadState(
@@ -23,7 +28,12 @@ object LocationState {
         )
     }
 
+    fun updateUbicacion(location: Location) {
+        _ultimaUbicacion.value = location
+    }
+
     fun reset() {
         _velocidad.value = VelocidadState(kmh = 0f, timestamp = 0L)
+        _ultimaUbicacion.value = null
     }
 }

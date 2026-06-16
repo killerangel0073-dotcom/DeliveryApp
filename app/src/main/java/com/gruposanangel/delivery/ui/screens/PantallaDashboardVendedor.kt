@@ -399,33 +399,37 @@ fun DashboardVendedorView(
     if (showConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showConfirmDialog = false },
-            title = { 
+            title = {
                 Text(
                     text = if (uiState.enRuta) "¿Terminar Jornada?" else "¿Empezar Ruta?",
                     fontWeight = FontWeight.Black,
-                    color = RojoDelisa
-                ) 
+                    color = RojoDelisa,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
             },
-            text = { 
+            text = {
                 Text(
-                    text = if (uiState.enRuta) 
-                        "Estás por terminar tu ruta, ¿estás seguro?" 
-                    else 
+                    text = if (uiState.enRuta)
+                        "Estás por terminar tu ruta, ¿estás seguro?"
+                    else
                         "Estás por empezar tu ruta, ¿estás seguro?",
                     fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium
-                ) 
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
             },
             confirmButton = {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = { showConfirmDialog = false }) {
                         Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(16.dp))
                     Button(
                         onClick = { onToggleRuta(!uiState.enRuta); showConfirmDialog = false },
                         colors = ButtonDefaults.buttonColors(RojoDelisa),

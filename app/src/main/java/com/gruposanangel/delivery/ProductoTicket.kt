@@ -18,5 +18,7 @@ data class TicketVentaCompleto(
     val sincronizado: Boolean,
     val fotoCliente: String = "",
     val productos: List<ProductoTicketDetalle> = emptyList(),
-    val vendedorNombre: String = "Vendedor"
+    val vendedorNombre: String = "Vendedor",
+    val fueraDeRango: Boolean = false,
+    val fotoEvidenciaUrl: String? = null
 ) : Parcelable

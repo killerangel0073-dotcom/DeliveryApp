@@ -24,6 +24,15 @@ class WatchdogReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Log.d("Watchdog", "🐶 Watchdog check...")
 
+        // 🛡️ Blindaje: Antes de intentar cualquier inicio de servicio, validamos permisos.
+        // Esto evita crashes si el usuario revocó permisos.
+        val hasLocation = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        
+        if (!hasLocation) {
+            Log.w("Watchdog", "🐶 Abortando: Sin permisos de ubicación.")
+            return
+        }
+
         // 🔹 Solo reinicia si el usuario es Vendedor de Ruta
         CoroutineScope(Dispatchers.IO).launch {
             val db = AppDatabase.getDatabase(context)

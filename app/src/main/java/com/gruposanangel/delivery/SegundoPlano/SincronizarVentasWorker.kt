@@ -51,24 +51,28 @@ class SincronizarVentasWorker(
             val pendientes = ventaRepo.obtenerVentasPendientes()
             if (pendientes.isEmpty()) return Result.success()
 
-            val almacenId = inventarioRepo.getAlmacenVendedor(uidVendedor)
-                ?: return Result.retry() // Reintentar si el almacén no está cargado aún
-
-            val nombreVendedor = usuarioActual?.nombre ?: FirebaseAuth.getInstance().currentUser?.displayName ?: "Vendedor"
-
             // 🔥 3. Subida en Ráfaga con Manejo de Intermitencia
             for (venta in pendientes) {
-                // Detener si el Worker ha sido cancelado (p.ej. por pérdida de red si se configuró así)
+                // Detener si el Worker ha sido cancelado
                 if (isStopped) return Result.retry()
 
                 val detalles = ventaRepo.obtenerDetallesDeVenta(venta.id)
                 val productos = detalles.map {
                     Plantilla_Producto(
-                        id = it.productoId,
+                        id = it.productoId, // Ya está limpio desde guardarVentaLocal
                         nombre = it.nombre,
                         precio = it.precio,
                         cantidad = it.cantidad
                     )
+                }
+
+                // Usamos los metadatos persistidos en la venta
+                val almacenId = venta.almacenId ?: ""
+                val nombreVendedor = venta.vendedorNombre ?: "Vendedor"
+
+                if (almacenId.isEmpty()) {
+                    Log.e("SyncWorker", "Ticket ${venta.id} no tiene almacenId asignado. Saltando para evitar error en nube.")
+                    continue
                 }
 
                 val (exitoServidor, mensaje) = try {
@@ -80,12 +84,14 @@ class SincronizarVentasWorker(
                         metodoPago = venta.metodoPago,
                         vendedorId = venta.vendedorId,
                         vendedorNombre = nombreVendedor,
-                        almacenVendedorId = almacenId
+                        almacenVendedorId = almacenId,
+                        fotoEvidenciaLocal = venta.fotoEvidenciaVisita,
+                        fueraDeRango = venta.fueraDeRango,
+                        latitudVenta = venta.latitudVenta,
+                        longitudVenta = venta.longitudVenta
                     )
                 } catch (e: Exception) {
                     Log.e("SyncWorker", "Error de red al sincronizar ticket ${venta.id}", e)
-                    // Si hay un error de red o excepción inesperada, detenemos la ráfaga
-                    // y pedimos reintento para las que faltan.
                     return Result.retry()
                 }
 
@@ -101,8 +107,6 @@ class SincronizarVentasWorker(
                     }
                 } else {
                     Log.e("SyncWorker", "Servidor rechazó ticket ${venta.id}: $mensaje")
-                    // Si el servidor responde con error (p.ej. 400), continuamos con la siguiente
-                    // para no bloquear toda la cola por un ticket corrupto.
                 }
             }
 

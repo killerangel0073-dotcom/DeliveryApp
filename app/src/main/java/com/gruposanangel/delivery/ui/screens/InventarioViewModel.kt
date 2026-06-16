@@ -96,6 +96,7 @@ class InventarioViewModel(
                                 imagenUrl = entity.imagenUrl ?: ""
                             )
                         }
+                        .sortedByDescending { it.precio }
                     _uiState.update { it.copy(productos = modelos) }
                 }
             }
@@ -119,14 +120,16 @@ class InventarioViewModel(
                 // Mapear stock a Plantilla_Producto
                 val catalogo = inventarioRepo.obtenerProductosLocal().first()
                 val productosStock = stock.mapNotNull { (prodId, cant) ->
+                    if (cant <= 0) return@mapNotNull null
                     val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
                     Plantilla_Producto(prodId, info.nombre, info.precio, cant, 0, info.imagenUrl ?: "")
-                }
+                }.sortedByDescending { it.precio }
                 
                 val productosDanados = danado.mapNotNull { (prodId, cant) ->
+                    if (cant <= 0) return@mapNotNull null
                     val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
                     Plantilla_Producto(prodId, info.nombre, info.precio, cant, 0, info.imagenUrl ?: "")
-                }
+                }.sortedByDescending { it.precio }
 
                 _uiState.update { it.copy(
                     productos = productosStock,
@@ -147,9 +150,10 @@ class InventarioViewModel(
                 val catalogo = inventarioRepo.obtenerProductosLocal().first()
                 
                 val productos = globalStock.mapNotNull { (prodId, cant) ->
+                    if (cant <= 0) return@mapNotNull null
                     val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
                     Plantilla_Producto(prodId, info.nombre, info.precio, cant, 0, info.imagenUrl ?: "")
-                }.sortedBy { it.nombre }
+                }.sortedByDescending { it.precio }
 
                 _uiState.update { it.copy(productos = productos, productosDanados = emptyList(), isLoading = false) }
             } catch (e: Exception) {
@@ -164,9 +168,10 @@ class InventarioViewModel(
                 val danado = inventarioRepo.obtenerStockDanado(almacen)
                 val catalogo = inventarioRepo.obtenerProductosLocal().first()
                 val lista = danado.mapNotNull { (prodId, cant) ->
+                    if (cant <= 0) return@mapNotNull null
                     val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
                     Plantilla_Producto(prodId, info.nombre, info.precio, cant, 0, info.imagenUrl ?: "")
-                }
+                }.sortedByDescending { it.precio }
                 _uiState.update { it.copy(productosDanados = lista) }
             } catch (e: Exception) { }
         }

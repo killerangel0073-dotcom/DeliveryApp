@@ -16,7 +16,7 @@ import androidx.room.RoomDatabase
         RutaEntity::class,
         MovimientoInventarioEntity::class
     ],
-    version = 15,
+    version = 22,
     exportSchema = true // Habilitado para soportar migraciones automáticas
 )
 abstract class AppDatabase : RoomDatabase() {

@@ -1,5 +1,6 @@
 package com.gruposanangel.delivery.ui.screens
 
+import android.location.Location
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -9,6 +10,7 @@ import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.*
 import com.gruposanangel.delivery.model.Plantilla_Producto
+import com.gruposanangel.delivery.SegundoPlano.LocationState
 import TicketVentaCompleto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -23,11 +25,17 @@ import java.util.*
 
 data class VentaUiState(
     val productosEnCarrito: List<Plantilla_Producto> = emptyList(),
-    val catalogoCompleto: List<Plantilla_Producto> = emptyList(), // Para cambios/devoluciones
+    val catalogoCompleto: List<Plantilla_Producto> = emptyList(), 
     val estaProcesando: Boolean = false,
     val totalVenta: Double = 0.0,
     val estadoRuta: EstadoRuta = EstadoRuta.Cargando,
     val isLoadingInventario: Boolean = true,
+    
+    // 🔥 AUDITORÍA GEOGRÁFICA
+    val distanciaAlClienteMetros: Float = -1f,
+    val estaEnRango: Boolean = true,
+    val requiereFotoEvidencia: Boolean = false,
+    val enRuta: Boolean = true // Por defecto true para no bloquear mientras carga
 )
 
 sealed class EstadoRuta {
@@ -62,12 +70,17 @@ class VentaViewModel(
         // 🛡️ Si es admin, idParaQuery es "" para ver todo
         val idParaQuery = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
         
+        // 🔥 AUDITORÍA DE TIEMPO: Límites basados en Hora Real
+        val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
         val cal = Calendar.getInstance()
+        cal.timeInMillis = ahoraReal
+        
         cal.set(Calendar.HOUR_OF_DAY, 0)
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
         val inicio = cal.timeInMillis
+
         cal.set(Calendar.HOUR_OF_DAY, 23)
         cal.set(Calendar.MINUTE, 59)
         cal.set(Calendar.SECOND, 59)
@@ -84,6 +97,45 @@ class VentaViewModel(
     init {
         observarInventario()
         escucharVentasNube()
+        observarEstadoJornada()
+    }
+
+    private fun observarEstadoJornada() {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        db.collection("jornadas").document(uid)
+            .addSnapshotListener { snapshot, _ ->
+                val activo = snapshot?.getBoolean("activo") ?: false
+                _uiState.update { it.copy(enRuta = activo) }
+            }
+    }
+
+    /**
+     * Monitorea la distancia en tiempo real entre el vendedor y el cliente.
+     */
+    fun monitorearGeocerca(clienteLat: Double, clienteLon: Double) {
+        viewModelScope.launch {
+            LocationState.ultimaUbicacion.collect { miUbicacion ->
+                if (miUbicacion != null && clienteLat != 0.0) {
+                    val locCliente = Location("").apply {
+                        latitude = clienteLat
+                        longitude = clienteLon
+                    }
+                    val distancia = miUbicacion.distanceTo(locCliente)
+                    val precisión = miUbicacion.accuracy
+                    
+                    // 📏 Regla de Negocio: Rango de 200m
+                    // Si el GPS está muy impreciso (> 100m), activamos modo foto preventivo
+                    val enRango = distancia < 200f
+                    val requiereFoto = !enRango || precisión > 100f
+                    
+                    _uiState.update { it.copy(
+                        distanciaAlClienteMetros = distancia,
+                        estaEnRango = enRango,
+                        requiereFotoEvidencia = requiereFoto
+                    ) }
+                }
+            }
+        }
     }
 
     private fun escucharVentasNube() {
@@ -267,15 +319,25 @@ class VentaViewModel(
         clienteNombre: String,
         clienteFotoUrl: String?,
         metodoPago: String,
+        fotoEvidenciaUrl: String? = null,
         onResultado: (Boolean, String, String) -> Unit
     ) {
         if (_uiState.value.estaProcesando) return
+        if (!_uiState.value.enRuta) {
+            onResultado(false, "Debes iniciar jornada para realizar ventas", "")
+            return
+        }
         _uiState.update { it.copy(estaProcesando = true) }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val usuarioActual = repositoryUsuario.obtenerUsuarioActual()
                 val uidVendedor = usuarioActual?.uid ?: FirebaseAuth.getInstance().currentUser?.uid ?: ""
+                val nombreVendedor = usuarioActual?.nombre ?: FirebaseAuth.getInstance().currentUser?.displayName ?: "Vendedor"
+                
+                val almacenId = (_uiState.value.estadoRuta as? EstadoRuta.ConRuta)?.almacenId
+                val miUbicacion = LocationState.ultimaUbicacion.value
+                
                 val productosVenta = _uiState.value.productosEnCarrito.filter { it.cantidad > 0 }
                 val totalVenta = productosVenta.sumOf { it.precio * it.cantidad }
 
@@ -286,7 +348,13 @@ class VentaViewModel(
                     productos = productosVenta,
                     total = totalVenta,
                     metodoPago = metodoPago,
-                    vendedorId = uidVendedor
+                    vendedorId = uidVendedor,
+                    vendedorNombre = nombreVendedor,
+                    almacenId = almacenId,
+                    latitud = miUbicacion?.latitude ?: 0.0,
+                    longitud = miUbicacion?.longitude ?: 0.0,
+                    fueraDeRango = !_uiState.value.estaEnRango,
+                    fotoEvidencia = fotoEvidenciaUrl
                 )
 
                 withContext(Dispatchers.Main) {

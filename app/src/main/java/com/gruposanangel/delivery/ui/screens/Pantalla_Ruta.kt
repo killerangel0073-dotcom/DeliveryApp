@@ -77,7 +77,7 @@ fun PaginaVentaScreen(navController: NavController, ventaRepository: VentaReposi
 fun PaginaVentaContent(ticketsHoy: List<TicketVenta>, isLoading: Boolean = false, onTicketClick: (TicketVenta) -> Unit) {
     val context = LocalContext.current; val fmtMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     val fmtFecha = SimpleDateFormat("EEEE d 'de' MMMM, hh:mm a", Locale.forLanguageTag("es-MX"))
-    val prefs = remember { PreferenciasMetas(context) }; val metaVals = remember { prefs.obtenerValores(11666.0, 35) }
+    val prefs = remember { PreferenciasMetas(context) }; val metaVals = remember { prefs.obtenerValores(6500.0, 30) }
     var meta by remember { mutableStateOf(metaVals.first) }; var cliTarget by remember { mutableStateOf(metaVals.second) }
     val totalHoy = ticketsHoy.sumOf { it.total }
 

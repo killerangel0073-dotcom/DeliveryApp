@@ -55,26 +55,32 @@ fun DialogoConfirmacion(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center
             ) {
-                Button(
-                    onClick = onConfirmar,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colorConfirmar,
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(text = textoConfirmar, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.width(16.dp))
+                // Botón CANCELAR (Izquierda)
                 Button(
                     onClick = onCancelar,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFFE0E0E0),
                         contentColor = Color.Gray
                     ),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
                     Text(text = textoCancelar, fontWeight = FontWeight.Bold)
+                }
+                
+                Spacer(modifier = Modifier.width(12.dp))
+                
+                // Botón CONFIRMAR (Derecha)
+                Button(
+                    onClick = onConfirmar,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorConfirmar,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = textoConfirmar, fontWeight = FontWeight.Bold)
                 }
             }
         }

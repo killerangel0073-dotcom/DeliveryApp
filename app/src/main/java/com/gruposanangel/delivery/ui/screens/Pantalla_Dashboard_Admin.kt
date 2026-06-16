@@ -774,8 +774,22 @@ fun CardVentaAdmin(
 @Composable
 fun DashboardPreview() {
     val dummyVentas = listOf(
-        VentaEntity(id = "1", clienteId = "c1", clienteNombre = "Abarrotes Don Pepe", total = 1540.0, metodoPago = "Efectivo", vendedorId = "v1", fecha = System.currentTimeMillis(), sincronizado = true),
-        VentaEntity(id = "2", clienteId = "c2", clienteNombre = "Mini Super El Sol", total = 890.0, metodoPago = "Transferencia", vendedorId = "v1", fecha = System.currentTimeMillis(), sincronizado = true)
+        VentaEntity(
+            id = "1", clienteId = "c1", clienteNombre = "Abarrotes Don Pepe", clienteImagenUrl = null,
+            total = 1540.0, metodoPago = "Efectivo", vendedorId = "v1", vendedorNombre = "Juan",
+            almacenId = "a1", fecha = System.currentTimeMillis(), horaDispositivo = System.currentTimeMillis(),
+            horaVerificada = System.currentTimeMillis(), alertaTiempo = false,
+            latitudVenta = 0.0, longitudVenta = 0.0, fueraDeRango = false, fotoEvidenciaVisita = null,
+            sincronizado = true, firestoreId = null
+        ),
+        VentaEntity(
+            id = "2", clienteId = "c2", clienteNombre = "Mini Super El Sol", clienteImagenUrl = null,
+            total = 890.0, metodoPago = "Transferencia", vendedorId = "v1", vendedorNombre = "Juan",
+            almacenId = "a1", fecha = System.currentTimeMillis(), horaDispositivo = System.currentTimeMillis(),
+            horaVerificada = System.currentTimeMillis(), alertaTiempo = false,
+            latitudVenta = 0.0, longitudVenta = 0.0, fueraDeRango = false, fotoEvidenciaVisita = null,
+            sincronizado = true, firestoreId = null
+        )
     )
     val dummySellers = listOf(
         SellerSummary("v1", "Juan Pérez", "Ruta 1 Delisa", "", 2430.0, 12, 202.5, dummyVentas)

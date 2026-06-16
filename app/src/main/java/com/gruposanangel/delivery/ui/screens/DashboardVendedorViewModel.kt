@@ -229,35 +229,44 @@ class DashboardVendedorViewModel(
 
     private fun observarVentasReactivo() {
         _uiState.update { it.copy(isLoading = true) }
+        
         viewModelScope.launch {
+            // 🔥 CLAVE: Usamos el userId directo del constructor para el filtro inicial
+            val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
             val cal = Calendar.getInstance()
-            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
-            val weekOfYear = cal.get(Calendar.WEEK_OF_YEAR)
-            val blockNumber = ((weekOfYear - 1) / 4)
-            cal.set(Calendar.WEEK_OF_YEAR, (blockNumber * 4) + 1)
+            cal.timeInMillis = ahoraReal
+            
+            // Definimos el inicio del bloque (4 semanas atrás)
+            cal.add(Calendar.WEEK_OF_YEAR, -4)
             cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
             val inicioBloque = cal.timeInMillis
 
-            ventaRepository.obtenerVentasPorPeriodoFlow(userId, inicioBloque, System.currentTimeMillis() + 86400000)
+            // Escuchamos todas las ventas del vendedor desde hace 4 semanas hasta "mañana"
+            ventaRepository.obtenerVentasPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000)
                 .collect { todasLasVentas ->
-                    val ventasMias = todasLasVentas
-                    val now = System.currentTimeMillis()
                     val calCalc = Calendar.getInstance()
                     
-                    calCalc.timeInMillis = now
+                    // Lógica de HOY exacta (Basada en Verdad Temporal)
+                    calCalc.timeInMillis = ahoraReal
                     calCalc.set(Calendar.HOUR_OF_DAY, 0); calCalc.set(Calendar.MINUTE, 0); calCalc.set(Calendar.SECOND, 0); calCalc.set(Calendar.MILLISECOND, 0)
                     val iniHoy = calCalc.timeInMillis
                     
-                    calCalc.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-                    // 🛡️ Ajuste de seguridad para el inicio de semana
-                    if (calCalc.timeInMillis > now) {
-                        calCalc.add(Calendar.DAY_OF_MONTH, -7)
+                    // Lógica de SEMANA exacta (Basada en Verdad Temporal)
+                    val calSem = Calendar.getInstance()
+                    calSem.timeInMillis = ahoraReal
+                    calSem.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                    calSem.set(Calendar.HOUR_OF_DAY, 0); calSem.set(Calendar.MINUTE, 0); calSem.set(Calendar.SECOND, 0)
+                    if (calSem.timeInMillis > ahoraReal) {
+                        calSem.add(Calendar.DAY_OF_MONTH, -7)
                     }
-                    val iniSemana = calCalc.timeInMillis
+                    val iniSemana = calSem.timeInMillis
 
-                    val ventasHoy = ventasMias.filter { it.fecha >= iniHoy }
-                    val ventasSemana = ventasMias.filter { it.fecha >= iniSemana }
+                    // Filtrado en memoria
+                    val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoy }
+                    val ventasSemana = todasLasVentas.filter { it.fecha >= iniSemana }
 
+                    // Cálculo por día de la semana (Lunes a Sábado)
                     val ventasPorDia = MutableList(6) { 0.0 }
                     val calDia = Calendar.getInstance()
                     ventasSemana.forEach { venta ->
@@ -287,7 +296,7 @@ class DashboardVendedorViewModel(
                         clientesDia = clientesHoy,
                         ticketPromedioDia = ticketPromedio,
                         ventaSemana = ventasSemana.sumOf { v -> v.total },
-                        ventaBloque = ventasMias.sumOf { v -> v.total },
+                        ventaBloque = todasLasVentas.sumOf { v -> v.total },
                         ventasPorDiaSemana = ventasPorDia,
                         ventasHoy = ventasHoy
                     ) }
@@ -296,20 +305,32 @@ class DashboardVendedorViewModel(
     }
 
     private fun escucharVentasNube() {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
-        val inicio = cal.time
+        viewModelScope.launch {
+            val user = usuarioRepository.obtenerUsuarioActual()
+            val esVendedor = user?.puestoTrabajo == "Vendedor de Ruta"
+            val idParaSync = if (esVendedor) userId else ""
 
-        salesListener?.remove()
-        salesListener = db.collection("ventas")
-            .whereGreaterThanOrEqualTo("fecha", inicio)
-            .addSnapshotListener { snapshot, _ ->
+            val cal = Calendar.getInstance()
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+            val inicio = cal.time
+
+            salesListener?.remove()
+            
+            var query: com.google.firebase.firestore.Query = db.collection("ventas")
+                .whereGreaterThanOrEqualTo("fecha", inicio)
+            
+            if (esVendedor) {
+                query = query.whereEqualTo("vendedorId", userId)
+            }
+
+            salesListener = query.addSnapshotListener { snapshot, _ ->
                 if (snapshot != null) {
                     viewModelScope.launch {
-                        ventaRepository.descargarVentasDia(userId)
+                        ventaRepository.descargarVentasDia(idParaSync)
                     }
                 }
             }
+        }
     }
 
     override fun onCleared() {

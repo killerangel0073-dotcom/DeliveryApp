@@ -201,6 +201,68 @@ fun Pantalla_Detalle_Venta_Admin(
                     HeaderVentaCard(ticket, formatoMoneda, formatoFecha, formatoHora)
                 }
 
+                // 🔥 AUDITORÍA GEOGRÁFICA (EVIDENCIA FUERA DE RANGO)
+                if (ticket.fueraDeRango) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red.copy(0.3f))
+                        ) {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.LocationOff,
+                                        contentDescription = null,
+                                        tint = Color.Red,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "VENTA REALIZADA FUERA DE RANGO",
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.Red,
+                                        fontSize = 13.sp,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                }
+
+                                if (!ticket.fotoEvidenciaUrl.isNullOrEmpty()) {
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(
+                                        text = "EVIDENCIA FÍSICA DE VISITA:",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.DarkGray
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    AsyncImage(
+                                        model = ticket.fotoEvidenciaUrl,
+                                        contentDescription = "Evidencia de Visita",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(220.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(Color.White),
+                                        contentScale = ContentScale.Crop,
+                                        placeholder = painterResource(R.drawable.repartidor),
+                                        error = painterResource(R.drawable.repartidor)
+                                    )
+                                } else {
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = "⚠️ Atención: El vendedor no capturó fotografía de evidencia.",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray,
+                                        modifier = Modifier.padding(start = 28.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // 🔹 ACCIONES DE AJUSTE (AUDITORÍA)
                 item {
                     Row(

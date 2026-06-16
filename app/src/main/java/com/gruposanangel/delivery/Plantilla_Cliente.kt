@@ -5,5 +5,7 @@ class Plantilla_Cliente (
     val nombreNegocio: String,
     val nombreDueno: String,
     val fotografiaCliente: String,
-    val activo: Boolean
+    val activo: Boolean,
+    val distanciaMetros: Float = -1f,
+    val distanciaTexto: String = ""
 )

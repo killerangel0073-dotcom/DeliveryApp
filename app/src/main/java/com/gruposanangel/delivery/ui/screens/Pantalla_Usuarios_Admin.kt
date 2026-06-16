@@ -28,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -40,6 +41,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
@@ -50,12 +53,15 @@ import com.gruposanangel.delivery.ui.theme.DeliveryTheme
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.*
 
 @Composable
 fun Pantalla_Usuarios_Admin(navController: NavController) {
     val context = LocalContext.current; val scope = rememberCoroutineScope(); val vm: UsuariosAdminViewModel = viewModel()
     val uiState by vm.uiState.collectAsState()
     var imgBitmap by remember { mutableStateOf<Bitmap?>(null) }; var imgFile by remember { mutableStateOf<File?>(null) }
+    
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { scope.launch { val file = createImageFile3(context); context.contentResolver.openInputStream(it)?.use { i -> FileOutputStream(file).use { o -> i.copyTo(o) } }; imgFile = file; imgBitmap = BitmapFactory.decodeFile(file.absolutePath) } } }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp -> bmp?.let { val file = createImageFile3(context); FileOutputStream(file).use { o -> it.compress(Bitmap.CompressFormat.JPEG, 85, o) }; imgFile = file; imgBitmap = it } }
 
@@ -64,6 +70,18 @@ fun Pantalla_Usuarios_Admin(navController: NavController) {
         onBack = { navController.popBackStack() },
         onUserSelect = { vm.seleccionarUsuario(it) },
         onImageSourceSelected = { if (it) cameraLauncher.launch(null) else galleryLauncher.launch("image/*") },
+        onValidateLicense = { 
+            val user = uiState.usuarioSeleccionado
+            if (user != null) {
+                navController.navigate("camara_escaneo_licencia/${user.uid}/${user.nombre}")
+            }
+        },
+        onValidateINE = {
+            val user = uiState.usuarioSeleccionado
+            if (user != null) {
+                navController.navigate("camara_escaneo_ine/${user.uid}/${user.nombre}")
+            }
+        },
         onSave = { n, e, p, a, l, c -> vm.guardarUsuario(n, e, p, a, l, c, imgFile) },
         onDelete = { vm.eliminarUsuario(it) }
     )
@@ -71,14 +89,18 @@ fun Pantalla_Usuarios_Admin(navController: NavController) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PantallaUsuariosAdminContent(uiState: UsuariosAdminUiState, imgBitmap: Bitmap?, onBack: () -> Unit, onUserSelect: (UsuarioEntity?) -> Unit, onImageSourceSelected: (Boolean) -> Unit, onSave: (String, String, String, Boolean, String, String) -> Unit, onDelete: (String) -> Unit) {
+fun PantallaUsuariosAdminContent(uiState: UsuariosAdminUiState, imgBitmap: Bitmap?, onBack: () -> Unit, onUserSelect: (UsuarioEntity?) -> Unit, onImageSourceSelected: (Boolean) -> Unit, onValidateLicense: () -> Unit, onValidateINE: () -> Unit, onSave: (String, String, String, Boolean, String, String) -> Unit, onDelete: (String) -> Unit) {
+    val context = LocalContext.current
     var nombre by remember(uiState.usuarioSeleccionado) { mutableStateOf(uiState.usuarioSeleccionado?.nombre ?: "") }
     var email by remember(uiState.usuarioSeleccionado) { mutableStateOf(uiState.usuarioSeleccionado?.email ?: "") }
     var puesto by remember(uiState.usuarioSeleccionado) { mutableStateOf(uiState.usuarioSeleccionado?.puestoTrabajo ?: "") }
     var activo by remember(uiState.usuarioSeleccionado) { mutableStateOf(uiState.usuarioSeleccionado?.activo ?: true) }
-    var licencia by remember(uiState.usuarioSeleccionado) { mutableStateOf(uiState.usuarioSeleccionado?.licenciaConducir ?: "") }
-    var credencial by remember(uiState.usuarioSeleccionado) { mutableStateOf(uiState.usuarioSeleccionado?.credencialElector ?: "") }
-    var showImgDialog by remember { mutableStateOf(false) }; var showDelDialog by remember { mutableStateOf(false) }
+    var showImgDialog by remember { mutableStateOf(false) }
+    var showDelDialog by remember { mutableStateOf(false) }
+    var showLicensePhotoDialog by remember { mutableStateOf(false) }
+    var showINEPhotoDialog by remember { mutableStateOf(false) }
+
+    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("GESTIÓN DE PERSONAL", fontWeight = FontWeight.Black, color = Color.DarkGray, style = MaterialTheme.typography.labelLarge) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red) } }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)) },
@@ -102,8 +124,118 @@ fun PantallaUsuariosAdminContent(uiState: UsuariosAdminUiState, imgBitmap: Bitma
                     FormTextField(nombre, { nombre = it }, "Nombre Completo", Icons.Default.Badge)
                     FormTextField(email, { email = it }, "Correo", Icons.Default.Email)
                     FormTextField(puesto, { puesto = it }, "Puesto", Icons.Default.Work)
-                    FormTextField(licencia, { licencia = it }, "Licencia", Icons.Default.DirectionsCar)
-                    FormTextField(credencial, { credencial = it }, "INE", Icons.Default.AccountBox)
+                    
+                    // 🔥 SECCIONES DE AUDITORÍA (IA) - SIEMPRE VISIBLES
+                    val user = uiState.usuarioSeleccionado
+                    val licenciaEstado = user?.licenciaEstado ?: "PENDIENTE"
+                    val ineEstado = user?.ineEstado ?: "PENDIENTE"
+                    
+                    val colorLicencia = when(licenciaEstado) {
+                        "VIGENTE" -> Color(0xFF2E7D32)
+                        "VENCIDA" -> Color.Red
+                        else -> Color.Gray
+                    }
+                    val colorIne = when(ineEstado) {
+                        "VIGENTE" -> Color(0xFF2E7D32)
+                        "VENCIDA" -> Color.Red
+                        else -> Color.Gray
+                    }
+
+                    // --- CARD LICENCIA ---
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = user?.licenciaFotoUrl != null) { showLicensePhotoDialog = true },
+                        colors = CardDefaults.cardColors(containerColor = colorLicencia.copy(alpha = 0.05f)),
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, colorLicencia.copy(alpha = 0.2f))
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.VerifiedUser, null, tint = colorLicencia, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("AUDITORÍA DE LICENCIA", fontWeight = FontWeight.Black, fontSize = 12.sp, color = colorLicencia)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text("Estado: $licenciaEstado", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            
+                            if (user?.licenciaVencimiento != null && user.licenciaVencimiento > 0) {
+                                Text("Vencimiento: ${sdf.format(Date(user.licenciaVencimiento))}", fontSize = 13.sp, color = Color.DarkGray)
+                            }
+
+                            if (uiState.resultadoIA?.contains("VIGENTE") == true && uiState.isLoadingIA.not()) {
+                                Text("Delisa IA: ${uiState.resultadoIA}", fontSize = 11.sp, color = Color.Gray)
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+
+                            if (uiState.isLoadingIA) {
+                                // Animación de escaneo (reutilizada)
+                                Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
+                                    LinearProgressIndicator(color = Color.Red, modifier = Modifier.fillMaxWidth())
+                                }
+                            } else {
+                                Button(
+                                    onClick = {
+                                        if (user == null) {
+                                            android.widget.Toast.makeText(context, "Primero cree la cuenta", android.widget.Toast.LENGTH_SHORT).show()
+                                        } else onValidateLicense()
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = colorLicencia),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.PhotoCamera, null); Spacer(Modifier.width(8.dp))
+                                    Text("VALIDAR LICENCIA (IA)", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // --- CARD INE ---
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = user?.ineFotoUrl != null) { showINEPhotoDialog = true },
+                        colors = CardDefaults.cardColors(containerColor = colorIne.copy(alpha = 0.05f)),
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, colorIne.copy(alpha = 0.2f))
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AccountBox, null, tint = colorIne, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("AUDITORÍA DE INE", fontWeight = FontWeight.Black, fontSize = 12.sp, color = colorIne)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text("Estado: $ineEstado", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            
+                            if (user?.ineVencimiento != null && user.ineVencimiento > 0) {
+                                Text("Vencimiento: ${sdf.format(Date(user.ineVencimiento))}", fontSize = 13.sp, color = Color.DarkGray)
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+
+                            Button(
+                                onClick = {
+                                    if (user == null) {
+                                        android.widget.Toast.makeText(context, "Primero cree la cuenta", android.widget.Toast.LENGTH_SHORT).show()
+                                    } else onValidateINE()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = colorIne),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Fingerprint, null); Spacer(Modifier.width(8.dp))
+                                Text("VALIDAR INE (IA)", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) { 
                         Text("Cuenta Activa", fontWeight = FontWeight.Bold)
                         Switch(
@@ -119,14 +251,76 @@ fun PantallaUsuariosAdminContent(uiState: UsuariosAdminUiState, imgBitmap: Bitma
                             )
                         ) 
                     }
+                    
                     if (uiState.isLoading) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally), color = Color.Red)
-                    else Button(onClick = { onSave(nombre, email, puesto, activo, licencia, credencial) }, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Icon(if (uiState.isNewUserMode) Icons.Default.Add else Icons.Default.Save, null); Spacer(Modifier.width(8.dp)); Text(if (uiState.isNewUserMode) "CREAR CUENTA" else "ACTUALIZAR", fontWeight = FontWeight.ExtraBold) }
+                    else Button(
+                        onClick = { onSave(nombre, email, puesto, activo, user?.licenciaConducir ?: "", user?.credencialElector ?: "") }, 
+                        modifier = Modifier.fillMaxWidth().height(54.dp), 
+                        shape = RoundedCornerShape(16.dp), 
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                    ) { 
+                        Icon(if (uiState.isNewUserMode) Icons.Default.PersonAdd else Icons.Default.Save, null); 
+                        Spacer(Modifier.width(8.dp)); 
+                        Text(if (uiState.isNewUserMode) "CREAR CUENTA" else "ACTUALIZAR DATOS", fontWeight = FontWeight.ExtraBold) 
+                    }
                 }
             }
         }
     }
     if (showDelDialog) { AlertDialog(onDismissRequest = { showDelDialog = false }, title = { Text("¿Eliminar?") }, text = { Text("Borrar a ${uiState.usuarioSeleccionado?.nombre}?") }, confirmButton = { Button(onClick = { uiState.usuarioSeleccionado?.uid?.let { onDelete(it) }; showDelDialog = false }, colors = ButtonDefaults.buttonColors(RojoDelisa)) { Text("ELIMINAR") } }, dismissButton = { TextButton(onClick = { showDelDialog = false }) { Text("CANCELAR") } }) }
     if (showImgDialog) { AlertDialog(onDismissRequest = { showImgDialog = false }, title = { Text("Foto") }, confirmButton = { Row { TextButton(onClick = { onImageSourceSelected(true); showImgDialog = false }) { Text("CÁMARA", color = Color.Red) }; TextButton(onClick = { onImageSourceSelected(false); showImgDialog = false }) { Text("GALERÍA", color = Color.Red) } } }) }
+    
+    if (showLicensePhotoDialog && uiState.usuarioSeleccionado?.licenciaFotoUrl != null) {
+        AlertDialog(
+            onDismissRequest = { showLicensePhotoDialog = false },
+            title = { Text("Evidencia de Licencia", fontWeight = FontWeight.Black) },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    AsyncImage(
+                        model = uiState.usuarioSeleccionado.licenciaFotoUrl,
+                        contentDescription = "Foto Licencia",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1.58f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White),
+                        contentScale = ContentScale.FillBounds,
+                        placeholder = painterResource(R.drawable.repartidor),
+                        error = painterResource(R.drawable.repartidor)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text("Evidencia oficial de licencia de conducir.", fontSize = 12.sp, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            },
+            confirmButton = { Button(onClick = { showLicensePhotoDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("CERRAR") } }
+        )
+    }
+
+    if (showINEPhotoDialog && uiState.usuarioSeleccionado?.ineFotoUrl != null) {
+        AlertDialog(
+            onDismissRequest = { showINEPhotoDialog = false },
+            title = { Text("Evidencia de INE", fontWeight = FontWeight.Black) },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    AsyncImage(
+                        model = uiState.usuarioSeleccionado.ineFotoUrl,
+                        contentDescription = "Foto INE",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1.58f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White),
+                        contentScale = ContentScale.FillBounds,
+                        placeholder = painterResource(R.drawable.repartidor),
+                        error = painterResource(R.drawable.repartidor)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text("Evidencia oficial de identificación INE/IFE.", fontSize = 12.sp, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            },
+            confirmButton = { Button(onClick = { showINEPhotoDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("CERRAR") } }
+        )
+    }
 }
 
 @Composable
@@ -155,5 +349,5 @@ fun createImageFile3(context: android.content.Context): File { val dir = File(co
 @Composable
 fun UsuariosAdminPreview() {
     val users = listOf(UsuarioEntity("1", "Lizeth Flores", "Gerente", "Si", ""), UsuarioEntity("2", "Juan Perez", "Vendedor", "Si", ""))
-    DeliveryTheme { PantallaUsuariosAdminContent(UsuariosAdminUiState(usuarios = users), null, {}, {}, {}, {_,_,_,_,_,_ ->}, {}) }
+    DeliveryTheme { PantallaUsuariosAdminContent(UsuariosAdminUiState(usuarios = users), null, {}, {}, {}, {}, {}, {_,_,_,_,_,_ ->}, {}) }
 }

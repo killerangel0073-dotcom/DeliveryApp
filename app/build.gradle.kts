@@ -114,8 +114,11 @@ dependencies {
 
     // Mapas
     implementation("com.google.android.gms:play-services-maps:18.1.0")
-    implementation("com.google.maps.android:maps-compose:2.11.4")
+    implementation("com.google.maps.android:maps-compose:6.1.0")
     implementation("com.google.android.gms:play-services-location:21.0.1")
+
+    // 🔥 Gemini Developer API (Versión actualizada para modelos 2.0+)
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 
     // Room
     implementation("androidx.room:room-runtime:2.8.4")
@@ -135,4 +138,11 @@ dependencies {
 
     // QR Code Generation (ZXing)
     implementation("com.google.zxing:core:3.5.3")
+
+    // 🔥 CameraX (Para Escaneo de Licencias con Guía)
+    val cameraxVersion = "1.4.0"
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
+    implementation("com.google.guava:guava:31.1-android")
 }

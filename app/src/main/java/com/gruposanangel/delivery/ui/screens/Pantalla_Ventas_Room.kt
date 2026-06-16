@@ -82,7 +82,15 @@ class VentasRoomViewModelFactory(private val repo: VentaRepository, private val 
 fun VentasRoomScreen(context: Context, navController: NavController? = null, ventaRepository: VentaRepository) {
     val isPreview = LocalInspectionMode.current
     if (isPreview) {
-        PantallaVentasRoomContent(VentasRoomUiState(ventasConFoto = listOf(VentaConFotoUI(VentaEntity("1", "c1", "Tienda Mary", null, 150.0, "Efectivo", "v1", System.currentTimeMillis(), true), ""))), Date(), {}, {}, {})
+        val dummyVenta = VentaEntity(
+            id = "1", clienteId = "c1", clienteNombre = "Tienda Mary", clienteImagenUrl = null,
+            total = 150.0, metodoPago = "Efectivo", vendedorId = "v1", vendedorNombre = null,
+            almacenId = null, fecha = System.currentTimeMillis(), horaDispositivo = System.currentTimeMillis(),
+            horaVerificada = System.currentTimeMillis(), alertaTiempo = false,
+            latitudVenta = 0.0, longitudVenta = 0.0, fueraDeRango = false, fotoEvidenciaVisita = null,
+            sincronizado = true, firestoreId = null
+        )
+        PantallaVentasRoomContent(VentasRoomUiState(ventasConFoto = listOf(VentaConFotoUI(dummyVenta, ""))), Date(), {}, {}, {})
     } else {
         val vm: VentasRoomViewModel = viewModel(factory = VentasRoomViewModelFactory(ventaRepository, context))
         val uiState by vm.uiState.collectAsState()
@@ -152,6 +160,14 @@ fun PantallaVentasRoomContent(uiState: VentasRoomUiState, fecha: Date, onFechaCh
 @Preview(showBackground = true, showSystemUi = true, name = "Ventas Historial - Lista")
 @Composable
 fun VentasRoomPreview() {
-    val items = listOf(VentaConFotoUI(VentaEntity("1", "c1", "Abarrotes Doña Mary", null, 450.0, "Efectivo", "v1", System.currentTimeMillis(), true), ""))
+    val dummyVenta = VentaEntity(
+        id = "1", clienteId = "c1", clienteNombre = "Abarrotes Doña Mary", clienteImagenUrl = null,
+        total = 450.0, metodoPago = "Efectivo", vendedorId = "v1", vendedorNombre = null,
+        almacenId = null, fecha = System.currentTimeMillis(), horaDispositivo = System.currentTimeMillis(),
+        horaVerificada = System.currentTimeMillis(), alertaTiempo = false,
+        latitudVenta = 0.0, longitudVenta = 0.0, fueraDeRango = false, fotoEvidenciaVisita = null,
+        sincronizado = true, firestoreId = null
+    )
+    val items = listOf(VentaConFotoUI(dummyVenta, ""))
     DeliveryTheme { PantallaVentasRoomContent(VentasRoomUiState(ventasConFoto = items), Date(), {}, {}, {}) }
 }

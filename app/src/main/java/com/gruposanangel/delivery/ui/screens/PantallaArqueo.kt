@@ -205,7 +205,7 @@ fun BitacoraMovimientosTab(state: ArqueoUiState) {
                 Text(nf.format(totalValorInicial), fontSize = 8.sp, color = Color.Black, fontWeight = FontWeight.Bold)
             }
 
-            listOf("LUN", "MAR", "MIE", "JUE", "VIE", "SAB").forEachIndexed { index, dia ->
+            listOf("LUN", "MAR", "MIE", "JUE", "VIE", "SAB", "DOM").forEachIndexed { index, dia ->
                 val totalDia = state.productosArqueo.sumOf { it.cargasPorDia[index] * it.precio }
                 Column(Modifier.width(70.dp).padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(dia, fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.Red)
@@ -449,8 +449,8 @@ fun GenerarPDFArqueo(context: Context, state: ArqueoUiState): File {
 
     // --- TABLA DE MOVIMIENTOS (EXCEL STYLE) ---
     val startX = 40f
-    val colW = listOf(140f, 50f, 45f, 45f, 45f, 45f, 45f, 45f, 50f, 50f)
-    val headers = listOf("PRODUCTO", "INICIAL", "LUN", "MAR", "MIE", "JUE", "VIE", "SAB", "ARQUEO", "DIFF")
+    val colW = listOf(140f, 50f, 40f, 40f, 40f, 40f, 40f, 40f, 40f, 50f, 50f)
+    val headers = listOf("PRODUCTO", "INICIAL", "LUN", "MAR", "MIE", "JUE", "VIE", "SAB", "DOM", "ARQUEO", "DIFF")
     
     // Draw Headers
     canvas.drawRect(startX, y, 790f, y + 18f, pFillHeader)
@@ -470,13 +470,13 @@ fun GenerarPDFArqueo(context: Context, state: ArqueoUiState): File {
             p.nombre.take(30), 
             "${p.stockInicialBitacora}",
             "${p.cargasPorDia[0]}", "${p.cargasPorDia[1]}", "${p.cargasPorDia[2]}", 
-            "${p.cargasPorDia[3]}", "${p.cargasPorDia[4]}", "${p.cargasPorDia[5]}",
+            "${p.cargasPorDia[3]}", "${p.cargasPorDia[4]}", "${p.cargasPorDia[5]}", "${p.cargasPorDia[6]}",
             if(p.stockReal.isEmpty()) "0" else p.stockReal,
             "${p.difBitacora}"
         )
 
         vals.forEachIndexed { i, v ->
-            val paint = if (i == 9 && p.difBitacora != 0) {
+            val paint = if (i == 10 && p.difBitacora != 0) {
                 Paint(pText).apply { color = if(p.difBitacora < 0) android.graphics.Color.RED else android.graphics.Color.rgb(0,120,0); isFakeBoldText = true }
             } else pText
             canvas.drawText(v, curX + 5f, y + 12f, paint)
