@@ -308,16 +308,17 @@ private fun takePhotoAndCropGeneric(
                     val w = rotatedBitmap.width
                     val h = rotatedBitmap.height
                     
-                    val cropW = (w * 0.90).toInt()
-                    val cropH = (cropW * 0.63).toInt()
+                    // Ajuste de precisión para que el recorte sea idéntico a la guía visual
+                    val cropW = (w * 0.90f).toInt()
+                    val cropH = (cropW * 0.63f).toInt()
                     val x = (w - cropW) / 2
                     val y = (h - cropH) / 2.5f 
                     
                     val cropped = Bitmap.createBitmap(
                         rotatedBitmap, 
-                        x.coerceAtLeast(0), 
+                        x.coerceAtLeast(0).toInt(), 
                         y.toInt().coerceAtLeast(0), 
-                        cropW.coerceAtMost(w - x), 
+                        cropW.coerceAtMost(w - x.toInt()),
                         cropH.coerceAtMost(h - y.toInt())
                     )
                     

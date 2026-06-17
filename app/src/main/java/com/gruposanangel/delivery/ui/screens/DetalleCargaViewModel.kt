@@ -37,6 +37,7 @@ class DetalleCargaViewModel(
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
+                // 1. Intentar buscar en Firebase (Carga Normal)
                 val doc = db.collection("ordenesTransferencia").document(cargaId).get().await()
                 if (doc.exists()) {
                     val productosRaw = doc.get("productos") as? List<Map<String, Any>> ?: emptyList()
@@ -48,7 +49,48 @@ class DetalleCargaViewModel(
                         val pLocal = productoDao.getProductoById(id)
                         Plantilla_Producto(id = id, nombre = pLocal?.nombre ?: nombreCarga ?: "ID: $id", precio = if (pLocal != null && pLocal.precio > 0) pLocal.precio else precioCarga, imagenUrl = pLocal?.imagenUrl ?: "", cantidad = cantidad)
                     }
-                    _uiState.update { it.copy(isLoading = false, productos = productosCompletos, carga = Plantila_carga(id = doc.id, nombreCarga = "Carga desde " + (doc.getString("origen") ?: "Almacén"), aceptada = doc.getString("estado") == "COMPLETADA" || doc.getString("estado") == "ACEPTADA")) }
+                    val fechaCarga = doc.getTimestamp("timestamp")?.toDate()
+                    _uiState.update { it.copy(
+                        isLoading = false, 
+                        productos = productosCompletos, 
+                        carga = Plantila_carga(
+                            id = doc.id, 
+                            nombreCarga = "Carga desde " + (doc.getString("origen") ?: "Almacén"), 
+                            aceptada = doc.getString("estado") == "COMPLETADA" || doc.getString("estado") == "ACEPTADA",
+                            fecha = fechaCarga
+                        )
+                    ) }
+                } else {
+                    // 2. Si no existe en Firebase, buscar en Room (Carga de Emergencia)
+                    val movsLocales = inventarioRepo.obtenerMovimientosDesde(com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "", 0L)
+                        .filter { it.referenciaId == cargaId || it.id == cargaId }
+                    
+                    if (movsLocales.isNotEmpty()) {
+                        val primerMov = movsLocales.first()
+                        val productosCompletos = movsLocales.map { mov ->
+                            val pLocal = productoDao.getProductoById(mov.productoId)
+                            Plantilla_Producto(
+                                id = mov.productoId,
+                                nombre = mov.nombreProducto,
+                                precio = pLocal?.precio ?: 0.0,
+                                cantidad = mov.cantidad,
+                                imagenUrl = pLocal?.imagenUrl ?: ""
+                            )
+                        }
+                        
+                        _uiState.update { it.copy(
+                            isLoading = false,
+                            productos = productosCompletos,
+                            carga = Plantila_carga(
+                                id = cargaId,
+                                nombreCarga = "CARGA MANUAL (EMERGENCIA)",
+                                aceptada = true,
+                                fecha = java.util.Date(primerMov.timestamp)
+                            )
+                        ) }
+                    } else {
+                        _uiState.update { it.copy(isLoading = false, error = "No se encontró el detalle de la carga") }
+                    }
                 }
             } catch (e: Exception) { _uiState.update { it.copy(isLoading = false, error = e.message) } }
         }

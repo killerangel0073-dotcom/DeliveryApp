@@ -53,11 +53,25 @@ fun Navegador(
             )
         }
 
-        composable("LISTA PRODUCTOS") {
+        composable(
+            route = "LISTA PRODUCTOS?origen={origen}&destino={destino}&emergency={emergency}",
+            arguments = listOf(
+                navArgument("origen") { type = NavType.StringType; nullable = true },
+                navArgument("destino") { type = NavType.StringType; nullable = true },
+                navArgument("emergency") { type = NavType.BoolType; defaultValue = false }
+            )
+        ) { backStackEntry ->
+            val origen = backStackEntry.arguments?.getString("origen")
+            val destino = backStackEntry.arguments?.getString("destino")
+            val isEmergency = backStackEntry.arguments?.getBoolean("emergency") ?: false
+            
             MovimientosInventarioScreen(
                 navController = navController,
                 impresoraBluetooth = impresoraBluetooth,
-                onImpresoraSeleccionada = { device -> impresoraBluetooth = device }
+                onImpresoraSeleccionada = { device -> impresoraBluetooth = device },
+                preSelectedOrigen = origen,
+                preSelectedDestino = destino,
+                isEmergency = isEmergency
             )
         }
 

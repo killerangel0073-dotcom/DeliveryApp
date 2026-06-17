@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,7 +41,9 @@ import com.gruposanangel.delivery.model.Plantilla_Producto
 import com.gruposanangel.delivery.ui.theme.DeliveryTheme
 import com.gruposanangel.delivery.utilidades.DialogoConfirmacion
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.Date
 
 @Composable
 fun PantallaDetalleCarga(
@@ -81,14 +85,24 @@ fun PantallaDetalleCarga(
 @Composable
 fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit, onAceptar: () -> Unit) {
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
+    val formatoFecha = SimpleDateFormat("EEEE, dd 'de' MMMM, hh:mm a", Locale("es", "MX"))
+
     var mostrarDialog by remember { mutableStateOf(false) }
     val totalCantidad = uiState.productos.sumOf { it.cantidad }
     val totalValor = uiState.productos.sumOf { it.cantidad * it.precio }
+    val esEmergencia = uiState.carga?.nombreCarga?.contains("EMERGENCIA") == true
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("DETALLE DE CARGA", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.DarkGray) },
+                title = { 
+                    Column {
+                        Text("DETALLE DE CARGA", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.DarkGray)
+                        if (esEmergencia) {
+                            Text("PROCESADA LOCALMENTE", style = MaterialTheme.typography.labelSmall, color = Color.Red, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
@@ -98,25 +112,85 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color.Red) }
         } else {
             Column(Modifier.fillMaxSize().padding(padding).background(Color(0xFFF8F9FA))) {
-                LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Header Informativo
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(1.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.Start // Asegura alineación a la izquierda
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                if (esEmergencia) Icons.Default.FlashOn else Icons.Default.Inventory,
+                                null,
+                                tint = if (esEmergencia) Color.Red else Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = uiState.carga?.nombreCarga ?: "CARGA DESCONOCIDA",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 14.sp,
+                                color = Color.DarkGray,
+                                textAlign = TextAlign.Start,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        
+                        uiState.carga?.fecha?.let {
+                            Text(
+                                text = formatoFecha.format(it).uppercase(),
+                                fontSize = 13.sp,
+                                color = if (esEmergencia) Color.Red else Color.Gray,
+                                modifier = Modifier
+                                    .padding(top = 8.dp)
+                                    .fillMaxWidth(), // Toma todo el ancho para que el TextAlign funcione
+                                fontWeight = FontWeight.ExtraBold,
+                                textAlign = TextAlign.Start
+                            )
+                        }
+
+                        if (uiState.carga?.id?.isNotEmpty() == true) {
+                            Text(
+                                text = "FOLIO: ${uiState.carga.id}",
+                                fontSize = 10.sp,
+                                color = Color.LightGray,
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .fillMaxWidth(),
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Start
+                            )
+                        }
+                    }
+                }
+
+                LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(uiState.productos) { producto ->
                         val totalProducto = producto.cantidad * producto.precio
                         Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
                             Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(75.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFFF1F2F6)), contentAlignment = Alignment.Center) {
+                                Box(Modifier.size(70.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFFF1F2F6)), contentAlignment = Alignment.Center) {
                                     AsyncImage(model = producto.imagenUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = producto.nombre, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                                 }
                                 Spacer(Modifier.width(16.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(producto.nombre, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = Color.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(producto.nombre, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     Spacer(Modifier.height(4.dp))
-                                    Surface(color = Color(0xFFE8F5E9), shape = RoundedCornerShape(8.dp)) {
-                                        Text("${producto.cantidad} pzas autorizadas", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 11.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+                                    Surface(color = if (esEmergencia) Color(0xFFFDECEA) else Color(0xFFE8F5E9), shape = RoundedCornerShape(8.dp)) {
+                                        Text("${producto.cantidad} pzas", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 11.sp, color = if (esEmergencia) Color.Red else Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
                                     }
                                 }
                                 Column(horizontalAlignment = Alignment.End) {
-                                    Text(formatoMoneda.format(totalProducto), fontWeight = FontWeight.Black, color = Color.Red, fontSize = 17.sp)
-                                    Text("u: ${formatoMoneda.format(producto.precio)}", fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
+                                    Text(formatoMoneda.format(totalProducto), fontWeight = FontWeight.Black, color = Color.Red, fontSize = 16.sp)
+                                    Text("${formatoMoneda.format(producto.precio)} c/u", fontSize = 9.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
                                 }
                             }
                         }
@@ -135,8 +209,15 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                             }
                         } else {
                             Spacer(Modifier.height(20.dp))
-                            Surface(modifier = Modifier.fillMaxWidth(), color = Color(0xFFE8F5E9), shape = RoundedCornerShape(16.dp)) {
-                                Text("ESTA CARGA YA FUE ACEPTADA", modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center, color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Surface(modifier = Modifier.fillMaxWidth(), color = if (esEmergencia) Color(0xFFFDECEA) else Color(0xFFE8F5E9), shape = RoundedCornerShape(16.dp)) {
+                                Text(
+                                    text = if (esEmergencia) "ESTA CARGA FUE PROCESADA MANUALMENTE" else "ESTA CARGA YA FUE ACEPTADA", 
+                                    modifier = Modifier.padding(16.dp), 
+                                    textAlign = TextAlign.Center, 
+                                    color = if (esEmergencia) Color.Red else Color(0xFF2E7D32), 
+                                    fontWeight = FontWeight.Bold, 
+                                    fontSize = 13.sp
+                                )
                             }
                         }
                     }

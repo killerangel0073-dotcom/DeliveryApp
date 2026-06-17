@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.ReceiptLong
@@ -63,7 +65,10 @@ import java.util.*
 fun MovimientosInventarioScreen(
     navController: NavController,
     impresoraBluetooth: BluetoothDevice? = null,
-    onImpresoraSeleccionada: (BluetoothDevice) -> Unit = {}
+    onImpresoraSeleccionada: (BluetoothDevice) -> Unit = {},
+    preSelectedOrigen: String? = null,
+    preSelectedDestino: String? = null,
+    isEmergency: Boolean = false
 ) {
     val context = LocalContext.current
     val isPreview = LocalInspectionMode.current
@@ -75,6 +80,7 @@ fun MovimientosInventarioScreen(
 
     // Simulación de triggers de lógica para estados reales
     var ejecutarCrearOrden: (String, String, List<Plantilla_Producto>, Map<String, Int>, (String) -> Unit) -> Unit = { _, _, _, _, _ -> }
+    var ejecutarCargaDirecta: (String, String, List<Plantilla_Producto>, Map<String, Int>, () -> Unit) -> Unit = { _, _, _, _, _ -> }
     var triggerCargarStock: (String) -> Unit = {}
     var listaAlmacenesDinamica by remember { mutableStateOf(emptyList<String>()) }
 
@@ -99,8 +105,12 @@ fun MovimientosInventarioScreen(
         ejecutarCrearOrden = { orig, dest, prods, cants, onCompletado ->
             viewModel.crearOrden(orig, dest, prods, cants, onCompletado)
         }
+        ejecutarCargaDirecta = { orig, dest, prods, cants, onCompletado ->
+            viewModel.confirmarCargaDirecta(orig, dest, prods, cants, onCompletado)
+        }
         triggerCargarStock = { orig -> viewModel.cargarStockOrigen(orig) }
     } else {
+        // ... (el resto del código de preview se mantiene igual)
         listaAlmacenesDinamica = listOf("Almacen Huasteca", "Vendedor Delisa R1", "Vendedor Delisa R2")
 
 
@@ -127,8 +137,8 @@ fun MovimientosInventarioScreen(
         stockOrigen = mapOf("1" to 50, "2" to 20)
     }
 
-    var origen by remember { mutableStateOf("Selecciona Origen") }
-    var destino by remember { mutableStateOf("Selecciona Destino") }
+    var origen by remember { mutableStateOf(preSelectedOrigen ?: "Selecciona Origen") }
+    var destino by remember { mutableStateOf(preSelectedDestino ?: "Selecciona Destino") }
     var expandedOrigen by remember { mutableStateOf(false) }
     var expandedDestino by remember { mutableStateOf(false) }
 
@@ -210,13 +220,16 @@ fun MovimientosInventarioScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Selector Origen
+                val origenEditable = !isEmergency
                 Card(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { expandedOrigen = true },
+                        .clickable(enabled = origenEditable) { expandedOrigen = true },
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(1.dp)
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (origenEditable) Color.White else Color(0xFFF1F2F6)
+                    ),
+                    elevation = CardDefaults.cardElevation(if (origenEditable) 1.dp else 0.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp),
@@ -227,41 +240,43 @@ fun MovimientosInventarioScreen(
                             text = origen,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (origen == "Selecciona Origen") Color.Gray else Color.Red,
+                            color = if (origen == "Selecciona Origen") Color.Gray else if (!origenEditable) Color.DarkGray else Color.Red,
                             maxLines = 1,
                             modifier = Modifier.weight(1f)
                         )
-                        Icon(Icons.Outlined.ArrowDropDown, null, tint = Color.Gray)
+                        if (origenEditable) Icon(Icons.Outlined.ArrowDropDown, null, tint = Color.Gray)
                     }
-                    DropdownMenu(
-                        expanded = expandedOrigen,
-                        onDismissRequest = { expandedOrigen = false },
-                        modifier = Modifier.background(Color.White)
-                    ) {
-                        opcionesOrigen.forEach { opcion ->
-                            DropdownMenuItem(
-                                text = { Text(opcion, fontWeight = FontWeight.Medium) },
-                                onClick = {
-                                    origen = opcion
-                                    expandedOrigen = false
-                                    destino = "Selecciona Destino"
-                                }
-                            )
+                    if (origenEditable) {
+                        DropdownMenu(
+                            expanded = expandedOrigen,
+                            onDismissRequest = { expandedOrigen = false },
+                            modifier = Modifier.background(Color.White)
+                        ) {
+                            opcionesOrigen.forEach { opcion ->
+                                DropdownMenuItem(
+                                    text = { Text(opcion, fontWeight = FontWeight.Medium) },
+                                    onClick = {
+                                        origen = opcion
+                                        expandedOrigen = false
+                                        destino = "Selecciona Destino"
+                                    }
+                                )
+                            }
                         }
                     }
                 }
 
                 // Selector Destino
-                val destinoHabilitado = origen != "Selecciona Origen"
+                val destinoEditable = !isEmergency && origen != "Selecciona Origen"
                 Card(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable(enabled = destinoHabilitado) { expandedDestino = true },
+                        .clickable(enabled = destinoEditable) { expandedDestino = true },
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (destinoHabilitado) Color.White else Color(0xFFEEEEEE)
+                        containerColor = if (destinoEditable) Color.White else Color(0xFFF1F2F6)
                     ),
-                    elevation = CardDefaults.cardElevation(if (destinoHabilitado) 1.dp else 0.dp)
+                    elevation = CardDefaults.cardElevation(if (destinoEditable) 1.dp else 0.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp),
@@ -272,30 +287,32 @@ fun MovimientosInventarioScreen(
                             text = destino,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (destino == "Selecciona Destino") Color.Gray else Color.Red,
+                            color = if (destino == "Selecciona Destino" || destino == "No asignado") Color.Gray else if (!destinoEditable) Color.DarkGray else Color.Red,
                             maxLines = 1,
                             modifier = Modifier.weight(1f)
                         )
-                        Icon(Icons.Outlined.ArrowDropDown, null, tint = Color.Gray)
+                        if (destinoEditable) Icon(Icons.Outlined.ArrowDropDown, null, tint = Color.Gray)
                     }
-                    val opcionesDestino = when {
-                        origen == "Compra Producto" -> opcionesDestinoCompra
-                        origen != "Selecciona Origen" -> opcionesDestinoAlmacen
-                        else -> emptyList()
-                    }
-                    DropdownMenu(
-                        expanded = expandedDestino,
-                        onDismissRequest = { expandedDestino = false },
-                        modifier = Modifier.background(Color.White)
-                    ) {
-                        opcionesDestino.forEach { opcion ->
-                            DropdownMenuItem(
-                                text = { Text(opcion, fontWeight = FontWeight.Medium) },
-                                onClick = {
-                                    destino = opcion
-                                    expandedDestino = false
-                                }
-                            )
+                    if (destinoEditable) {
+                        val opcionesDestino = when {
+                            origen == "Compra Producto" -> opcionesDestinoCompra
+                            origen != "Selecciona Origen" -> opcionesDestinoAlmacen
+                            else -> emptyList()
+                        }
+                        DropdownMenu(
+                            expanded = expandedDestino,
+                            onDismissRequest = { expandedDestino = false },
+                            modifier = Modifier.background(Color.White)
+                        ) {
+                            opcionesDestino.forEach { opcion ->
+                                DropdownMenuItem(
+                                    text = { Text(opcion, fontWeight = FontWeight.Medium) },
+                                    onClick = {
+                                        destino = opcion
+                                        expandedDestino = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -309,18 +326,30 @@ fun MovimientosInventarioScreen(
                     CircularProgressIndicator(color = Color.Red)
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(productosOrdenados) { producto ->
-                        ItemProductoCarga(
-                            producto = producto,
-                            cantidadActual = cantidades[producto.id] ?: 0,
-                            stockDisponible = stockOrigen[producto.id] ?: 0,
-                            esCompra = origen == "Compra Producto",
-                            onCantidadChange = { cantidades[producto.id] = it }
-                        )
+                val puedeHacerCarga = !(isEmergency && (destino == "No asignado" || destino == "Selecciona Destino"))
+                
+                if (!puedeHacerCarga) {
+                    Box(modifier = Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                            Icon(Icons.Default.ErrorOutline, null, modifier = Modifier.size(64.dp), tint = Color.Gray)
+                            Spacer(Modifier.height(16.dp))
+                            Text("No tienes un almacén o ruta asignada. No puedes realizar cargas de emergencia.", textAlign = TextAlign.Center, color = Color.Gray, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(productosOrdenados) { producto ->
+                            ItemProductoCarga(
+                                producto = producto,
+                                cantidadActual = cantidades[producto.id] ?: 0,
+                                stockDisponible = stockOrigen[producto.id] ?: 0,
+                                esCompra = origen == "Compra Producto" || isEmergency, // En emergencia permitimos cargar sin validar stock de origen ya que no hay señal
+                                onCantidadChange = { cantidades[producto.id] = it }
+                            )
+                        }
                     }
                 }
             }
@@ -328,6 +357,13 @@ fun MovimientosInventarioScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             // PANEL DE ACCIÓN E INFORME TOTAL
+            val total = productosCatalogo.sumOf { (cantidades[it.id] ?: 0) * it.precio }
+            val habilitarBoton = if (isEmergency) {
+                destino != "No asignado" && destino != "Selecciona Destino" && total > 0
+            } else {
+                origen != "Selecciona Origen" && destino != "Selecciona Destino" && total > 0
+            }
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
@@ -335,7 +371,6 @@ fun MovimientosInventarioScreen(
                 elevation = CardDefaults.cardElevation(4.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    val total = productosCatalogo.sumOf { (cantidades[it.id] ?: 0) * it.precio }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -358,25 +393,25 @@ fun MovimientosInventarioScreen(
 
                     Button(
                         onClick = {
-                            if (origen == "Selecciona Origen" || destino == "Selecciona Destino") {
-                                Toast.makeText(context, "Selecciona origen y destino", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            if (productosCatalogo.none { (cantidades[it.id] ?: 0) > 0 }) {
-                                Toast.makeText(context, "Selecciona al menos un producto", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
                             mostrarDialogConfirmacion = true
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                        enabled = habilitarBoton,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isEmergency) Color(0xFF2E7D32) else Color.Red,
+                            disabledContainerColor = Color.LightGray
+                        ),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp)
                     ) {
-                        Icon(Icons.Outlined.Inventory2, null, tint = Color.White)
+                        Icon(if (isEmergency) Icons.Default.CheckCircle else Icons.Outlined.Inventory2, null, tint = Color.White)
                         Spacer(Modifier.width(8.dp))
-                        Text("CREAR ORDEN DE TRANSFERENCIA", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+                        Text(
+                            text = if (isEmergency) "CONFIRMAR CARGA DIRECTA" else "CREAR ORDEN DE TRANSFERENCIA", 
+                            fontSize = 14.sp, 
+                            fontWeight = FontWeight.ExtraBold
+                        )
                     }
                 }
             }
@@ -384,25 +419,32 @@ fun MovimientosInventarioScreen(
 
             if (mostrarDialogConfirmacion) {
                 DialogoConfirmacion(
-                    titulo = "Confirmación",
-                    mensaje = "¿Deseas crear esta orden de transferencia?",
+                    titulo = if (isEmergency) "Carga Directa" else "Confirmación",
+                    mensaje = if (isEmergency) "¿Deseas cargar estos productos directamente a tu inventario?" else "¿Deseas crear esta orden de transferencia?",
                     onConfirmar = {
                         mostrarDialogConfirmacion = false
                         val productosConCantidad = productosCatalogo.filter { (cantidades[it.id] ?: 0) > 0 }
                         if (!isPreview) {
-                            ejecutarCrearOrden(origen, destino, productosConCantidad, cantidades) { docId ->
-                                // 1. Generar e imprimir el PDF (Tu lógica de siempre)
-                                val file = generarPdfMovimientoInventario(context, origen, destino, productosConCantidad, cantidades)
-                                abrirPdfConFileProvider(context, file)
-                                if (impresoraBluetooth != null) {
-                                    imprimirMovimientoInventario58mmCorregida(impresoraBluetooth, context, R.drawable.logo, origen, destino, productosConCantidad, cantidades)
+                            if (isEmergency) {
+                                ejecutarCargaDirecta(origen, destino, productosConCantidad, cantidades) {
+                                    Toast.makeText(context, "Carga aplicada localmente", Toast.LENGTH_LONG).show()
+                                    navController.popBackStack()
                                 }
-                                Toast.makeText(context, "Orden creada: $docId", Toast.LENGTH_LONG).show()
+                            } else {
+                                ejecutarCrearOrden(origen, destino, productosConCantidad, cantidades) { docId ->
+                                    // 1. Generar e imprimir el PDF (Tu lógica de siempre)
+                                    val file = generarPdfMovimientoInventario(context, origen, destino, productosConCantidad, cantidades)
+                                    abrirPdfConFileProvider(context, file)
+                                    if (impresoraBluetooth != null) {
+                                        imprimirMovimientoInventario58mmCorregida(impresoraBluetooth, context, R.drawable.logo, origen, destino, productosConCantidad, cantidades)
+                                    }
+                                    Toast.makeText(context, "Orden creada: $docId", Toast.LENGTH_LONG).show()
 
-                                // 2. 🚀 LA SOLUCIÓN: Limpiamos la pantalla aquí adentro
-                                cantidades.clear()
-                                origen = "Selecciona Origen"
-                                destino = "Selecciona Destino"
+                                    // 2. 🚀 LA SOLUCIÓN: Limpiamos la pantalla aquí adentro
+                                    cantidades.clear()
+                                    origen = "Selecciona Origen"
+                                    destino = "Selecciona Destino"
+                                }
                             }
                         }
                     },

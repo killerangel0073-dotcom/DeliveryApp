@@ -117,8 +117,8 @@ dependencies {
     implementation("com.google.maps.android:maps-compose:6.1.0")
     implementation("com.google.android.gms:play-services-location:21.0.1")
 
-    // 🔥 Gemini Developer API (Versión actualizada para modelos 2.0+)
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+    // 🔥 Vertex AI para Firebase
+    implementation("com.google.firebase:firebase-vertexai")
 
     // Room
     implementation("androidx.room:room-runtime:2.8.4")

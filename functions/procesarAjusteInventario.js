@@ -3,19 +3,16 @@ const admin = require('firebase-admin');
 const db = admin.firestore();
 
 /**
- * Cloud Function para procesar ajustes de inventario (Cambios y Devoluciones)
+ * Cloud Function para procesar ajustes de inventario (Cambios, Devoluciones y Cargas Manuales)
  * Trigger: onCreate en ajustes_inventario/{ajusteId}
  */
 exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajusteId}', async (event) => {
     const data = event.data.data();
     const ajusteId = event.params.ajusteId;
 
-    if (!data) {
-        console.error('⚠️ No hay datos en el evento:', ajusteId);
-        return null;
-    }
+    if (!data) return null;
 
-    const { productoId, cantidad, tipo, almacenNombre, vendedorId, nombreProducto } = data;
+    const { productoId, cantidad, tipo, almacenNombre, vendedorId, nombreProducto, referenciaId } = data;
 
     if (!productoId || !cantidad || !tipo || !almacenNombre) {
       console.error('⚠️ Datos incompletos en ajuste:', ajusteId);
@@ -25,22 +22,42 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
     const stockId = `${productoId}_${almacenNombre}`;
     const stockRef = db.collection('inventarioStock').doc(stockId);
     const danadoRef = db.collection('inventarioDanado').doc(stockId);
-    const movRef = db.collection('movimientosStock').doc(ajusteId); // 🛡️ Idempotencia: usamos el ID del ajuste
+
+    // 🛡️ UNIFICACIÓN: Si es una carga manual, creamos el registro de "Orden" para el historial oficial
+    if (tipo === 'CARGA_INVENTARIO' && referenciaId && referenciaId.startsWith('DIRECT_LOAD')) {
+        try {
+            const ordenRef = db.collection('ordenesTransferencia').doc(referenciaId);
+            const ordenSnap = await ordenRef.get();
+
+            if (!ordenSnap.exists) {
+                await ordenRef.set({
+                    tipo: "TRANSFERENCIA_VENDEDOR",
+                    origen: "CARGA MANUAL (OFFLINE)",
+                    destino: almacenNombre,
+                    estado: "ACEPTADA",
+                    vendedorId: vendedorId,
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    productos: [{
+                        productoId: productoId,
+                        nombre: nombreProducto || "Producto",
+                        cantidad: cantidad
+                    }],
+                    esEmergencia: true
+                });
+                console.log(`✅ Registro de orden creado para carga manual: ${referenciaId}`);
+            }
+        } catch (e) {
+            console.error("Error creando orden espejo:", e.message);
+        }
+    }
 
     try {
       await db.runTransaction(async (transaction) => {
         const stockSnap = await transaction.get(stockRef);
         const danadoSnap = await transaction.get(danadoRef);
 
-        let cantidadActual = 0;
-        if (stockSnap.exists) {
-          cantidadActual = stockSnap.data().cantidad || 0;
-        }
-
-        let cantidadDanadoActual = 0;
-        if (danadoSnap.exists) {
-          cantidadDanadoActual = danadoSnap.data().cantidad || 0;
-        }
+        let cantidadActual = stockSnap.exists ? (stockSnap.data().cantidad || 0) : 0;
+        let cantidadDanadoActual = danadoSnap.exists ? (danadoSnap.data().cantidad || 0) : 0;
 
         let nuevaCantidad = cantidadActual;
         let nuevaCantidadDanado = cantidadDanadoActual;
@@ -48,17 +65,14 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
         let actualizaStockDanado = false;
 
         switch (tipo) {
+          case 'CARGA_INVENTARIO':
           case 'ENTRADA_CAMBIO_BUENO':
             nuevaCantidad = cantidadActual + cantidad;
             actualizaStockBueno = true;
             break;
           case 'SALIDA_CAMBIO_BUENO':
           case 'SALIDA_REPOSICION_BUENO':
-            nuevaCantidad = cantidadActual - cantidad;
-            // 🛡️ Validación de Stock Insuficiente
-            if (nuevaCantidad < 0) {
-              throw new Error(`Stock insuficiente en ${almacenNombre} para ${nombreProducto || productoId}. Disponible: ${cantidadActual}`);
-            }
+            nuevaCantidad = Math.max(0, cantidadActual - cantidad);
             actualizaStockBueno = true;
             break;
           case 'ENTRADA_MALO_DEVOLUCION':
@@ -67,7 +81,6 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
             break;
         }
 
-        // 1. Actualizar Stock Bueno (si aplica)
         if (actualizaStockBueno) {
           transaction.set(stockRef, {
             cantidad: nuevaCantidad,
@@ -78,7 +91,6 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
           }, { merge: true });
         }
 
-        // 2. Actualizar Stock Dañado (si aplica)
         if (actualizaStockDanado) {
           transaction.set(danadoRef, {
             cantidad: nuevaCantidadDanado,
@@ -88,24 +100,11 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
             productoNombre: nombreProducto || 'Producto'
           }, { merge: true });
         }
-
-        // 3. Registrar Movimiento General (Historial)
-        transaction.set(movRef, {
-          tipoMovimiento: tipo,
-          productoId: productoId,
-          productoNombre: nombreProducto || 'Producto',
-          cantidad: cantidad,
-          almacenNombre: almacenNombre,
-          vendedorId: vendedorId,
-          timestamp: admin.firestore.FieldValue.serverTimestamp(),
-          referenciaId: data.referenciaId || ajusteId,
-          idempotenciaKey: ajusteId
-        });
       });
 
-      console.log(`✅ Ajuste procesado exitosamente: ${ajusteId} (${tipo})`);
+      console.log(`✅ Inventario actualizado para: ${stockId} (${tipo})`);
     } catch (error) {
-      console.error(`❌ Error procesando ajuste ${ajusteId}:`, error.message);
+      console.error(`❌ Error en transacción:`, error.message);
     }
     return null;
   });

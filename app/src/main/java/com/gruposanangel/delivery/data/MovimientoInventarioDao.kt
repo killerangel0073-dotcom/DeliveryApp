@@ -15,8 +15,14 @@ interface MovimientoInventarioDao {
     @Query("UPDATE movimientos_inventario SET sincronizado = 1 WHERE id = :id")
     suspend fun marcarComoSincronizado(id: String)
 
+    @Query("SELECT * FROM movimientos_inventario WHERE vendedorId = :vendedorId AND timestamp >= :inicio ORDER BY timestamp DESC")
+    fun obtenerMovimientosDesdeFlow(vendedorId: String, inicio: Long): Flow<List<MovimientoInventarioEntity>>
+
     @Query("SELECT * FROM movimientos_inventario WHERE vendedorId = :vendedorId AND timestamp >= :inicio")
     suspend fun obtenerMovimientosDesde(vendedorId: String, inicio: Long): List<MovimientoInventarioEntity>
+
+    @Query("SELECT * FROM movimientos_inventario WHERE timestamp >= :inicio")
+    suspend fun obtenerTodosRecientes(inicio: Long): List<MovimientoInventarioEntity>
 
     @Query("SELECT * FROM movimientos_inventario WHERE referenciaId = :referenciaId")
     fun obtenerMovimientosPorReferencia(referenciaId: String): Flow<List<MovimientoInventarioEntity>>

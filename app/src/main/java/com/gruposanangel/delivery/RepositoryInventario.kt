@@ -7,6 +7,7 @@ import com.gruposanangel.delivery.model.Plantilla_Producto
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
@@ -70,8 +71,7 @@ class RepositoryInventario(
 
     private suspend fun obtenerImpactoInventarioPendiente(): Map<String, Int> {
         val mapaImpacto = mutableMapOf<String, Int>()
-        val almacenActual = "" // Podríamos obtenerlo dinámicamente si fuera necesario
-
+        
         // 1. Impacto de Ventas Pendientes (Siempre restan)
         val ventasPendientes = ventaDao.obtenerVentasPendientes()
         for (v in ventasPendientes) {
@@ -81,12 +81,21 @@ class RepositoryInventario(
             }
         }
 
-        // 2. Impacto de Ajustes/Cambios Pendientes (Pueden sumar o restar)
+        // 2. Impacto de Ajustes (NUEVO BLINDAJE ROBUSTO)
+        // Tomamos todos los pendientes (sin importar el tiempo) 
+        // Y los sincronizados en los últimos 20 minutos (tiempo de sobra para Cloud Functions)
+        val hace20Min = System.currentTimeMillis() - (20 * 60 * 1000)
         val ajustesPendientes = movimientoInventarioDao?.obtenerMovimientosPendientes() ?: emptyList()
-        for (a in ajustesPendientes) {
-            // Usamos el almacenNombre que ya viene en la entidad (sin consultar red)
+        val ajustesRecientesSincronizados = movimientoInventarioDao?.obtenerTodosRecientes(hace20Min)
+            ?.filter { it.sincronizado } ?: emptyList()
+
+        val movimientosAuditoria = (ajustesPendientes + ajustesRecientesSincronizados).distinctBy { it.id }
+        
+        for (a in movimientosAuditoria) {
             val almacen = a.almacenNombre ?: ""
-            val idPK = "${a.productoId}_$almacen"
+            val idPK = if (almacen.isNotEmpty() && !a.productoId.contains("_")) 
+                "${a.productoId}_$almacen" 
+            else a.productoId
 
             when (a.tipo) {
                 "ENTRADA_CAMBIO_BUENO", "CARGA_INVENTARIO" -> {
@@ -331,6 +340,10 @@ class RepositoryInventario(
             Log.e(TAG, "Error subiendo ajuste: ${e.message}")
             throw e
         }
+    }
+
+    fun obtenerMovimientosDesdeFlow(vendedorId: String, inicio: Long): Flow<List<MovimientoInventarioEntity>> {
+        return movimientoInventarioDao?.obtenerMovimientosDesdeFlow(vendedorId, inicio) ?: flowOf(emptyList())
     }
 
     suspend fun obtenerMovimientosDesde(vendedorId: String, inicio: Long): List<MovimientoInventarioEntity> {

@@ -1,5 +1,6 @@
 package com.gruposanangel.delivery.ui.screens
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -84,7 +85,7 @@ class MovimientosViewModel(
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
-                val uid = usuarioRepo.obtenerUsuarioActual()?.uid ?: ""
+                val uid = usuarioRepo.obtenerUsuarioActual()?.uid ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
                 val listaProductos = productosSeleccionados.map { p ->
                     mapOf(
                         "productoId" to p.id,
@@ -130,6 +131,59 @@ class MovimientosViewModel(
                 _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true) }
                 onSuccess(docId)
             } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    fun confirmarCargaDirecta(
+        origen: String,
+        destino: String,
+        productosSeleccionados: List<Plantilla_Producto>,
+        cantidades: Map<String, Int>,
+        onSuccess: () -> Unit
+    ) {
+        _uiState.update { it.copy(isLoading = true) }
+        viewModelScope.launch {
+            try {
+                // Obtenemos el UID de forma robusta para asegurar sincronización con el historial
+                val usuarioRoom = usuarioRepo.obtenerUsuarioActual()
+                val uidActual = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+                val uid = if (usuarioRoom?.uid?.isNotEmpty() == true) usuarioRoom.uid else uidActual
+                
+                val nombreAlmacen = usuarioRoom?.ultimoAlmacenNombre ?: destino
+                val folioEmergencia = "DIRECT_LOAD_${System.currentTimeMillis()}"
+                
+                Log.d("MOV_VM", "Iniciando Carga Directa. Vendedor: $uid, Almacen: $nombreAlmacen, Folio: $folioEmergencia")
+
+                productosSeleccionados.forEach { p ->
+                    val cant = cantidades[p.id] ?: 0
+                    if (cant > 0) {
+                        // Limpiar el ID si viene con el nombre del almacén para evitar duplicados en la base de datos de movimientos
+                        val baseId = if (p.id.contains("_")) p.id.split("_")[0] else p.id
+                        
+                        val movimiento = com.gruposanangel.delivery.data.MovimientoInventarioEntity(
+                            id = java.util.UUID.randomUUID().toString(),
+                            productoId = baseId,
+                            nombreProducto = p.nombre,
+                            cantidad = cant,
+                            tipo = "CARGA_INVENTARIO",
+                            vendedorId = uid,
+                            almacenNombre = nombreAlmacen,
+                            clienteId = null,
+                            referenciaId = folioEmergencia,
+                            timestamp = System.currentTimeMillis(),
+                            sincronizado = false
+                        )
+                        // Persistir en Room y actualizar stock local de inmediato
+                        inventarioRepo.registrarMovimientoCarga(movimiento, p)
+                    }
+                }
+
+                _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true) }
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e("MOV_VM", "Error en confirmarCargaDirecta", e)
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }

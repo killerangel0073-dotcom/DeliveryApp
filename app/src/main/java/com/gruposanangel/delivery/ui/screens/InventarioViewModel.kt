@@ -84,9 +84,10 @@ class InventarioViewModel(
         // 🔥 OFFLINE-FIRST: Observar productos desde Room de forma reactiva
         inventarioRepo.obtenerProductosLocal()
             .onEach { entities ->
-                if (!_uiState.value.esVistaGlobal && _uiState.value.almacenSeleccionado == _uiState.value.rutaAsignada) {
+                val almacenActual = _uiState.value.almacenSeleccionado
+                if (!_uiState.value.esVistaGlobal && !almacenActual.isNullOrEmpty()) {
                     val modelos = entities
-                        .filter { it.cantidadDisponible > 0 } 
+                        .filter { it.cantidadDisponible > 0 && it.id.contains(almacenActual) }
                         .map { entity ->
                             Plantilla_Producto(
                                 id = entity.id,
