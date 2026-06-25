@@ -14,6 +14,10 @@ data class UsuarioEntity(
 
     // NUEVOS CAMPOS que traemos de Firestore
     val activo: Boolean? = null,
+    val status: String = "ACTIVO",           // "ACTIVO", "SUSPENDIDO", "BAJA"
+    val fechaBaja: Long? = null,             // Timestamp de la baja
+    val motivoBaja: String? = null,          // Razón de la baja
+
     val createdTime: Long? = null,           // epoch millis
     val credencialElector: String? = null,
     val jefeDirectoNombre: String? = null, // <-- NUEVO

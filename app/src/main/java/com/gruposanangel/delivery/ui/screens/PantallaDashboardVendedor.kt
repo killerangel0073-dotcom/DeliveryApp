@@ -96,7 +96,7 @@ fun PantallaDashboardVendedor(
     val context = LocalContext.current
     val isPreview = LocalInspectionMode.current
     val db = AppDatabase.getDatabase(context)
-    val ventaRepository = VentaRepository(db.VentaDao())
+    val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
     val firebaseDataSource = FirebaseDataSource()
     val repositoryUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
     val userId = if (!isPreview) FirebaseAuth.getInstance().currentUser?.uid ?: "" else "preview_user"

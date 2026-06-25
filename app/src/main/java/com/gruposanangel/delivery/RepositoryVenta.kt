@@ -21,7 +21,10 @@ import java.util.Calendar
 import java.util.Date
 import java.util.UUID
 
-class VentaRepository(private val ventaDao: VentaDao) {
+class VentaRepository(
+    private val ventaDao: VentaDao,
+    private val productoDao: com.gruposanangel.delivery.data.ProductoDao
+) {
 
     suspend fun obtenerVentasPorPeriodo(vendedorId: String, inicio: Long, fin: Long): List<VentaEntity> =
         withContext(Dispatchers.IO) {
@@ -355,7 +358,7 @@ class VentaRepository(private val ventaDao: VentaDao) {
         clienteNombre: String,
         clienteImagenUrl: String?,
         productos: List<Plantilla_Producto>,
-        total: Double,
+        total: Double, // Se ignora para el cálculo, se recalcula por seguridad
         metodoPago: String,
         vendedorId: String,
         vendedorNombre: String? = null,
@@ -372,12 +375,32 @@ class VentaRepository(private val ventaDao: VentaDao) {
         val horaRealVerificada = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
         val alertaTiempo = Math.abs(horaRealVerificada - horaDispositivo) > 300_000 // Discrepancia > 5 min
 
+        // 🛡️ BLINDAJE FINANCIERO: Mapeo de detalles con recuperación de PRECIO MAESTRO desde DB Local
+        val detalles = productos.map { p ->
+            val productoDB = productoDao.getProductoById(p.id)
+            val precioReal = productoDB?.precio ?: 0.0 // 🛡️ Si no existe, precio 0 (Error de seguridad)
+            
+            val idLimpio = p.id.split("_")[0] 
+            
+            VentaDetalleEntity(
+                ventaId = idLocal,
+                productoId = idLimpio,
+                stockId = p.id,
+                nombre = productoDB?.nombre ?: p.nombre,
+                precio = precioReal, // 🛡️ Asignación exclusiva desde DB Local (Inmutable)
+                cantidad = p.cantidad
+            )
+        }
+
+        // Recalcular total real basado en precios de DB
+        val totalReal = detalles.sumOf { it.precio * it.cantidad }
+
         val venta = VentaEntity(
             id = idLocal,
             clienteId = clienteId,
             clienteNombre = clienteNombre,
             clienteImagenUrl = clienteImagenUrl,
-            total = total,
+            total = totalReal, // 🛡️ Total blindado
             metodoPago = metodoPago,
             vendedorId = vendedorId,
             vendedorNombre = vendedorNombre,
@@ -392,20 +415,6 @@ class VentaRepository(private val ventaDao: VentaDao) {
             fotoEvidenciaVisita = fotoEvidencia,
             sincronizado = false
         )
-
-        val detalles = productos.map { producto ->
-            // 🔥 Aseguramos ID limpio para Firestore
-            val idLimpio = producto.id.split("_")[0] 
-            
-            VentaDetalleEntity(
-                ventaId = idLocal,
-                productoId = idLimpio,
-                stockId = producto.id, // Guardamos el original para referencia local
-                nombre = producto.nombre,
-                precio = producto.precio,
-                cantidad = producto.cantidad
-            )
-        }
 
         ventaDao.insertarVentaYActualizarStock(venta, detalles)
         idLocal

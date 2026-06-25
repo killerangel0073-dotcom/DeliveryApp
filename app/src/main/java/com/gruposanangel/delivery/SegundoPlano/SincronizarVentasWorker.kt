@@ -20,7 +20,7 @@ class SincronizarVentasWorker(
 
     override suspend fun doWork(): Result {
         val db = AppDatabase.getDatabase(applicationContext)
-        val ventaRepo = VentaRepository(db.VentaDao())
+        val ventaRepo = VentaRepository(db.VentaDao(), db.productoDao())
         val firebaseDataSource = FirebaseDataSource()
         val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
         val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())

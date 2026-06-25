@@ -38,13 +38,14 @@ class WatchdogReceiver : BroadcastReceiver() {
             val db = AppDatabase.getDatabase(context)
             val usuario = db.usuarioDao().obtenerUsuarioActual()
             
-            if (usuario?.puestoTrabajo == "Vendedor de Ruta") {
+            val puesto = usuario?.puestoTrabajo?.trim() ?: ""
+            if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") {
                 val serviceIntent = Intent(context, LocationService::class.java).apply {
                     action = LocationService.ACTION_START
                 }
                 ContextCompat.startForegroundService(context, serviceIntent)
             } else {
-                Log.d("Watchdog", "🐶 Ignorado: Usuario no es Vendedor de Ruta")
+                Log.d("Watchdog", "🐶 Ignorado: Usuario no requiere rastreo activo ($puesto)")
             }
         }
 

@@ -88,7 +88,8 @@ class MapaViewModel : ViewModel() {
     private fun escucharUbicacionesVendedores(uid: String, puesto: String, miRuta: String?) {
         liveTrackingListener?.let { rtdb.removeEventListener(it) }
 
-        val esAdmin = puesto != "Vendedor de Ruta"
+        val p = puesto.trim()
+        val esAdmin = p == "CEO" || p == "Gerente General" || p == "Supervisor" || p == "Administración"
         val query = if (esAdmin) rtdb.child("vendedores_en_vivo") else rtdb.child("vendedores_en_vivo").child(uid)
 
         Log.d("MapaVM", "📡 RTDB: Iniciando escucha para $puesto (Admin: $esAdmin)")
@@ -100,7 +101,7 @@ class MapaViewModel : ViewModel() {
                         // --- LÓGICA ADMIN: CRUZAR DATOS ---
                         val vendedoresMaestros = try {
                             db.collection("users")
-                                .whereEqualTo("puestoTrabajo", "Vendedor de Ruta")
+                                .whereIn("puestoTrabajo", listOf("Vendedor de Ruta", "Suplente de Ruta"))
                                 .whereEqualTo("activo", true)
                                 .get().await().documents.mapNotNull { doc ->
                                     val rRef = doc.getDocumentReference("rutaAsignada")

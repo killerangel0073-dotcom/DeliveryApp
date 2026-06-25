@@ -107,7 +107,7 @@ fun Pantalla_Dashboard_Admin(
 ) {
     val context = LocalContext.current
     val db = AppDatabase.getDatabase(context)
-    val ventaRepository = VentaRepository(db.VentaDao())
+    val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
 
     val viewModel: DashboardAdminViewModel = viewModel(
         factory = DashboardAdminViewModelFactory(ventaRepository)

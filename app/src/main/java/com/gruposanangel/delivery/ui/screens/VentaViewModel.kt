@@ -67,8 +67,9 @@ class VentaViewModel(
     val ventasHoyFlow: StateFlow<List<VentaEntity>> = flow {
         val usuario = repositoryUsuario.obtenerUsuarioActual()
         val uid = usuario?.uid ?: ""
+        val puesto = usuario?.puestoTrabajo?.trim() ?: ""
         // 🛡️ Si es admin, idParaQuery es "" para ver todo
-        val idParaQuery = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
+        val idParaQuery = if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") uid else ""
         
         // 🔥 AUDITORÍA DE TIEMPO: Límites basados en Hora Real
         val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
@@ -142,7 +143,8 @@ class VentaViewModel(
         viewModelScope.launch {
             val usuario = repositoryUsuario.obtenerUsuarioActual() ?: return@launch
             val uid = usuario.uid
-            val esVendedor = usuario.puestoTrabajo == "Vendedor de Ruta"
+            val puesto = usuario.puestoTrabajo?.trim() ?: ""
+            val esVendedor = puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta"
             val idParaSync = if (esVendedor) uid else ""
 
             val cal = Calendar.getInstance()
@@ -246,7 +248,8 @@ class VentaViewModel(
             try {
                 val usuario = repositoryUsuario.obtenerUsuarioActual()
                 val uid = usuario?.uid ?: ""
-                val idParaQuery = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
+                val puesto = usuario?.puestoTrabajo?.trim() ?: ""
+                val idParaQuery = if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") uid else ""
                 
                 val ventas = ventaRepository.obtenerVentasPorPeriodo(idParaQuery, fechaInicio.time, fechaFin.time)
                 _ventasPeriodo.value = ventas
@@ -261,7 +264,8 @@ class VentaViewModel(
             try {
                 val usuario = repositoryUsuario.obtenerUsuarioActual()
                 val uid = usuario?.uid ?: ""
-                val idParaSync = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
+                val puesto = usuario?.puestoTrabajo?.trim() ?: ""
+                val idParaSync = if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") uid else ""
                 
                 // Sincroniza todas las ventas (Maestro o individuales)
                 ventaRepository.sincronizarVentasPeriodo(idParaSync)

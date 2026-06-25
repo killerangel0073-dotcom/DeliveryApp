@@ -23,31 +23,33 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
     const stockRef = db.collection('inventarioStock').doc(stockId);
     const danadoRef = db.collection('inventarioDanado').doc(stockId);
 
-    // 🛡️ UNIFICACIÓN: Si es una carga manual, creamos el registro de "Orden" para el historial oficial
+    // 🛡️ UNIFICACIÓN: Si es una carga manual, creamos o actualizamos el registro de "Orden" para el historial oficial
     if (tipo === 'CARGA_INVENTARIO' && referenciaId && referenciaId.startsWith('DIRECT_LOAD')) {
         try {
             const ordenRef = db.collection('ordenesTransferencia').doc(referenciaId);
-            const ordenSnap = await ordenRef.get();
+            const productoData = {
+                productoId: productoId,
+                nombre: nombreProducto || "Producto",
+                cantidad: cantidad
+            };
 
-            if (!ordenSnap.exists) {
-                await ordenRef.set({
-                    tipo: "TRANSFERENCIA_VENDEDOR",
-                    origen: "CARGA MANUAL (OFFLINE)",
-                    destino: almacenNombre,
-                    estado: "ACEPTADA",
-                    vendedorId: vendedorId,
-                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    productos: [{
-                        productoId: productoId,
-                        nombre: nombreProducto || "Producto",
-                        cantidad: cantidad
-                    }],
-                    esEmergencia: true
-                });
-                console.log(`✅ Registro de orden creado para carga manual: ${referenciaId}`);
-            }
+            // Usamos .set con { merge: true } y FieldValue.arrayUnion
+            // Esto permite que si la carga manual tiene 10 productos, se vayan sumando todos
+            // al mismo documento de historial en lugar de solo registrar el primero.
+            await ordenRef.set({
+                tipo: "TRANSFERENCIA_VENDEDOR",
+                origen: "CARGA MANUAL (OFFLINE)",
+                destino: almacenNombre,
+                estado: "ACEPTADA",
+                vendedorId: vendedorId,
+                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                productos: admin.firestore.FieldValue.arrayUnion(productoData),
+                esEmergencia: true
+            }, { merge: true });
+
+            console.log(`✅ Registro de orden actualizado/creado para carga manual: ${referenciaId}`);
         } catch (e) {
-            console.error("Error creando orden espejo:", e.message);
+            console.error("Error gestionando orden espejo manual:", e.message);
         }
     }
 

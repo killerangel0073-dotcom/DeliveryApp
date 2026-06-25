@@ -61,7 +61,8 @@ class VentasRoomViewModel(private val ventaRepository: VentaRepository, context:
         viewModelScope.launch {
             val usuario = usuarioDao.obtenerUsuarioActual()
             val uid = usuario?.uid ?: ""
-            val idParaQuery = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
+            val puesto = usuario?.puestoTrabajo?.trim() ?: ""
+            val idParaQuery = if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") uid else ""
             
             _uiState.value = _uiState.value.copy(isLoading = true)
             

@@ -204,7 +204,7 @@ fun Navegador(
             val db = AppDatabase.getDatabase(context)
             val firebaseDataSource = FirebaseDataSource()
             val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
-            val ventaRepo = VentaRepository(db.VentaDao())
+            val ventaRepo = VentaRepository(db.VentaDao(), db.productoDao())
             val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
             val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
             
@@ -228,7 +228,7 @@ fun Navegador(
             val db = AppDatabase.getDatabase(context)
             val firebaseDataSource = FirebaseDataSource()
             val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
-            val ventaRepo = VentaRepository(db.VentaDao())
+            val ventaRepo = VentaRepository(db.VentaDao(), db.productoDao())
             val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
             val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
@@ -248,7 +248,7 @@ fun Navegador(
 
         composable("ventas_room") {
             val db = AppDatabase.getDatabase(context)
-            val ventaRepository = VentaRepository(db.VentaDao())
+            val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
 
             VentasRoomScreen(
                 context = context,
@@ -263,7 +263,7 @@ fun Navegador(
         ) { backStackEntry ->
             val ticketId = backStackEntry.arguments?.getString("ticketId") ?: ""
             val db = AppDatabase.getDatabase(context)
-            val ventaRepository = VentaRepository(db.VentaDao())
+            val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
 
             DetalleTicketScreen(
                 navController = navController,
@@ -305,7 +305,7 @@ fun Navegador(
             val viewModel: VentaViewModel = viewModel(
                 factory = VentaViewModelFactory(
                     repositoryInventario = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao()),
-                    ventaRepository = VentaRepository(db.VentaDao()),
+                    ventaRepository = VentaRepository(db.VentaDao(), db.productoDao()),
                     repositoryUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
                 )
             )

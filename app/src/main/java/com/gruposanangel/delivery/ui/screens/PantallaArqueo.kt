@@ -62,7 +62,7 @@ fun PantallaArqueo(navController: NavController) {
     val firebaseDataSource = FirebaseDataSource()
     val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
     val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
-    val ventaRepo = com.gruposanangel.delivery.VentaRepository(db.VentaDao())
+    val ventaRepo = com.gruposanangel.delivery.VentaRepository(db.VentaDao(), db.productoDao())
     val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
     val viewModel: ArqueoViewModel = viewModel(

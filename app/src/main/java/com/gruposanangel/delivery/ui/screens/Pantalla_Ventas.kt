@@ -88,8 +88,8 @@ fun PantallaVentas(
     val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
     val ventaViewModel: VentaViewModel = viewModel(
         factory = VentaViewModelFactory(
-            inventarioRepo ?: RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao()), 
-            VentaRepository(db.VentaDao()), 
+            inventarioRepo ?: RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao()), 
+            VentaRepository(db.VentaDao(), db.productoDao()),
             repoUsuario
         )
     )

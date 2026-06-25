@@ -29,6 +29,36 @@ class FirebaseDataSource {
         auth.signOut()
     }
 
+    /**
+     * Realiza un Soft Delete (Baja Lógica) de un usuario en Firestore.
+     */
+    suspend fun desactivarUsuario(uid: String, motivo: String, status: String = "BAJA") {
+        val updates = mapOf(
+            "activo" to false,
+            "status" to status,
+            "fechaBaja" to com.google.firebase.Timestamp.now(),
+            "motivoBaja" to motivo
+        )
+        firestore.collection("users").document(uid).update(updates).await()
+    }
+
+    suspend fun obtenerUsuariosPorStatus(status: String): List<UsuarioEntity> {
+        val snapshot = firestore.collection("users")
+            .whereEqualTo("status", status)
+            .get()
+            .await()
+        
+        return snapshot.documents.map { doc ->
+            UsuarioEntity(
+                uid = doc.id,
+                nombre = doc.getString("nombre") ?: "",
+                status = doc.getString("status") ?: "ACTIVO",
+                activo = doc.getBoolean("activo") ?: true
+                // Otros campos se pueden mapear aquí o dejar que syncUsuario lo haga
+            )
+        }
+    }
+
     suspend fun obtenerProductosCatalog(): List<Map<String, Any>> {
         val snapshot = firestore.collection("producto").get().await()
         return snapshot.documents.mapNotNull { it.data?.plus("id" to it.id) }
@@ -165,7 +195,7 @@ class FirebaseDataSource {
 
     suspend fun obtenerTokensDirectivos(): List<String> {
         return try {
-            val puestos = listOf("CEO1.1", "Gerente General")
+            val puestos = listOf("CEO", "Gerente General")
             val tokens = mutableListOf<String>()
             
             for (puesto in puestos) {

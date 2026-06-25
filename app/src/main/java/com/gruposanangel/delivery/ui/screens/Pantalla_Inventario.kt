@@ -252,31 +252,77 @@ fun ResumenInventario(
     titulo: String = "MI INVENTARIO"
 ) {
     val nf = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.Red), elevation = CardDefaults.cardElevation(4.dp), modifier = Modifier.fillMaxWidth()) {
+    Card(
+        shape = RoundedCornerShape(24.dp), 
+        colors = CardDefaults.cardColors(containerColor = Color.Red), 
+        elevation = CardDefaults.cardElevation(4.dp), 
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Red, Color(0xFFB71C1C)))).padding(16.dp)) {
             Column {
                 Text(titulo.uppercase(), color = Color.White.copy(0.8f), fontSize = 10.sp, fontWeight = FontWeight.Black)
-                Spacer(Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text("TOTAL PIEZAS", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text("$totalProductos", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(12.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(), 
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 1. TOTAL PIEZAS (Izquierda - Ocupa el 50% del espacio sobrante)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("TOTAL PIEZAS", color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("$totalProductos", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
                     }
-                    Box {
-                        FloatingActionButton(onClick = onNotificacionClick, containerColor = Color.White, contentColor = Color.Red, shape = CircleShape, modifier = Modifier.size(44.dp)) {
-                            Icon(Icons.Default.Notifications, null, modifier = Modifier.size(22.dp))
+
+                    // 2. BOTÓN NOTIFICACIONES (Centro Absoluto)
+                    Box(
+                        modifier = Modifier.wrapContentWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        FloatingActionButton(
+                            onClick = onNotificacionClick, 
+                            containerColor = Color.White, 
+                            contentColor = Color.Red, 
+                            shape = CircleShape, 
+                            modifier = Modifier.size(46.dp),
+                            elevation = FloatingActionButtonDefaults.elevation(4.dp)
+                        ) {
+                            Icon(Icons.Default.Notifications, null, modifier = Modifier.size(24.dp))
                         }
                         if (notificacionesCount > 0) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp)) {
-                                Box(modifier = Modifier.size(18.dp).background(Color(0xFF00AAFF), CircleShape), contentAlignment = Alignment.Center) {
-                                    Text(notificacionesCount.toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                            Surface(
+                                color = Color(0xFF00AAFF),
+                                shape = CircleShape,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 2.dp, y = (-2).dp)
+                                    .size(20.dp),
+                                border = BorderStroke(2.dp, Color.Red)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = notificacionesCount.toString(), 
+                                        color = Color.White, 
+                                        fontSize = 10.sp, 
+                                        fontWeight = FontWeight.Black
+                                    )
                                 }
                             }
                         }
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("VALOR TOTAL", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text(nf.format(valorTotal), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+
+                    // 3. VALOR TOTAL (Derecha - Ocupa el 50% del espacio sobrante)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        Text("VALOR TOTAL", color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = nf.format(valorTotal), 
+                            color = Color.White, 
+                            fontSize = 18.sp, 
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1
+                        )
                     }
                 }
             }

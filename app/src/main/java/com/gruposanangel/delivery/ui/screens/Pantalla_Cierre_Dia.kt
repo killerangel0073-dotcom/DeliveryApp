@@ -30,11 +30,15 @@ import androidx.navigation.NavController
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.VentaRepository
+import com.gruposanangel.delivery.data.FirebaseDataSource
+import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.data.RepositoryInventario
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
 import java.io.FileOutputStream
 import com.google.zxing.BarcodeFormat
@@ -63,7 +67,7 @@ fun PantallaCierreDia(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = AppDatabase.getDatabase(context)
-    val ventaRepo = VentaRepository(db.VentaDao())
+    val ventaRepo = VentaRepository(db.VentaDao(), db.productoDao())
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
     
     val efectivoAEntregar = uiState.ventaDia 
@@ -79,6 +83,8 @@ fun PantallaCierreDia(
     )}
     val totalContado = cashState.entries.sumOf { it.key * it.value }.toDouble()
     val diferencia = totalContado - efectivoAEntregar
+
+    var showConfirmLiquidation by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -185,7 +191,20 @@ fun PantallaCierreDia(
                 ) {
                     Icon(Icons.Rounded.Description, null)
                     Spacer(Modifier.width(12.dp))
-                    Text("GENERAR REPORTE", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                    Text("GENERAR REPORTE PDF", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                }
+
+                if (totalContado > 0) {
+                    Button(
+                        onClick = { showConfirmLiquidation = true },
+                        modifier = Modifier.fillMaxWidth().height(64.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                    ) {
+                        Icon(Icons.Rounded.CloudUpload, null)
+                        Spacer(Modifier.width(12.dp))
+                        Text("FINALIZAR JORNADA Y LIQUIDAR", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                    }
                 }
 
                 OutlinedButton(
@@ -375,6 +394,64 @@ fun PantallaCierreDia(
                     }
                 }
             }
+        }
+        // --- DIÁLOGO DE CONFIRMACIÓN DE LIQUIDACIÓN ---
+        if (showConfirmLiquidation) {
+            val dbV = AppDatabase.getDatabase(context)
+            val firebaseDataSource = FirebaseDataSource()
+            val viewModelDashboard: DashboardVendedorViewModel = viewModel(
+                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = 
+                        DashboardVendedorViewModel(
+                            VentaRepository(dbV.VentaDao(), dbV.productoDao()), 
+                            RepositoryUsuario(firebaseDataSource, dbV.usuarioDao()), 
+                            RepositoryInventario(firebaseDataSource, dbV.productoDao(), dbV.VentaDao(), dbV.movimientoInventarioDao()),
+                            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+                        ) as T
+                }
+            )
+
+            AlertDialog(
+                onDismissRequest = { showConfirmLiquidation = false },
+                title = { Text("Confirmar Liquidación", fontWeight = FontWeight.Black) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Se enviará el reporte de caja a la administración y se cerrará tu jornada.")
+                        Divider()
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Efectivo Contado:")
+                            Text(formatoMoneda.format(totalContado), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Diferencia:")
+                            Text(formatoMoneda.format(diferencia), fontWeight = FontWeight.Bold, color = if (Math.abs(diferencia) < 1) Color(0xFF4CAF50) else Color.Red)
+                        }
+                        if (uiState.isLoading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Color.Red)
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModelDashboard.finalizarJornadaYLiquidar(
+                                ventaTotal = efectivoAEntregar,
+                                efectivoContado = totalContado,
+                                diferencia = diferencia,
+                                desgloseEfectivo = cashState.toMap()
+                            ) {
+                                showConfirmLiquidation = false
+                                Toast.makeText(context, "Liquidación enviada con éxito", Toast.LENGTH_LONG).show()
+                                navController.popBackStack()
+                            }
+                        },
+                        enabled = !uiState.isLoading,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                    ) { Text("CONFIRMAR Y ENVIAR") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showConfirmLiquidation = false }, enabled = !uiState.isLoading) { Text("CANCELAR") }
+                },
+                shape = RoundedCornerShape(24.dp)
+            )
         }
     }
 }

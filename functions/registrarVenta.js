@@ -63,7 +63,10 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
         }))
       );
 
-      // 🔹 Validar stocks
+      // 🔹 Validar stocks y Precios (Auditoría Financiera)
+      let alertaPrecioGlobal = false;
+      let precioMaestroAudit = "";
+
       resultados.forEach(r => {
         if (!r.stockSnap.exists) {
           throw new Error(`Stock no existe para ${r.producto.nombre}`);
@@ -71,6 +74,13 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
         const stockActual = r.stockSnap.data().cantidad || 0;
         if (stockActual < r.producto.cantidad) {
           throw new Error(`Stock insuficiente para ${r.producto.nombre}`);
+        }
+
+        // 🛡️ Blindaje de Precio: Comparar contra precio unitario maestro
+        const precioMaestro = r.stockSnap.data().precioUnitario || 0;
+        if (Math.abs(r.producto.precio - precioMaestro) > 0.01) {
+          alertaPrecioGlobal = true;
+          precioMaestroAudit += `${r.producto.nombre}: ${precioMaestro}; `;
         }
       });
 
@@ -89,20 +99,25 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
         vendedorId,
         sincronizado: true,
         estado: 'pagada',
-        comentarios: 'Registro Idempotente',
+        comentarios: 'Registro con Blindaje Financiero',
         fotoEvidenciaVisita: fotoEvidenciaVisita || null,
-        fueraDeRango: fueraDeRango || false, // 🔥
-        latitudVenta: latitudVenta || 0, // 🔥
-        longitudVenta: longitudVenta || 0 // 🔥
+        fueraDeRango: fueraDeRango || false,
+        latitudVenta: latitudVenta || 0,
+        longitudVenta: longitudVenta || 0,
+        alertaPrecio: alertaPrecioGlobal, // 🔥 Flag de Auditoría
+        precioMaestro: alertaPrecioGlobal ? precioMaestroAudit : null // 🔥 Referencia de precios maestros
       });
 
       // 🔹 Agregar productos y actualizar stock
       resultados.forEach(r => {
         const { producto, productIdLimpio, stockRef, productoRef } = r;
+        const precioMaestro = r.stockSnap.data().precioUnitario || 0;
 
         transaction.set(ventaRef.collection('productos').doc(productIdLimpio), {
           nombre: producto.nombre,
           precio: producto.precio,
+          precioMaestro: precioMaestro, // 🛡️ Snapshot del precio oficial al momento de venta
+          alertaPrecio: Math.abs(producto.precio - precioMaestro) > 0.01,
           cantidad: producto.cantidad,
           imagenUrl: producto.imagenUrl || ''
         });
@@ -118,6 +133,8 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
           productoRef,
           productoNombre: producto.nombre,
           precioUnitario: producto.precio,
+          precioMaestro: precioMaestro, // 🛡️ Auditoría
+          alertaPrecio: Math.abs(producto.precio - precioMaestro) > 0.01,
           cantidad: producto.cantidad,
           almacenRef: db.collection('almacenes').doc(almacenIdLimpio),
           almacenNombre: almacenIdLimpio,

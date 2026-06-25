@@ -256,12 +256,15 @@ fun MapaScreen(
                 shape = CircleShape
             ) { Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(22.dp)) }
 
+            val p = uiState.puestoTrabajo?.trim() ?: ""
+            val esVendedor = p == "Vendedor de Ruta" || p == "Suplente de Ruta"
+
             // 🛣️ Botones de Ruta Laterales (Chips)
             Column(
                 Modifier.align(Alignment.TopStart).padding(top = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (uiState.puestoTrabajo == "Vendedor de Ruta") {
+                if (esVendedor) {
                     // 🔘 BOTÓN ÚNICO SEGUIMIENTO (PARA VENDEDORES)
                     uiState.miRuta?.let { rutaAsignada ->
                         val activo = uiState.seguirVendedor == rutaAsignada
@@ -349,7 +352,7 @@ fun MapaScreen(
                     DropdownMenuItem(text = { Text("Modo Oscuro") }, onClick = { viewModel.setMapType(MapType.NORMAL, darkMapStyleJson); expanded = false })
                 }
                 
-                if (uiState.puestoTrabajo != "Vendedor de Ruta") {
+                if (!esVendedor) {
                     Spacer(Modifier.height(12.dp))
 
                     // 🕰️ Botón Historial Retroactivo (Tesla Style)

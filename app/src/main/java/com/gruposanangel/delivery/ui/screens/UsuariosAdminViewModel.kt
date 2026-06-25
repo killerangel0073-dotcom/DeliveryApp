@@ -35,6 +35,13 @@ data class UsuariosAdminUiState(
     val error: String? = null,
     val successMessage: String? = null,
     
+    val puestosDisponibles: List<String> = listOf(
+        "CEO", "Gerente General", "Supervisor", 
+        "Vendedor de Ruta", "Suplente de Ruta",
+        "Encargado Almacen", "Auxiliar de almacen",
+        "Encargado Produccion", "Auxiliar de Produccion"
+    ),
+    
     val isLoadingLicencia: Boolean = false,
     val resultadoLicencia: String? = null,
     val errorLicencia: String? = null,
@@ -103,6 +110,9 @@ class UsuariosAdminViewModel : ViewModel() {
                         photoUrl = doc.getString("photo_url"),
                         puestoTrabajo = doc.getString("puestoTrabajo"),
                         activo = doc.getBoolean("activo") ?: true,
+                        status = doc.getString("status") ?: "ACTIVO",
+                        fechaBaja = doc.getTimestamp("fechaBaja")?.toDate()?.time,
+                        motivoBaja = doc.getString("motivoBaja"),
                         licenciaConducir = doc.getString("licenciaConducir"),
                         credencialElector = doc.getString("credencialElector"),
                         licenciaFotoUrl = doc.getString("licenciaFotoUrl"),
@@ -349,7 +359,8 @@ class UsuariosAdminViewModel : ViewModel() {
                     "nombre" to nombre, 
                     "email" to email, 
                     "puestoTrabajo" to puesto, 
-                    "activo" to activo, 
+                    "activo" to activo,
+                    "status" to if (activo) "ACTIVO" else "SUSPENDIDO",
                     "licenciaConducir" to licencia, 
                     "credencialElector" to credencial,
                     "created_time" to com.google.firebase.Timestamp.now()
@@ -357,6 +368,21 @@ class UsuariosAdminViewModel : ViewModel() {
                 photoUrl?.let { data["photo_url"] = it }
                 
                 val userRef = db.collection("users").document(targetUid)
+                
+                // --- LÓGICA DE LIBERACIÓN DE RUTA SI CAMBIA DE PUESTO (Vendedor -> Otro) ---
+                val snapshotActual = if (!state.isNewUserMode) userRef.get().await() else null
+                val puestoAnterior = snapshotActual?.getString("puestoTrabajo")
+                val rutaReferencia = snapshotActual?.get("rutaAsignada") as? DocumentReference
+                
+                val esVendedorAnterior = puestoAnterior?.contains("Vendedor") == true || puestoAnterior?.contains("Suplente") == true
+                val esVendedorNuevo = puesto.contains("Vendedor") || puesto.contains("Suplente")
+                
+                if (esVendedorAnterior && !esVendedorNuevo && rutaReferencia != null) {
+                    // El usuario dejó de ser vendedor, liberamos la ruta
+                    batch.update(userRef, "rutaAsignada", null)
+                    batch.update(rutaReferencia, "vendedorAsignado", null)
+                }
+
                 if (state.isNewUserMode) {
                     batch.set(userRef, data, com.google.firebase.firestore.SetOptions.merge())
                 } else {
@@ -401,11 +427,33 @@ class UsuariosAdminViewModel : ViewModel() {
         }
     }
 
-    fun eliminarUsuario(uid: String) {
+    fun eliminarUsuario(uid: String, motivo: String) {
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
-                db.collection("users").document(uid).delete().await()
+                val userRef = db.collection("users").document(uid)
+                val userSnap = userRef.get().await()
+                val rutaRef = userSnap.get("rutaAsignada") as? DocumentReference
+
+                val batch = db.batch()
+
+                // 1. Preparar actualizaciones del usuario
+                val userUpdates = mutableMapOf<String, Any?>(
+                    "activo" to false,
+                    "status" to "BAJA",
+                    "fechaBaja" to com.google.firebase.Timestamp.now(),
+                    "motivoBaja" to motivo
+                )
+
+                // 2. Si tiene ruta, liberarla en ambos documentos
+                if (rutaRef != null) {
+                    userUpdates["rutaAsignada"] = null
+                    batch.update(rutaRef, "vendedorAsignado", null)
+                }
+
+                batch.update(userRef, userUpdates)
+                batch.commit().await()
+
                 cargarUsuarios()
                 seleccionarUsuario(null)
             } catch (e: Exception) {

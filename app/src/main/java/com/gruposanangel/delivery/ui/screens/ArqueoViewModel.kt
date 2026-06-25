@@ -286,16 +286,36 @@ class ArqueoViewModel(
                     productoDao.updateCantidadDisponible(p.id, cantFinal)
                 }
 
-                // 2. GUARDAR REPORTE EN FIREBASE
+                // 2. GUARDAR REPORTE EN FIREBASE (BLINDAJE MONETARIO)
                 val arqueoData = mapOf(
                     "vendedorId" to vendedorId,
                     "vendedorNombre" to (usuarioVendedor?.nombre ?: "Vendedor"),
                     "almacen" to (usuarioVendedor?.ultimoAlmacenNombre ?: "Sin Almacen"),
                     "fecha" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
                     "autorizadoPor" to autorizador,
+                    
+                    // Auditoría de Unidades
                     "piezasTeoricas" to _uiState.value.saldoTeoricoCalculado,
                     "piezasReales" to _uiState.value.productosArqueo.sumOf { it.stockReal.toIntOrNull() ?: 0 },
-                    "detalle" to _uiState.value.productosArqueo.map { mapOf("id" to it.id, "nombre" to it.nombre, "t" to it.stockTeorico, "r" to (it.stockReal.toIntOrNull() ?: 0)) }
+                    
+                    // Auditoría Monetaria (Pesos $)
+                    "valorStockInicial" to _uiState.value.valorStockInicial,
+                    "valorCargasSemana" to _uiState.value.valorCargasSemana,
+                    "valorVentasSemana" to _uiState.value.valorVentasSemana,
+                    "valorTeoricoFinal" to _uiState.value.saldoValorTeoricoCalculado,
+                    "valorRealContado" to _uiState.value.productosArqueo.sumOf { (it.stockReal.toIntOrNull() ?: 0) * it.precio },
+                    "diferenciaMonetaria" to _uiState.value.productosArqueo.sumOf { it.valorDiferencia },
+                    
+                    "detalle" to _uiState.value.productosArqueo.map { 
+                        mapOf(
+                            "id" to it.id, 
+                            "nombre" to it.nombre, 
+                            "t" to it.stockTeorico, 
+                            "r" to (it.stockReal.toIntOrNull() ?: 0),
+                            "p" to it.precio,
+                            "d" to it.valorDiferencia
+                        ) 
+                    }
                 )
 
                 db.collection("reportes_arqueo").add(arqueoData).await()

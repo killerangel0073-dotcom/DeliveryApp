@@ -119,11 +119,11 @@ fun VelocimetroTeslaRojo(velocidad: Float) {
 }
 
 fun puedeVerFABInicio(puestoTrabajo: String?): Boolean {
-    return puestoTrabajo == "CEO1.1" || puestoTrabajo == "Gerente General" || puestoTrabajo == "Supervisor"
+    return puestoTrabajo == "CEO" || puestoTrabajo == "Gerente General" || puestoTrabajo == "Supervisor"
 }
 
 @Preview(showBackground = true, showSystemUi = true)
 @Composable
 fun PantallaInicioPreview() {
-    DeliveryTheme { PantallaInicioContent(45f, true, "26 de Septiembre, 10:30 AM", "CEO1.1", {}, {}, {}, {}) }
+    DeliveryTheme { PantallaInicioContent(45f, true, "26 de Septiembre, 10:30 AM", "CEO", {}, {}, {}, {}) }
 }

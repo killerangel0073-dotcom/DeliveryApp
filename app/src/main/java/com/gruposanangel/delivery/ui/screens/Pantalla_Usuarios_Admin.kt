@@ -12,6 +12,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -95,7 +97,7 @@ fun Pantalla_Usuarios_Admin(navController: NavController) {
             navController.navigate("camara_escaneo_ine/$uid/$uNombre")
         },
         onSave = { n, e, p, a, l, c, pass -> vm.guardarUsuario(n, e, p, a, l, c, imgFile, pass) },
-        onDelete = { vm.eliminarUsuario(it) },
+        onDelete = { uid, motivo -> vm.eliminarUsuario(uid, motivo) },
         onRutaSelect = { vm.proponerRuta(it) },
         onRutaClear = { vm.proponerRuta(null) },
         onConfirmRuta = { vm.confirmarPropuestaRuta() },
@@ -123,7 +125,7 @@ fun PantallaUsuariosAdminContent(
     onValidateLicense: () -> Unit, 
     onValidateINE: () -> Unit, 
     onSave: (String, String, String, Boolean, String, String, String) -> Unit, 
-    onDelete: (String) -> Unit,
+    onDelete: (String, String) -> Unit,
     onRutaSelect: (RutaEntity) -> Unit,
     onRutaClear: () -> Unit,
     onConfirmRuta: () -> Unit,
@@ -138,9 +140,23 @@ fun PantallaUsuariosAdminContent(
     var activo by remember(uiState.usuarioSeleccionado) { mutableStateOf(uiState.usuarioSeleccionado?.activo ?: true) }
     var showImgDialog by remember { mutableStateOf(false) }
     var showDelDialog by remember { mutableStateOf(false) }
+    var motivoBaja by remember { mutableStateOf("") }
+    var showStatusConfirmDialog by remember { mutableStateOf(false) }
+    var showPuestoConfirmDialog by remember { mutableStateOf(false) }
+    var pendingPuestoChange by remember { mutableStateOf("") }
+    var pendingStatusChange by remember { mutableStateOf(true) }
     var showLicensePhotoDialog by remember { mutableStateOf(false) }
     var showINEPhotoDialog by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
+
+    // 🎭 Animación para la Foto de Perfil Principal
+    val profileInteractionSource = remember { MutableInteractionSource() }
+    val isProfilePressed by profileInteractionSource.collectIsPressedAsState()
+    val profileScale by animateFloatAsState(
+        targetValue = if (isProfilePressed) 0.92f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "profileScale"
+    )
 
     // 🔥 AUTOLLENADO DE NOMBRE DESDE IA
     LaunchedEffect(uiState.nombreExtraidoDeIA) {
@@ -171,9 +187,22 @@ fun PantallaUsuariosAdminContent(
                 Column(Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) { 
                         Text(if (uiState.isNewUserMode) "Nuevo Usuario" else "Editar Perfil", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = RojoDelisa)
-                        if (!uiState.isNewUserMode) IconButton(onClick = { showDelDialog = true }) { Icon(Icons.Default.DeleteForever, null, tint = GrisTextoSecundario) } 
+                        if (!uiState.isNewUserMode) IconButton(onClick = { showDelDialog = true }) { Icon(Icons.Default.PersonRemove, null, tint = GrisTextoSecundario) } 
                     }
-                    Box(Modifier.size(110.dp).align(Alignment.CenterHorizontally).clickable { showImgDialog = true }, contentAlignment = Alignment.BottomEnd) {
+                    Box(
+                        Modifier
+                            .size(110.dp)
+                            .align(Alignment.CenterHorizontally)
+                            .graphicsLayer {
+                                scaleX = profileScale
+                                scaleY = profileScale
+                            }
+                            .clickable(
+                                interactionSource = profileInteractionSource,
+                                indication = null
+                            ) { showImgDialog = true }, 
+                        contentAlignment = Alignment.BottomEnd
+                    ) {
                         Surface(shape = CircleShape, shadowElevation = 4.dp, modifier = Modifier.fillMaxSize()) {
                             if (imgBitmap != null) Image(bitmap = imgBitmap.asImageBitmap(), null, contentScale = ContentScale.Crop)
                             else AsyncImage(model = uiState.usuarioSeleccionado?.photoUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = null, contentScale = ContentScale.Crop)
@@ -182,6 +211,54 @@ fun PantallaUsuariosAdminContent(
                     }
                     FormTextField(nombre, { nombre = it }, "Nombre Completo", Icons.Default.Badge)
                     FormTextField(email, { email = it }, "Correo Electrónico", Icons.Default.Email)
+                    
+                    // 🔥 SELECTOR DE PUESTO (DROPDOWN)
+                    var expandedPuestos by remember { mutableStateOf(false) }
+                    Box {
+                        OutlinedTextField(
+                            value = puesto,
+                            onValueChange = { },
+                            readOnly = true,
+                            label = { Text("Puesto / Cargo") },
+                            leadingIcon = { Icon(Icons.Default.Work, null, tint = RojoDelisa) },
+                            trailingIcon = { 
+                                IconButton(onClick = { expandedPuestos = true }) {
+                                    Icon(Icons.Default.ArrowDropDown, null, tint = NegroPremium)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().clickable { expandedPuestos = true },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = RojoDelisa, 
+                                focusedLabelColor = RojoDelisa, 
+                                cursorColor = RojoDelisa,
+                                disabledBorderColor = Color.LightGray,
+                                disabledTextColor = NegroPremium,
+                                disabledLabelColor = GrisTextoSecundario
+                            ),
+                            enabled = true
+                        )
+                        DropdownMenu(
+                            expanded = expandedPuestos,
+                            onDismissRequest = { expandedPuestos = false },
+                            modifier = Modifier.fillMaxWidth(0.9f).background(Color.White)
+                        ) {
+                            uiState.puestosDisponibles.forEach { p ->
+                                DropdownMenuItem(
+                                    text = { Text(p, fontWeight = FontWeight.Medium) },
+                                    onClick = { 
+                                        if (p != puesto && !uiState.isNewUserMode) {
+                                            pendingPuestoChange = p
+                                            showPuestoConfirmDialog = true
+                                        } else {
+                                            puesto = p
+                                        }
+                                        expandedPuestos = false 
+                                    }
+                                )
+                            }
+                        }
+                    }
                     
                     if (uiState.isNewUserMode) {
                         OutlinedTextField(
@@ -202,8 +279,6 @@ fun PantallaUsuariosAdminContent(
                             singleLine = true
                         )
                     }
-
-                    FormTextField(puesto, { puesto = it }, "Puesto", Icons.Default.Work)
 
                     // 🔥 SECCIÓN DE RUTA ASIGNADA
                     val user = uiState.usuarioSeleccionado
@@ -425,10 +500,13 @@ fun PantallaUsuariosAdminContent(
                     Spacer(Modifier.height(16.dp))
 
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) { 
-                        Text("Cuenta Activa", fontWeight = FontWeight.Bold, color = NegroPremium)
+                        Text("Acceso a la App (Suspendido/Activo)", fontWeight = FontWeight.Bold, color = NegroPremium)
                         Switch(
                             checked = activo, 
-                            onCheckedChange = { activo = it }, 
+                            onCheckedChange = { 
+                                pendingStatusChange = it
+                                showStatusConfirmDialog = true
+                            }, 
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
                                 checkedTrackColor = RojoDelisa,
@@ -459,24 +537,48 @@ fun PantallaUsuariosAdminContent(
         AlertDialog(
             onDismissRequest = { showDelDialog = false },
             title = {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("¿Eliminar Usuario?", fontWeight = FontWeight.Black, color = NegroPremium)
-                }
+                Text(
+                    "BAJA DE PERSONAL", 
+                    fontWeight = FontWeight.Black, 
+                    color = NegroPremium,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
             },
             text = {
-                Text(
-                    "¿Estás seguro que deseas borrar a ${uiState.usuarioSeleccionado?.nombre}?\nEsta acción no se puede deshacer.",
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val tieneRuta = uiState.usuarioSeleccionado?.ultimaRutaId != null
+                    Text(
+                        if (tieneRuta) 
+                            "¿Deseas dar de baja definitiva a ${uiState.usuarioSeleccionado?.nombre}?\nSe liberará su ruta (${uiState.usuarioSeleccionado?.ultimaRutaNombre}) y perderá acceso."
+                        else 
+                            "¿Deseas dar de baja definitiva a ${uiState.usuarioSeleccionado?.nombre}?\nPerderá acceso inmediato a la plataforma.",
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = motivoBaja,
+                        onValueChange = { motivoBaja = it },
+                        label = { Text("Motivo de la baja") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
             },
             confirmButton = {
                 Button(
-                    onClick = { uiState.usuarioSeleccionado?.uid?.let { onDelete(it) }; showDelDialog = false },
+                    onClick = { 
+                        if (motivoBaja.isNotBlank()) {
+                            uiState.usuarioSeleccionado?.uid?.let { onDelete(it, motivoBaja) }
+                            showDelDialog = false 
+                        } else {
+                            Toast.makeText(context, "Por favor escribe un motivo", Toast.LENGTH_SHORT).show()
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("ELIMINAR DEFINITIVAMENTE", fontWeight = FontWeight.Bold)
+                    Text("CONFIRMAR BAJA DEFINITIVA", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -633,18 +735,203 @@ fun PantallaUsuariosAdminContent(
             }
         )
     }
+
+    if (showStatusConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showStatusConfirmDialog = false },
+            title = {
+                Text(
+                    if (pendingStatusChange) "Activar Cuenta" else "Desactivar Cuenta", 
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            },
+            text = {
+                Text(
+                    if (pendingStatusChange) 
+                        "¿Deseas reactivar el acceso para ${uiState.usuarioSeleccionado?.nombre}?"
+                    else 
+                        "Al desactivar la cuenta, el usuario perderá acceso inmediato a la aplicación. ¿Deseas continuar?",
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { 
+                        activo = pendingStatusChange
+                        showStatusConfirmDialog = false 
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("CONFIRMAR", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStatusConfirmDialog = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text("CANCELAR", color = GrisTextoSecundario)
+                }
+            }
+        )
+    }
+
+    if (showPuestoConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showPuestoConfirmDialog = false },
+            title = {
+                Text(
+                    "Confirmar Cambio de Puesto", 
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            },
+            text = {
+                val tieneRuta = uiState.usuarioSeleccionado?.ultimaRutaId != null
+                val esVendedor = uiState.usuarioSeleccionado?.puestoTrabajo?.contains("Vendedor") == true || uiState.usuarioSeleccionado?.puestoTrabajo?.contains("Suplente") == true
+                val nuevoEsVendedor = pendingPuestoChange.contains("Vendedor") || pendingPuestoChange.contains("Suplente")
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "¿Estás seguro de cambiar el puesto de ${uiState.usuarioSeleccionado?.nombre} a '$pendingPuestoChange'?",
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    
+                    if (esVendedor && !nuevoEsVendedor && tieneRuta) {
+                        Surface(
+                            color = RojoDelisa.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text(
+                                "⚠️ ADVERTENCIA: Al dejar de ser vendedor, la ruta '${uiState.usuarioSeleccionado?.ultimaRutaNombre}' se liberará automáticamente.",
+                                color = RojoDelisa,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(12.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { 
+                        puesto = pendingPuestoChange
+                        showPuestoConfirmDialog = false 
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("CONFIRMAR CAMBIO", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPuestoConfirmDialog = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text("CANCELAR", color = GrisTextoSecundario)
+                }
+            }
+        )
+    }
 }
 
 @Composable
 fun UserSelectorCard(nombre: String, subtitulo: String, photoUrl: String? = null, icon: ImageVector? = null, isSelected: Boolean, onClick: () -> Unit) {
-    Card(modifier = Modifier.size(width = 140.dp, height = 120.dp).clickable { onClick() }, shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = if (isSelected) Color.White else Color(0xFFF1F2F6)), border = if (isSelected) BorderStroke(2.dp, RojoDelisa) else null, elevation = CardDefaults.cardElevation(if (isSelected) 8.dp else 2.dp)) {
-        Column(Modifier.fillMaxSize().padding(12.dp), Arrangement.Center, Alignment.CenterHorizontally) {
-            Box(Modifier.size(45.dp).clip(CircleShape).background(if (isSelected) RojoDelisa.copy(0.1f) else Color.White), Alignment.Center) {
-                if (!photoUrl.isNullOrEmpty()) AsyncImage(model = photoUrl, null, contentScale = ContentScale.Crop)
-                else Icon(icon ?: Icons.Default.Person, null, tint = if (isSelected) RojoDelisa else GrisTextoSecundario, modifier = Modifier.size(24.dp))
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
+    // 🎭 Animación de Escala (Efecto de presión "Tesla Style")
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else if (isSelected) 1.05f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "cardScale"
+    )
+
+    // 🎨 Animación de Colores Suaves
+    val bgColor by animateColorAsState(if (isSelected) Color.White else Color(0xFFF1F2F6), label = "bgColor")
+    val contentColor by animateColorAsState(if (isSelected) RojoDelisa else NegroPremium, label = "contentColor")
+    val elevation by animateDpAsState(if (isSelected) 10.dp else 2.dp, label = "elevation")
+
+    Card(
+        modifier = Modifier
+            .size(width = 145.dp, height = 125.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
             }
-            Spacer(Modifier.height(8.dp)); Text(nombre, fontSize = 12.sp, fontWeight = FontWeight.Black, color = if (isSelected) RojoDelisa else NegroPremium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(subtitulo, fontSize = 10.sp, color = GrisTextoSecundario, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            .shadow(
+                elevation = elevation,
+                shape = RoundedCornerShape(24.dp),
+                spotColor = if (isSelected) RojoDelisa.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.2f)
+            )
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = RojoDelisa.copy(alpha = 0.1f)),
+                onClick = onClick
+            ),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = bgColor),
+        border = if (isSelected) BorderStroke(2.dp, RojoDelisa) else BorderStroke(1.dp, Color.Transparent)
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(12.dp), 
+            Arrangement.Center, 
+            Alignment.CenterHorizontally
+        ) {
+            // Contenedor de Imagen con Efecto de Profundidad
+            Box(
+                Modifier
+                    .size(50.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) RojoDelisa.copy(0.08f) else Color.White)
+                    .border(
+                        width = if (isSelected) 1.dp else 0.dp,
+                        color = if (isSelected) RojoDelisa.copy(0.2f) else Color.Transparent,
+                        shape = CircleShape
+                    ), 
+                Alignment.Center
+            ) {
+                if (!photoUrl.isNullOrEmpty()) {
+                    AsyncImage(
+                        model = photoUrl, 
+                        contentDescription = null, 
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        imageVector = icon ?: Icons.Default.Person, 
+                        contentDescription = null, 
+                        tint = if (isSelected) RojoDelisa else GrisTextoSecundario, 
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
+            
+            Spacer(Modifier.height(10.dp))
+            
+            Text(
+                text = nombre, 
+                fontSize = 13.sp, 
+                fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold, 
+                color = contentColor, 
+                maxLines = 1, 
+                overflow = TextOverflow.Ellipsis
+            )
+            
+            Text(
+                text = subtitulo, 
+                fontSize = 10.sp, 
+                color = if (isSelected) contentColor.copy(alpha = 0.7f) else GrisTextoSecundario, 
+                maxLines = 1, 
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }
@@ -704,5 +991,5 @@ fun createImageFile3(context: android.content.Context): File { val dir = File(co
 @Composable
 fun UsuariosAdminPreview() {
     val users = listOf(UsuarioEntity("1", "Lizeth Flores", "Gerente", "Si", ""), UsuarioEntity("2", "Juan Perez", "Vendedor", "Si", ""))
-    DeliveryTheme { PantallaUsuariosAdminContent(UsuariosAdminUiState(usuarios = users), null, {}, {}, {}, {}, {}, {_,_,_,_,_,_,_ ->}, {}, {}, {}, {}, {}, {}) }
+    DeliveryTheme { PantallaUsuariosAdminContent(UsuariosAdminUiState(usuarios = users), null, {}, {}, {}, {}, {}, {_,_,_,_,_,_,_ ->}, {_,_ ->}, {}, {}, {}, {}, {}) }
 }

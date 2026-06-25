@@ -53,9 +53,9 @@ exports.notificarNuevaVenta = onDocumentCreated("ventas/{ventaId}", async (event
             }
         }
 
-        // 3. BUSCAR DIRECTIVOS
+        // 3. BUSCAR DIRECTIVOS (CEO, Gerente General y Supervisor)
         const usuariosSnapshot = await db.collection("users")
-            .where("puestoTrabajo", "in", ["CEO1.1", "Gerente General"])
+            .where("puestoTrabajo", "in", ["CEO", "Gerente General", "Supervisor"])
             .where("activo", "==", true)
             .get();
 

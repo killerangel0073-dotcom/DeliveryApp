@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
         usuarioDao = db.usuarioDao(); repositoryUsuario = RepositoryUsuario(FirebaseDataSource(), usuarioDao)
         repository = RepositoryCliente(db.clienteDao())
         inventarioRepo = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
-        ventaRepository = VentaRepository(db.VentaDao())
+        ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
 
         // 🔥 QUITAMOS LAS LLAMADAS DIRECTAS DE ONCREATE
         // Las moveremos dentro del Wrapper para que solo corran con permisos
@@ -118,6 +118,7 @@ class MainActivity : ComponentActivity() {
             
             // 🔥 ESTADOS DE BLOQUEO Y SEGURIDAD
             var blockReason by remember { mutableStateOf<String?>(null) }
+            var appGlobalBloqueada by remember { mutableStateOf(false) }
             val timeManager = com.gruposanangel.delivery.utilidades.TimeManager
             var showTimeError by remember { mutableStateOf(!timeManager.esHoraAutomaticaActivada(context)) }
             var needsSync by remember { mutableStateOf(timeManager.requiereSincronizacion()) }
@@ -144,8 +145,16 @@ class MainActivity : ComponentActivity() {
                 onDispose { }
             }
 
+            // 🔥 LISTENER GLOBAL DE BLOQUEO (Configuración de la App)
+            LaunchedEffect(Unit) {
+                FirebaseFirestore.getInstance().collection("config").document("app")
+                    .addSnapshotListener { snapshot, _ ->
+                        appGlobalBloqueada = snapshot?.getBoolean("bloqueada") ?: false
+                    }
+            }
+
             // Listener en tiempo real para el estado "activo" del usuario
-            LaunchedEffect(usuarioActual?.uid) {
+            LaunchedEffect(usuarioActual?.uid, appGlobalBloqueada) {
                 val uid = usuarioActual?.uid ?: FirebaseAuth.getInstance().currentUser?.uid
                 if (uid != null) {
                     statusListener?.remove()
@@ -153,21 +162,32 @@ class MainActivity : ComponentActivity() {
                         .addSnapshotListener { snapshot, _ ->
                             if (snapshot != null && snapshot.exists()) {
                                 val activo = snapshot.getBoolean("activo") ?: true
+                                val status = snapshot.getString("status") ?: "ACTIVO"
                                 val estadoLicencia = snapshot.getString("licenciaEstado") ?: "VIGENTE"
                                 val puesto = snapshot.getString("puestoTrabajo") ?: ""
 
                                 // 🔥 Los administradores/jefes tienen inmunidad de bloqueo por licencia
-                                val esJefe = puesto == "CEO1.1" || puesto == "Gerente General" || puesto == "Supervisor" || puesto == "Administración"
+                                val p = puesto.trim()
+                                val esJefe = p == "CEO" || p == "Gerente General" || p == "Supervisor" || p == "Administración"
                                 
+                                // 🔥 CEO y Gerente General tienen inmunidad TOTAL al bloqueo visual
+                                val esDirectivoMaximo = p == "CEO" || p == "Gerente General"
+
                                 blockReason = when {
-                                    !activo -> "ACCOUNT_DISABLED"
+                                    esDirectivoMaximo -> null
+                                    appGlobalBloqueada -> "GLOBAL_BLOCK"
+                                    !activo || status == "SUSPENDIDO" || status == "BAJA" -> "ACCOUNT_DISABLED"
                                     estadoLicencia == "VENCIDA" && !esJefe -> "LICENSE_EXPIRED"
                                     else -> null
+                                }
+
+                                if ((status == "SUSPENDIDO" || status == "BAJA") && !esDirectivoMaximo) {
+                                    cerrarSesion(context)
                                 }
                             }
                         }
                 } else {
-                    blockReason = null
+                    blockReason = if (appGlobalBloqueada) "GLOBAL_BLOCK" else null
                     statusListener?.remove()
                 }
             }
@@ -177,7 +197,7 @@ class MainActivity : ComponentActivity() {
             if (blockReason != null) {
                 // PANTALLA DE BLOQUEO TOTAL
                 Box(Modifier.fillMaxSize().background(Color.Black), Alignment.Center) {
-                    if (blockReason == "ACCOUNT_DISABLED") {
+                    if (blockReason == "ACCOUNT_DISABLED" || blockReason == "GLOBAL_BLOCK") {
                         Image(
                             painter = painterResource(id = R.drawable.appbloqueada),
                             contentDescription = "Aplicación Bloqueada",
@@ -290,7 +310,8 @@ class MainActivity : ComponentActivity() {
                 repositoryUsuario.sincronizarVendedorLocal(uid)
                 
                 val usuario = repositoryUsuario.obtenerUsuarioLocal(uid)
-                val idParaSync = if (usuario?.puestoTrabajo == "Vendedor de Ruta") uid else ""
+                val puesto = usuario?.puestoTrabajo?.trim() ?: ""
+                val idParaSync = if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") uid else ""
                 
                 // 3. Iniciar escucha en tiempo real (SnapshotListeners)
                 repository.escucharCambiosFirebase(this@MainActivity)
@@ -343,7 +364,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startLocationService(puesto: String?) {
-        if (puesto == "Vendedor de Ruta") {
+        val p = puesto?.trim() ?: ""
+        if (p == "Vendedor de Ruta" || p == "Suplente de Ruta") {
             // 🛡️ Blindaje final: No intentamos arrancar el FGS si no hay permisos reales
             val hasLocation = ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
             

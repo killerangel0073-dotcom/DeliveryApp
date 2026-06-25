@@ -49,14 +49,18 @@ class InventarioViewModel(
         usuarioRepo.getUsuarioActual()
             .onEach { usuario ->
                 if (usuario != null) {
-                    val adminRoles = listOf("CEO1.1", "Gerente General")
-                    val esAdmin = usuario.puestoTrabajo in adminRoles
+                    val p = usuario.puestoTrabajo?.trim() ?: ""
+                    val adminRoles = listOf("CEO", "Gerente General", "Encargado Almacen", "Auxiliar de almacen")
+                    val esAdmin = p in adminRoles
+                    val esAlmacenRol = p == "Encargado Almacen" || p == "Auxiliar de almacen"
+                    
                     val nombreAlmacen = usuario.ultimoAlmacenNombre
+                    val almacenInicial = if (esAlmacenRol) "Almacen Huasteca" else nombreAlmacen
                     
                     _uiState.update { it.copy(
                         puestoTrabajo = usuario.puestoTrabajo,
                         rutaAsignada = nombreAlmacen,
-                        almacenSeleccionado = nombreAlmacen,
+                        almacenSeleccionado = almacenInicial,
                         isAdmin = esAdmin,
                         isLoading = false
                     ) }
@@ -65,7 +69,9 @@ class InventarioViewModel(
                         cargarListaAlmacenes()
                     }
                     
-                    if (!nombreAlmacen.isNullOrEmpty()) {
+                    if (esAlmacenRol) {
+                        seleccionarAlmacen("Almacen Huasteca")
+                    } else if (!nombreAlmacen.isNullOrEmpty()) {
                         escucharNotificaciones(nombreAlmacen)
                         cargarStockDanado(nombreAlmacen)
                     }
@@ -106,7 +112,11 @@ class InventarioViewModel(
 
     private fun cargarListaAlmacenes() {
         viewModelScope.launch {
-            val lista = inventarioRepo.obtenerListaAlmacenes()
+            var lista = inventarioRepo.obtenerListaAlmacenes()
+            val p = _uiState.value.puestoTrabajo?.trim() ?: ""
+            if (p == "Encargado Almacen" || p == "Auxiliar de almacen") {
+                lista = lista.filter { it != "Compra Producto" }
+            }
             _uiState.update { it.copy(listaAlmacenes = lista) }
         }
     }

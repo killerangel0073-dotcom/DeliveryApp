@@ -167,6 +167,46 @@ class DashboardVendedorViewModel(
         }
     }
 
+    fun finalizarJornadaYLiquidar(
+        ventaTotal: Double,
+        efectivoContado: Double,
+        diferencia: Double,
+        desgloseEfectivo: Map<Int, Int>,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isLoading = true) }
+                val now = Date()
+                
+                // 1. Crear registro de Liquidación en Firestore
+                val liquidacionData = mapOf(
+                    "vendedorId" to userId,
+                    "vendedorNombre" to _uiState.value.nombreVendedor,
+                    "fecha" to Timestamp(now),
+                    "ventaTotal" to ventaTotal,
+                    "efectivoContado" to efectivoContado,
+                    "diferencia" to diferencia,
+                    "desgloseEfectivo" to desgloseEfectivo.mapKeys { it.key.toString() },
+                    "almacen" to _uiState.value.rutaNombre,
+                    "clientesAtendidos" to _uiState.value.clientesDia,
+                    "tipo" to "LIQUIDACION_DIARIA"
+                )
+                
+                db.collection("liquidaciones_diarias").add(liquidacionData).await()
+                
+                // 2. Finalizar Jornada Oficialmente
+                toggleRuta(false)
+                
+                _uiState.update { it.copy(isLoading = false) }
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error en liquidación", e)
+                _uiState.update { it.copy(isLoading = false, error = "Error al guardar liquidación: ${e.message}") }
+            }
+        }
+    }
+
     private fun notificarEstadoRuta(activar: Boolean, fecha: Date) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -307,7 +347,8 @@ class DashboardVendedorViewModel(
     private fun escucharVentasNube() {
         viewModelScope.launch {
             val user = usuarioRepository.obtenerUsuarioActual()
-            val esVendedor = user?.puestoTrabajo == "Vendedor de Ruta"
+            val puesto = user?.puestoTrabajo?.trim() ?: ""
+            val esVendedor = puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta"
             val idParaSync = if (esVendedor) userId else ""
 
             val cal = Calendar.getInstance()

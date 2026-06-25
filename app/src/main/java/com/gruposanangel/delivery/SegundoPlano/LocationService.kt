@@ -609,7 +609,7 @@ class LocationService : Service() {
     private suspend fun obtenerTokenSupervisor(): String? {
         return try {
             val snap = firestore.collection("users")
-                .whereEqualTo("puestoTrabajo", "CEO1.1")
+                .whereEqualTo("puestoTrabajo", "CEO")
                 .whereEqualTo("activo", true)
                 .get().await()
 

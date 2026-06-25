@@ -56,7 +56,7 @@ fun Pantalla_Detalle_Venta_Admin(
     val db = AppDatabase.getDatabase(context)
     val firebaseDataSource = FirebaseDataSource()
     val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
-    val ventaRepository = VentaRepository(db.VentaDao())
+    val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
     val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
 
     val viewModel: VentaViewModel = viewModel(

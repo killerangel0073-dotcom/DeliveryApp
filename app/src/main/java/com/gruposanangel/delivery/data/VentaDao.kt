@@ -61,7 +61,9 @@ interface VentaDao {
         insertarVenta(venta)
         detalles.forEach {
             insertarDetalle(it)
-            descontarStockLocal(it.productoId, it.cantidad)
+            // 🛡️ Blindaje Financiero: Descontar stock usando el stockId (PK real de la tabla productos)
+            val idParaStock = it.stockId ?: it.productoId
+            descontarStockLocal(idParaStock, it.cantidad)
         }
     }
 

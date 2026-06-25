@@ -37,6 +37,10 @@ class RepositoryUsuario(
             val puestoTrabajo = userData["puestoTrabajo"] as? String
             val licencia = userData["licenciaConducir"] as? String
             val activo = userData["activo"] as? Boolean
+            val status = userData["status"] as? String ?: "ACTIVO"
+            val fechaBaja = (userData["fechaBaja"] as? com.google.firebase.Timestamp)?.toDate()?.time
+            val motivoBaja = userData["motivoBaja"] as? String
+
             val createdTime = (userData["created_time"] as? com.google.firebase.Timestamp)?.toDate()?.time
             val credencialElector = userData["credencialElector"] as? String
 
@@ -78,6 +82,9 @@ class RepositoryUsuario(
                 puestoTrabajo = puestoTrabajo,
                 licenciaConducir = licencia,
                 activo = activo,
+                status = status,
+                fechaBaja = fechaBaja,
+                motivoBaja = motivoBaja,
                 createdTime = createdTime,
                 credencialElector = credencialElector,
                 jefeDirectoId = jefeDirectoId,
@@ -142,5 +149,22 @@ class RepositoryUsuario(
 
     suspend fun obtenerUsuarioLocal(uid: String): UsuarioEntity? {
         return usuarioDao.obtenerPorId(uid)
+    }
+
+    /**
+     * Da de baja lógica a un vendedor.
+     */
+    suspend fun desactivarVendedor(uid: String, motivo: String, status: String = "BAJA") {
+        firebaseDataSource.desactivarUsuario(uid, motivo, status)
+        // Opcional: Podrías actualizar localmente si el UID coincide con el usuario actual
+    }
+
+    /**
+     * Obtiene la lista de vendedores activos desde Firestore (Operacional).
+     */
+    suspend fun obtenerVendedoresActivos(): List<UsuarioEntity> {
+        // Esta lógica podría moverse a FirebaseDataSource para mantener el patrón
+        // Por ahora, usaremos una consulta filtrada por status
+        return firebaseDataSource.obtenerUsuariosPorStatus("ACTIVO")
     }
 }

@@ -48,9 +48,9 @@ data class VentaEntity(
 data class VentaDetalleEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val ventaId: String, 
-    val productoId: String, // ID Limpio para Firestore
-    val stockId: String? = null, // ID compuesto (IdProducto_IdAlmacen) usado en local
+    val productoId: String, // ID Limpio para Firestore (Base)
+    val stockId: String? = null, // ID compuesto (IdProducto_IdAlmacen) para Room
     val nombre: String,
-    val precio: Double,
+    val precio: Double, // 🛡️ SNAPSHOT INMUTABLE: Precio unitario cobrado (No Nulo)
     val cantidad: Int
 )
