@@ -204,8 +204,20 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                         }
                         if (uiState.carga?.aceptada == false) {
                             Spacer(Modifier.height(20.dp))
-                            Button(onClick = { mostrarDialog = true }, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
-                                Icon(Icons.Default.Inventory, null, tint = Color.White); Spacer(Modifier.width(8.dp)); Text("ACEPTAR Y SUMAR AL STOCK", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                            Button(
+                                onClick = { mostrarDialog = true }, 
+                                enabled = !uiState.isLoading,
+                                modifier = Modifier.fillMaxWidth().height(56.dp), 
+                                shape = RoundedCornerShape(16.dp), 
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                            ) {
+                                if (uiState.isLoading) {
+                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                                } else {
+                                    Icon(Icons.Default.Inventory, null, tint = Color.White)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("ACEPTAR Y SUMAR AL STOCK", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                                }
                             }
                         } else {
                             Spacer(Modifier.height(20.dp))

@@ -31,6 +31,7 @@ data class CargaResumen(
 data class HistorialCargasUiState(
     val isLoading: Boolean = false,
     val cargas: List<CargaResumen> = emptyList(),
+    val arqueos: List<CargaResumen> = emptyList(), // 🔥 Nueva lista separada
     val listaVendedores: List<String> = emptyList(),
     val filtroVendedor: String = "Todos",
     val fechaInicio: Long = System.currentTimeMillis(),
@@ -48,13 +49,31 @@ class HistorialCargasViewModel : ViewModel() {
     private val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("es", "MX"))
 
     init {
-        // Establecer rango de hoy por defecto
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+        // Establecer rango de la semana actual (Lunes a Domingo) por defecto
+        val cal = Calendar.getInstance(Locale("es", "MX"))
+        cal.firstDayOfWeek = Calendar.MONDAY
+        
+        // Ir al lunes de esta semana
+        cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        
+        // Si hoy es domingo y el Calendar lo movió al lunes de MAÑANA, retroceder 7 días
+        if (cal.timeInMillis > System.currentTimeMillis()) {
+            cal.add(Calendar.DAY_OF_YEAR, -7)
+        }
+        
         val inicio = cal.timeInMillis
         
-        val calEnd = Calendar.getInstance()
-        calEnd.set(Calendar.HOUR_OF_DAY, 23); calEnd.set(Calendar.MINUTE, 59); calEnd.set(Calendar.SECOND, 59)
+        // Calcular el domingo (inicio + 6 días)
+        val calEnd = cal.clone() as Calendar
+        calEnd.add(Calendar.DAY_OF_YEAR, 6)
+        calEnd.set(Calendar.HOUR_OF_DAY, 23)
+        calEnd.set(Calendar.MINUTE, 59)
+        calEnd.set(Calendar.SECOND, 59)
+        calEnd.set(Calendar.MILLISECOND, 999)
         val fin = calEnd.timeInMillis
         
         _uiState.update { it.copy(fechaInicio = inicio, fechaFin = fin) }
@@ -108,36 +127,95 @@ class HistorialCargasViewModel : ViewModel() {
                 return@addSnapshotListener
             }
 
-            val lista = snapshot?.documents?.mapNotNull { doc ->
-                val data = doc.data ?: return@mapNotNull null
-                val ts = data["timestamp"] as? Timestamp
-                val timestamp = ts?.toDate()?.time ?: 0L
-                
-                // Mapeo de productos igual que en Notificaciones
-                val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
-                val productos = productosRaw.map { p ->
-                    Plantilla_Producto(
-                        id = p["productoId"] as? String ?: "",
-                        nombre = p["nombre"] as? String ?: "",
-                        precio = (p["precio"] as? Number)?.toDouble() ?: 0.0,
-                        cantidad = (p["cantidad"] as? Number)?.toInt() ?: 0
+            viewModelScope.launch {
+                val listaCargas = snapshot?.documents?.mapNotNull { doc ->
+                    val data = doc.data ?: return@mapNotNull null
+                    val ts = data["timestamp"] as? Timestamp
+                    val timestamp = ts?.toDate()?.time ?: 0L
+                    
+                    val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
+                    val productos = productosRaw.map { p ->
+                        Plantilla_Producto(
+                            id = p["productoId"] as? String ?: "",
+                            nombre = p["nombre"] as? String ?: "",
+                            precio = (p["precio"] as? Number)?.toDouble() ?: 0.0,
+                            cantidad = (p["cantidad"] as? Number)?.toInt() ?: 0
+                        )
+                    }
+
+                    CargaResumen(
+                        id = doc.id,
+                        origen = data["origen"] as? String ?: "",
+                        destino = data["destino"] as? String ?: "",
+                        estado = data["estado"] as? String ?: "PENDIENTE",
+                        fechaFormateada = sdf.format(Date(timestamp)),
+                        timestamp = timestamp,
+                        totalPiezas = productos.sumOf { it.cantidad },
+                        montoTotal = productos.sumOf { it.cantidad * it.precio },
+                        productos = productos
                     )
+                } ?: emptyList()
+
+                // 🔥 2. CONSULTAR TAMBIÉN LOS ARQUEOS (Ajustes de auditoría) con Blindaje
+                try {
+                    var arqueosQuery: com.google.firebase.firestore.Query = db.collection("ajustes_inventario")
+                        .whereIn("tipo", listOf("AJUSTE_ARQUEO_FALTANTE", "AJUSTE_ARQUEO_SOBRANTE"))
+                        .whereGreaterThanOrEqualTo("timestamp", state.fechaInicio)
+                        .whereLessThanOrEqualTo("timestamp", state.fechaFin)
+                        .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+
+                    if (state.filtroVendedor != "Todos") {
+                        arqueosQuery = arqueosQuery.whereEqualTo("almacenNombre", state.filtroVendedor)
+                    }
+
+                    val arqueosSnap = arqueosQuery.get().await()
+                    
+                    // Agrupamos los micro-ajustes por su referenciaId (El Arqueo Completo)
+                    val listaArqueos = arqueosSnap.documents.groupBy { it.getString("referenciaId") ?: "SIN_ID" }
+                        .mapNotNull { (referenciaId, docs) ->
+                            if (referenciaId == "SIN_ID") return@mapNotNull null
+                            val primerDoc = docs.first()
+                            val timestamp = primerDoc.getLong("timestamp") ?: 0L
+                            
+                            val productos = docs.map { d ->
+                                val tipo = d.getString("tipo")
+                                val cant = d.getLong("cantidad")?.toInt() ?: 0
+                                Plantilla_Producto(
+                                    id = d.getString("productoId") ?: "",
+                                    nombre = d.getString("nombreProducto") ?: "Producto",
+                                    precio = 0.0, 
+                                    cantidad = if (tipo == "AJUSTE_ARQUEO_FALTANTE") -cant else cant
+                                )
+                            }
+
+                            CargaResumen(
+                                id = referenciaId,
+                                origen = "AUDITORÍA FÍSICA",
+                                destino = primerDoc.getString("almacenNombre") ?: "",
+                                estado = "ARQUEADO",
+                                fechaFormateada = sdf.format(Date(timestamp)),
+                                timestamp = timestamp,
+                                totalPiezas = productos.sumOf { it.cantidad },
+                                montoTotal = 0.0, 
+                                productos = productos
+                            )
+                        }.sortedByDescending { it.timestamp }
+
+                    _uiState.update { it.copy(
+                        cargas = listaCargas.sortedByDescending { it.timestamp },
+                        arqueos = listaArqueos,
+                        isLoading = false
+                    ) }
+                } catch (e: Exception) {
+                    Log.e("HistorialCargasVM", "Error en Arqueos (Falta índice Firestore?): ${e.message}")
+                    // Si fallan los arqueos por falta de índice, al menos mostramos las cargas normales
+                    _uiState.update { it.copy(
+                        cargas = listaCargas.sortedByDescending { it.timestamp },
+                        isLoading = false,
+                        error = if (e.message?.contains("index") == true) "Preparando base de datos de auditoría..." else e.message
+                    ) }
                 }
-
-                CargaResumen(
-                    id = doc.id,
-                    origen = data["origen"] as? String ?: "",
-                    destino = data["destino"] as? String ?: "",
-                    estado = data["estado"] as? String ?: "PENDIENTE",
-                    fechaFormateada = sdf.format(Date(timestamp)),
-                    timestamp = timestamp,
-                    totalPiezas = productos.sumOf { it.cantidad },
-                    montoTotal = productos.sumOf { it.cantidad * it.precio },
-                    productos = productos
-                )
-            }?.sortedByDescending { it.timestamp } ?: emptyList()
-
-            _uiState.update { it.copy(cargas = lista, isLoading = false) }
+            }
         }
     }
 

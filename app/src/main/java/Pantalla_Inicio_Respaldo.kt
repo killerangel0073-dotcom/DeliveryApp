@@ -644,7 +644,7 @@ fun imprimirTicket58mm2(device: BluetoothDevice, cliente: String, productos: Lis
         sb.append("-------------------------------\n")
         sb.append("TOTAL:".padEnd(24) + String.format("%.2f", total).padStart(8) + "\n")
         sb.append("\n")
-        sb.append("¡Gracias por su compra!\n")
+        sb.append("GRACIAS POR SU COMPRA!\n")
         sb.append("\n\n\n") // saltos de papel
 
         outputStream.write(sb.toString().toByteArray(Charsets.UTF_8))

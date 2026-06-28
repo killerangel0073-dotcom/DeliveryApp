@@ -1,10 +1,12 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.widget.Toast
-import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -32,18 +36,24 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import coil.compose.AsyncImage
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.model.Plantila_carga
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import java.util.Date
+import java.util.Calendar
+import java.util.Locale
+import java.text.SimpleDateFormat
 
 // 🔹 Modelo de notificación/carga
 data class Notificacion(
@@ -96,19 +106,22 @@ fun PantallaNotificaciones(navController: NavController) {
             }
         },
         onItemClick = { noti ->
+            val carga = Plantila_carga(
+                id = noti.id,
+                nombreCarga = noti.titulo,
+                plantillaProductos = emptyList(),
+                aceptada = noti.aceptada
+            )
+            navController.currentBackStackEntry?.savedStateHandle?.set("carga", carga)
+
             if (noti.esCarga) {
-                val carga = Plantila_carga(
-                    id = noti.id,
-                    nombreCarga = noti.titulo,
-                    plantillaProductos = emptyList(),
-                    aceptada = noti.aceptada
-                )
-                navController.currentBackStackEntry?.savedStateHandle?.remove<Plantila_carga>("carga")
-                navController.currentBackStackEntry?.savedStateHandle?.set("carga", carga)
                 navController.navigate("DETALLE_CARGA")
+            } else if (noti.titulo.contains("AUDITORÍA") || noti.titulo.contains("ARQUEO")) {
+                navController.navigate("DETALLE_ARQUEO")
             }
         },
-        onEmergencyClick = { viewModel.abrirDialogoAutorizacion() }
+        onEmergencyClick = { viewModel.abrirDialogoAutorizacion() },
+        onDateRangeSelected = { inicio, fin -> viewModel.actualizarFiltroFechas(inicio, fin) }
     )
 
     if (uiState.showAuthDialog) {
@@ -130,14 +143,32 @@ fun PantallaNotificacionesContent(
     uiState: NotificacionesUiState,
     onBack: () -> Unit,
     onItemClick: (Notificacion) -> Unit,
-    onEmergencyClick: () -> Unit = {}
+    onEmergencyClick: () -> Unit = {},
+    onDateRangeSelected: (Long, Long) -> Unit = { _, _ -> }
 ) {
+    val showRangePicker = remember { mutableStateOf(false) }
+
+    if (showRangePicker.value) {
+        DateRangePickerDialogMaterial3(
+            initialStartDate = uiState.fechaInicio,
+            initialEndDate = uiState.fechaFin,
+            onRangeSelected = { inicio, fin ->
+                showRangePicker.value = false
+                onDateRangeSelected(inicio, fin)
+            },
+            onDismiss = { showRangePicker.value = false }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("CENTRO DE MENSAJES", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color.DarkGray, letterSpacing = 1.sp) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Regresar", tint = Color.Red) } },
                 actions = {
+                    IconButton(onClick = { showRangePicker.value = true }) {
+                        Icon(Icons.Default.CalendarMonth, "Filtrar por fecha", tint = Color.Red)
+                    }
                     IconButton(onClick = onEmergencyClick) {
                         Icon(Icons.Default.WifiOff, "Carga Emergencia", tint = Color.Red)
                     }
@@ -150,19 +181,26 @@ fun PantallaNotificacionesContent(
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (uiState.isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color.Red, strokeWidth = 3.dp)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = Color.Red, strokeWidth = 3.dp)
+                        Spacer(Modifier.height(12.dp))
+                        Text("Sincronizando...", fontSize = 12.sp, color = Color.Gray)
+                    }
                 }
             } else if (uiState.notificaciones.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Default.Notifications, null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
                         Spacer(Modifier.height(16.dp))
-                        Text("Sin notificaciones nuevas", fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text("Sin notificaciones en este periodo", fontWeight = FontWeight.Bold, color = Color.Gray)
+                        TextButton(onClick = { showRangePicker.value = true }) {
+                            Text("Cambiar fechas", color = Color.Red)
+                        }
                     }
                 }
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    items(uiState.notificaciones) { noti ->
+                    items(uiState.notificaciones, key = { it.id }) { noti ->
                         NotificacionItem(noti) { onItemClick(noti) }
                     }
                 }
@@ -171,8 +209,88 @@ fun PantallaNotificacionesContent(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DateRangePickerDialogMaterial3(
+    initialStartDate: Long,
+    initialEndDate: Long,
+    onRangeSelected: (Long, Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val state = rememberDateRangePickerState(
+        initialSelectedStartDateMillis = initialStartDate,
+        initialSelectedEndDateMillis = initialEndDate
+    )
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White,
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                DateRangePicker(
+                    state = state,
+                    modifier = Modifier.weight(1f),
+                    title = { Text("Selecciona el periodo", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold) },
+                    headline = { 
+                        val start = state.selectedStartDateMillis
+                        val end = state.selectedEndDateMillis
+                        if (start != null && end != null) {
+                            val sdf = SimpleDateFormat("dd MMM", Locale.forLanguageTag("es-MX"))
+                            Text("${sdf.format(Date(start))} - ${sdf.format(Date(end))}", modifier = Modifier.padding(horizontal = 16.dp))
+                        } else {
+                            Text("Rango de fechas", modifier = Modifier.padding(horizontal = 16.dp))
+                        }
+                    },
+                    showModeToggle = false,
+                    colors = DatePickerDefaults.colors(
+                        containerColor = Color.White,
+                        titleContentColor = Color.Black,
+                        headlineContentColor = Color.Red,
+                        selectedDayContainerColor = Color.Red,
+                        selectedDayContentColor = Color.White,
+                        dayInSelectionRangeContainerColor = Color.Red.copy(alpha = 0.15f),
+                        dayInSelectionRangeContentColor = Color.Red,
+                        todayContentColor = Color.Red,
+                        todayDateBorderColor = Color.Red
+                    )
+                )
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("CANCELAR") }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            val start = state.selectedStartDateMillis
+                            val end = state.selectedEndDateMillis
+                            if (start != null) {
+                                // Si solo seleccionó una fecha, usamos la misma para inicio y fin
+                                onRangeSelected(start, end ?: (start + 86399999))
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                    ) { Text("APLICAR") }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "scale"
+    )
+
     val esEmergencia = noti.titulo.contains("EMERGENCIA") || noti.titulo.contains("MANUAL")
     val borderColor = when {
         esEmergencia -> Color.Red.copy(alpha = 0.5f)
@@ -183,17 +301,25 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer { 
+                scaleX = scale
+                scaleY = scale 
+            }
             .border(
                 width = if (esEmergencia || (!noti.aceptada && noti.esCarga)) 1.5.dp else 0.dp,
                 color = borderColor,
                 shape = RoundedCornerShape(24.dp)
             )
-            .clickable { onClick() },
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = Color.Red.copy(0.1f)),
+                onClick = onClick
+            ),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (esEmergencia) Color(0xFFFFF5F5) else Color.White
         ),
-        elevation = CardDefaults.cardElevation(if (noti.aceptada && !esEmergencia) 1.dp else 4.dp)
+        elevation = CardDefaults.cardElevation(if (isPressed) 1.dp else if (noti.aceptada && !esEmergencia) 1.dp else 4.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -324,18 +450,12 @@ fun DialogoAutorizacionEmergencia(
     )
 }
 
-private fun getMockNotificaciones() = listOf(
-    Notificacion(id = "1", titulo = "Pedido #123", mensaje = "Tu pedido está en camino \uD83D\uDE9A", fecha = "Lunes, 10:45 AM"),
-    Notificacion(id = "3", titulo = "Carga de Almacén", mensaje = "Tienes una carga pendiente por aceptar", fecha = "Hoy, 11:00 AM", esCarga = true, aceptada = false),
-    Notificacion(id = "4", titulo = "Carga de Almacén", mensaje = "Carga aceptada exitosamente ✅", fecha = "26/09, 09:15 AM", esCarga = true, aceptada = true)
-)
-
-@Preview(showBackground = true, showSystemUi = true, name = "Notificaciones - Con Mensajes")
+@Preview(showBackground = true, showSystemUi = true, name = "Notificaciones")
 @Composable
 fun PantallaNotificacionesPreview() {
     DeliveryTheme {
         PantallaNotificacionesContent(
-            uiState = NotificacionesUiState(isLoading = false, notificaciones = getMockNotificaciones()),
+            uiState = NotificacionesUiState(isLoading = false),
             onBack = {},
             onItemClick = {}
         )

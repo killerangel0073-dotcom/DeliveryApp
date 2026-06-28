@@ -335,7 +335,9 @@ fun DashboardVendedorView(
                         icon = Icons.Default.CalendarMonth,
                         formato = formatoMoneda,
                         modifier = Modifier.width(160.dp).height(110.dp)
-                    )
+                    ) {
+                        onNavigate("REPORTE_SEMANAL")
+                    }
                 }
                 item {
                     VentaSecundariaCard(
@@ -346,7 +348,9 @@ fun DashboardVendedorView(
                         icon = Icons.Default.Flag,
                         formato = formatoMoneda,
                         modifier = Modifier.width(160.dp).height(110.dp)
-                    )
+                    ) {
+                        // Acción opcional para Meta Bloque
+                    }
                 }
                 item {
                     AccionCardVendedor(
@@ -668,9 +672,41 @@ fun VentaPrincipalCard(
 }
 
 @Composable
-fun VentaSecundariaCard(titulo: String, monto: Double, meta: Double, color: Color, icon: androidx.compose.ui.graphics.vector.ImageVector, formato: NumberFormat, modifier: Modifier) {
+fun VentaSecundariaCard(
+    titulo: String, 
+    monto: Double, 
+    meta: Double, 
+    color: Color, 
+    icon: androidx.compose.ui.graphics.vector.ImageVector, 
+    formato: NumberFormat, 
+    modifier: Modifier,
+    onClick: () -> Unit = {}
+) {
     val progreso = (monto / meta).coerceIn(0.0, 1.0).toFloat()
-    Card(modifier = modifier, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.98f else 1f,
+        label = "ventaSecScale"
+    )
+
+    Card(
+        modifier = modifier
+            .height(110.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = color.copy(alpha = 0.2f)),
+                onClick = onClick
+            ),
+        shape = RoundedCornerShape(20.dp), 
+        colors = CardDefaults.cardColors(containerColor = Color.White), 
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
         Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                 Text(titulo, fontSize = 9.sp, fontWeight = FontWeight.Black, color = GrisTextoSecundario)

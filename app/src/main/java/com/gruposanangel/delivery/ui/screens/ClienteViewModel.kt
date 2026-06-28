@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.*
 data class ClienteUiState(
     val clientes: List<Plantilla_Cliente> = emptyList(),
     val searchQuery: String = "",
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val totalClientes: Int = 0
 )
 
 class ClienteViewModel(
@@ -79,7 +80,8 @@ class ClienteViewModel(
         ClienteUiState(
             clientes = listaOrdenada,
             searchQuery = query,
-            isLoading = false
+            isLoading = false,
+            totalClientes = clientes.size
         )
     }.stateIn(
         scope = viewModelScope,

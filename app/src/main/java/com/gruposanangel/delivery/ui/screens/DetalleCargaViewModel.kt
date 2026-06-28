@@ -97,30 +97,41 @@ class DetalleCargaViewModel(
     }
 
     fun aceptarCarga() {
-        val state = _uiState.value; if (state.carga == null || state.productos.isEmpty()) return
+        val state = _uiState.value
+        // 🛡️ BLINDAJE: Evitar múltiples ejecuciones si ya está cargando o ya se aceptó
+        if (state.isLoading || state.aceptadaExito || state.carga == null || state.productos.isEmpty()) return
+
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
                 val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
                 val nombreAlmacen = inventarioRepo.getAlmacenVendedor(uid) ?: "Almacen Principal"
 
-                // 🔥 ESTRATEGIA ARQUITECTÓNICA: Movimiento de Carga
-                // Creamos un registro de movimiento por cada producto cargado para auditoría
+                // 🔥 ESTRATEGIA DE PREVENCIÓN DE DUPLICIDAD (Idempotencia)
                 state.productos.forEach { p ->
+                    // Limpiamos el ID por si trae sufijos de almacén
+                    val baseId = if (p.id.contains("_")) p.id.split("_")[0] else p.id
+                    
                     val movimiento = com.gruposanangel.delivery.data.MovimientoInventarioEntity(
                         id = java.util.UUID.randomUUID().toString(),
-                        productoId = p.id,
+                        productoId = baseId,
                         nombreProducto = p.nombre,
                         cantidad = p.cantidad,
                         tipo = "CARGA_INVENTARIO",
                         vendedorId = uid,
                         almacenNombre = nombreAlmacen,
                         clienteId = null,
-                        referenciaId = state.carga.id, // ID de la orden de transferencia
-                        sincronizado = false
+                        referenciaId = state.carga.id, 
+                        // 🛡️ MARCADO COMO SINCRONIZADO:
+                        // Como esta carga viene de una 'ordenesTransferencia', el backend ya se encarga
+                        // de sumar el stock al detectar el cambio de estado. 
+                        // Marcarlo como sincronizado aquí evita que la lógica local lo sume doble.
+                        sincronizado = true, 
+                        timestamp = System.currentTimeMillis()
                     )
-                    // Persistimos el movimiento y actualizamos el stock localmente de forma atómica
-                    inventarioRepo.registrarMovimientoCarga(movimiento, p)
+                    // Solo actualizamos el stock localmente para feedback inmediato, 
+                    // sin intentar subir un ajuste redundante a Firebase.
+                    inventarioRepo.registrarMovimientoCargaLocal(movimiento, p.copy(id = baseId))
                 }
 
                 // 2. Intentamos marcar en la nube como aceptada (Idempotencia por ID de carga)

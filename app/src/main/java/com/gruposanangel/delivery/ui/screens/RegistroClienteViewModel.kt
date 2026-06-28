@@ -26,7 +26,7 @@ import java.util.*
 sealed class RegistroUiStatus {
     object Idle : RegistroUiStatus()
     object Loading : RegistroUiStatus()
-    object Success : RegistroUiStatus()
+    data class Success(val clienteId: String) : RegistroUiStatus()
     data class Error(val message: String) : RegistroUiStatus()
 }
 
@@ -41,7 +41,8 @@ data class RegistroUiState(
 )
 
 class RegistroClienteViewModel(
-    private val repository: RepositoryCliente
+    private val repository: RepositoryCliente,
+    private val usuarioRepo: com.gruposanangel.delivery.RepositoryUsuario
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RegistroUiState())
@@ -133,17 +134,25 @@ class RegistroClienteViewModel(
                     return@launch
                 }
 
+                // Formatear nombres a Title Case
+                val nombreNegocioFormateado = toTitleCase(nombreNegocio)
+                val nombreDuenoFormateado = toTitleCase(nombreDueno)
+
                 // 2. Obtener ubicación precisa final
                 val finalLocation = getPreciseLocationFinal(context)
                 val lat = finalLocation?.latitude ?: currentState.latitud ?: 19.4895
                 val lon = finalLocation?.longitude ?: currentState.longitud ?: -96.8289
 
+                // 🔥 OBTENER RUTA DEL VENDEDOR ACTUAL
+                val usuarioActual = usuarioRepo.obtenerUsuarioActual()
+                val idDeRuta = usuarioActual?.ultimoAlmacenNombre ?: "Ruta General"
+
                 // 3. Crear Entidad
                 val clienteId = UUID.randomUUID().toString()
                 val cliente = ClienteEntity(
                     id = clienteId,
-                    nombreNegocio = nombreNegocio,
-                    nombreDueno = nombreDueno,
+                    nombreNegocio = nombreNegocioFormateado,
+                    nombreDueno = nombreDuenoFormateado,
                     telefono = telefono,
                     correo = correo,
                     tipoExhibidor = tipoExhibidor,
@@ -153,7 +162,9 @@ class RegistroClienteViewModel(
                     activo = true,
                     medio = "App Android",
                     fechaDeCreacion = System.currentTimeMillis(),
-                    syncStatus = false
+                    syncStatus = false,
+                    ownerUid = usuarioActual?.uid ?: "",
+                    rutaId = idDeRuta // 🔥 SE ASIGNA LA RUTA AQUÍ
                 )
 
                 // 4. Guardar Localmente
@@ -170,12 +181,29 @@ class RegistroClienteViewModel(
                     }
                 }
 
-                _uiState.update { it.copy(status = RegistroUiStatus.Success) }
+                _uiState.update { it.copy(status = RegistroUiStatus.Success(clienteId)) }
 
             } catch (e: Exception) {
                 _uiState.update { it.copy(status = RegistroUiStatus.Error("Error: ${e.message}")) }
             }
         }
+    }
+
+    private fun toTitleCase(text: String): String {
+        if (text.isBlank()) return ""
+        val minorWords = listOf("el", "la", "los", "las", "de", "del", "y", "en", "con")
+        val words = text.trim().lowercase().split("\\s+".toRegex())
+        
+        return words.mapIndexed { index, word ->
+            // Si la palabra contiene puntos (como S.A. de C.V.), no la tocamos o la dejamos en mayúsculas
+            if (word.contains(".")) {
+                word.uppercase()
+            } else if (index > 0 && word in minorWords) {
+                word // Mantener en minúsculas si no es la primera palabra y es una palabra menor
+            } else {
+                word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+            }
+        }.joinToString(" ")
     }
 
     private fun validarCampos(
@@ -186,12 +214,17 @@ class RegistroClienteViewModel(
         tipoExhibidor: String,
         state: RegistroUiState
     ): String? {
-        if (state.imageFile == null) return "La fotografía es obligatoria"
+        if (state.imageFile == null) return "La fotografía del negocio es obligatoria"
         if (nombreNegocio.isBlank()) return "El nombre del negocio es obligatorio"
         if (nombreDueno.isBlank()) return "El nombre del dueño es obligatorio"
-        if (telefono.length < 10) return "El teléfono debe tener al menos 10 dígitos"
+        
+        // Teléfono opcional, pero si se llena debe tener 10 dígitos
+        if (telefono.isNotBlank() && telefono.length < 10) {
+            return "El teléfono debe tener al menos 10 dígitos"
+        }
+
         if (correo.isNotBlank() && !Patterns.EMAIL_ADDRESS.matcher(correo).matches()) return "Correo electrónico inválido"
-        if (tipoExhibidor == "Elige una opción") return "Selecciona un tipo de exhibidor"
+        if (tipoExhibidor == "Selecciona Exhibidor") return "Debes seleccionar un tipo de exhibidor"
         if (!state.ubicacionValida) return "Ubicación no disponible"
         return null
     }

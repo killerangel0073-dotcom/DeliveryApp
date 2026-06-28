@@ -74,7 +74,16 @@ fun DetalleClienteScreen(
     var showMapFull by remember { mutableStateOf(false) }
     var editandoUbicacion by remember { mutableStateOf(false) }
 
-
+    fun toTitleCase(text: String): String {
+        if (text.isBlank()) return ""
+        val minorWords = listOf("el", "la", "los", "las", "de", "del", "y", "en", "con")
+        val words = text.trim().lowercase().split("\\s+".toRegex())
+        return words.mapIndexed { index, word ->
+            if (word.contains(".")) word.uppercase()
+            else if (index > 0 && word in minorWords) word
+            else word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
+        }.joinToString(" ")
+    }
 
     var cliente by remember { mutableStateOf<ClienteEntity?>(null) }
     var cargando by remember { mutableStateOf(true) }
@@ -258,9 +267,9 @@ fun DetalleClienteScreen(
                             if (!mapReady) return@remember null
 
                             when (c.medio.lowercase()) {
-                                "alto" -> bitmapDescriptorFromVector(context, R.drawable.marcadorverde)
-                                "medio" -> bitmapDescriptorFromVector(context, R.drawable.marcadorrojo)
-                                "bajo" -> bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo)
+                                "alto" -> bitmapDescriptorFromVector(context, R.drawable.marcadorverde, 120, 160)
+                                "medio" -> bitmapDescriptorFromVector(context, R.drawable.marcadorrojo, 120, 160)
+                                "bajo" -> bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo, 120, 160)
                                 else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
                             }
                         }
@@ -485,7 +494,7 @@ fun DetalleClienteScreen(
                             .padding(24.dp)
                     ) {
                         Text(
-                            c.nombreNegocio,
+                            toTitleCase(c.nombreNegocio),
                             color = Color.White,
                             fontSize = 28.sp,
                             fontWeight = FontWeight.Bold
@@ -522,7 +531,7 @@ fun DetalleClienteScreen(
                     InfoItem(
                         icon = { Icon(Icons.Default.Edit, null, tint = rojoIconos) },
                         label = "Dueño",
-                        value = c.nombreDueno
+                        value = toTitleCase(c.nombreDueno)
                     )
 
                     InfoItem(
@@ -619,9 +628,9 @@ fun MapaClienteDetalle(
         if (!mapReady) return@remember null
 
         when (valor.lowercase()) {
-            "alto" -> bitmapDescriptorFromVector(context, R.drawable.marcadorverde)
-            "medio" -> bitmapDescriptorFromVector(context, R.drawable.marcadorrojo)
-            "bajo" -> bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo)
+            "alto" -> bitmapDescriptorFromVector(context, R.drawable.marcadorverde, 120, 160)
+            "medio" -> bitmapDescriptorFromVector(context, R.drawable.marcadorrojo, 120, 160)
+            "bajo" -> bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo, 120, 160)
             else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
         }
     }

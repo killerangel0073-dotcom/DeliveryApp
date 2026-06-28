@@ -370,40 +370,84 @@ fun MapaScreen(
             }
 
             // 🏷️ Toggle Cobertura de Clientes (Lógica centralizada en ViewModel)
-            Card(
+            var showRouteMenu by remember { mutableStateOf(false) }
+
+            Column(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 16.dp)
-                    .clickable { viewModel.toggleMarkersVisible() },
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (uiState.markersVisible) Color.DarkGray else Color.White
-                ),
-                elevation = CardDefaults.cardElevation(4.dp)
+                    .padding(top = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                Card(
+                    modifier = Modifier
+                        .clickable { viewModel.toggleMarkersVisible() },
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (uiState.markersVisible) Color.DarkGray else Color.White
+                    ),
+                    elevation = CardDefaults.cardElevation(4.dp)
                 ) {
-                    if (uiState.isLoading) {
-                        CircularProgressIndicator(color = Color.Red, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                    } else {
-                        Icon(
-                            Icons.Default.Storefront,
-                            contentDescription = null,
-                            tint = if (uiState.markersVisible) Color.White else Color.Red,
-                            modifier = Modifier.size(16.dp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(color = Color.Red, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                        } else {
+                            Icon(
+                                Icons.Default.Storefront,
+                                contentDescription = null,
+                                tint = if (uiState.markersVisible) Color.White else Color.Red,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(
+                            text = if (uiState.markersVisible) "Ocultar Clientes (${uiState.clientes.size})" else "Mostrar Clientes",
+                            color = if (uiState.markersVisible) Color.White else Color.DarkGray,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
                         )
-                        Spacer(Modifier.width(8.dp))
                     }
-                    Text(
-                        text = if (uiState.markersVisible) "Ocultar Clientes (${uiState.clientes.size})" else "Mostrar Clientes",
-                        color = if (uiState.markersVisible) Color.White else Color.DarkGray,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
+                }
+
+                // 🔥 Selector de Ruta para Admin (CEO / Gerente)
+                if (!esVendedor && uiState.markersVisible) {
+                    Spacer(Modifier.height(8.dp))
+                    Card(
+                        modifier = Modifier
+                            .clickable { showRouteMenu = true },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.9f)),
+                        elevation = CardDefaults.cardElevation(2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = uiState.filtroRuta,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.Red
+                            )
+                            Icon(Icons.Default.ArrowDropDown, null, tint = Color.Red, modifier = Modifier.size(16.dp))
+                        }
+
+                        DropdownMenu(expanded = showRouteMenu, onDismissRequest = { showRouteMenu = false }) {
+                            uiState.listaRutas.forEach { ruta ->
+                                DropdownMenuItem(
+                                    text = { Text(ruta, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
+                                    onClick = {
+                                        viewModel.actualizarFiltroRuta(ruta)
+                                        showRouteMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

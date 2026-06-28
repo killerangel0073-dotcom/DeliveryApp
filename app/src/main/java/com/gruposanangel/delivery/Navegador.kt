@@ -54,16 +54,18 @@ fun Navegador(
         }
 
         composable(
-            route = "LISTA PRODUCTOS?origen={origen}&destino={destino}&emergency={emergency}",
+            route = "LISTA PRODUCTOS?origen={origen}&destino={destino}&emergency={emergency}&isLiquidation={isLiquidation}",
             arguments = listOf(
                 navArgument("origen") { type = NavType.StringType; nullable = true },
                 navArgument("destino") { type = NavType.StringType; nullable = true },
-                navArgument("emergency") { type = NavType.BoolType; defaultValue = false }
+                navArgument("emergency") { type = NavType.BoolType; defaultValue = false },
+                navArgument("isLiquidation") { type = NavType.BoolType; defaultValue = false }
             )
         ) { backStackEntry ->
             val origen = backStackEntry.arguments?.getString("origen")
             val destino = backStackEntry.arguments?.getString("destino")
             val isEmergency = backStackEntry.arguments?.getBoolean("emergency") ?: false
+            val isLiquidation = backStackEntry.arguments?.getBoolean("isLiquidation") ?: false
             
             MovimientosInventarioScreen(
                 navController = navController,
@@ -71,7 +73,8 @@ fun Navegador(
                 onImpresoraSeleccionada = { device -> impresoraBluetooth = device },
                 preSelectedOrigen = origen,
                 preSelectedDestino = destino,
-                isEmergency = isEmergency
+                isEmergency = isEmergency,
+                isLiquidationMode = isLiquidation
             )
         }
 
@@ -86,6 +89,10 @@ fun Navegador(
                 ?.get<Plantila_carga>("carga")
 
             PantallaDetalleCarga(navController, plantilacarga)
+        }
+
+        composable("DETALLE_ARQUEO") {
+            PantallaDetalleArqueo(navController)
         }
 
         composable("INVENTARIO_VENDEDOR") {
@@ -192,6 +199,10 @@ fun Navegador(
             Pantalla_Historial_Ruta(navController)
         }
 
+        composable("HISTORIAL_CARGAS") {
+            PantallaHistorialCargas(navController)
+        }
+
         composable("VENDEDOR_INFO_VENTAS") {
             VendedorInfoVentasScreen()
         }
@@ -243,6 +254,23 @@ fun Navegador(
             PantallaCierreDia(
                 navController = navController,
                 uiState = uiState
+            )
+        }
+
+        composable("REPORTE_SEMANAL") {
+            val db = AppDatabase.getDatabase(context)
+            val firebaseDataSource = FirebaseDataSource()
+            val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
+            val ventaRepo = VentaRepository(db.VentaDao(), db.productoDao())
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
+            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+
+            PantallaReporteSemanal(
+                navController = navController,
+                ventaRepository = ventaRepo,
+                usuarioRepository = usuarioRepo,
+                inventarioRepository = inventarioRepo,
+                userId = uid
             )
         }
 

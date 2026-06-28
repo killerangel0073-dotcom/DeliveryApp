@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.tasks.await
+import java.util.Calendar
 import java.util.UUID
 
 /**
@@ -81,15 +82,11 @@ class RepositoryInventario(
             }
         }
 
-        // 2. Impacto de Ajustes (NUEVO BLINDAJE ROBUSTO)
-        // Tomamos todos los pendientes (sin importar el tiempo) 
-        // Y los sincronizados en los últimos 20 minutos (tiempo de sobra para Cloud Functions)
-        val hace20Min = System.currentTimeMillis() - (20 * 60 * 1000)
-        val ajustesPendientes = movimientoInventarioDao?.obtenerMovimientosPendientes() ?: emptyList()
-        val ajustesRecientesSincronizados = movimientoInventarioDao?.obtenerTodosRecientes(hace20Min)
-            ?.filter { it.sincronizado } ?: emptyList()
-
-        val movimientosAuditoria = (ajustesPendientes + ajustesRecientesSincronizados).distinctBy { it.id }
+        // 2. Impacto de Ajustes (BLINDAJE CONTRA DUPLICIDAD)
+        // 🔥 CRÍTICO: Solo incluimos los movimientos que aún NO se han sincronizado con Firebase.
+        // Si ya se sincronizaron, confiamos en que el snapshot de Firestore eventualmente los traerá.
+        // Incluir sincronizados "recientes" causaba que se sumaran dos veces (Nube + Local).
+        val movimientosAuditoria = movimientoInventarioDao?.obtenerMovimientosPendientes() ?: emptyList()
         
         for (a in movimientosAuditoria) {
             val almacen = a.almacenNombre ?: ""
@@ -203,7 +200,34 @@ class RepositoryInventario(
 
     suspend fun obtenerListaAlmacenes(): List<String> = firebaseDataSource.obtenerListaAlmacenes()
 
-    suspend fun obtenerStockDanado(almacen: String): Map<String, Int> = firebaseDataSource.obtenerStockDanado(almacen)
+    suspend fun obtenerStockDanado(almacen: String): Map<String, Int> {
+        val stockNube = firebaseDataSource.obtenerStockDanado(almacen)
+        val impactoLocal = obtenerImpactoDanadoPendiente(almacen)
+        
+        val stockFinal = stockNube.toMutableMap()
+        impactoLocal.forEach { (prodId, cant) ->
+            stockFinal[prodId] = (stockFinal[prodId] ?: 0) + cant
+        }
+        return stockFinal
+    }
+
+    private suspend fun obtenerImpactoDanadoPendiente(almacen: String): Map<String, Int> {
+        val mapaImpacto = mutableMapOf<String, Int>()
+        // Tomamos movimientos de hoy para asegurar que se vean las devoluciones recién hechas
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+        val inicioHoy = cal.timeInMillis
+
+        val movimientos = movimientoInventarioDao?.obtenerTodosRecientes(inicioHoy) ?: emptyList()
+        
+        for (m in movimientos) {
+            if (m.almacenNombre == almacen && (m.tipo == "ENTRADA_MALO_DEVOLUCION" || m.tipo == "DEVOLUCION_DANIADO")) {
+                val baseId = m.productoId
+                mapaImpacto[baseId] = (mapaImpacto[baseId] ?: 0) + m.cantidad
+            }
+        }
+        return mapaImpacto
+    }
 
     suspend fun obtenerStockGlobal(): Map<String, Int> = firebaseDataSource.obtenerStockGlobal()
 
@@ -211,6 +235,9 @@ class RepositoryInventario(
 
     // --- LÓGICA DE AJUSTES Y ARQUEO (CORREGIDA: SIEMPRE ACTUALIZAR ALMACÉN DEL VENDEDOR) ---
 
+    /**
+     * Registra un movimiento de carga y lo sincroniza con Firebase (usado para Cargas de Emergencia/Directas)
+     */
     suspend fun registrarMovimientoCarga(movimiento: MovimientoInventarioEntity, plantilla: Plantilla_Producto) {
         withContext(Dispatchers.IO) {
             // 1. Guardar el registro del movimiento para auditoría (Arqueo)
@@ -225,11 +252,27 @@ class RepositoryInventario(
             sumarStockLocal(idReal, movimiento.cantidad, plantilla, movimiento.productoId)
             
             // 3. Intentar sincronizar (Si falla, el Worker lo hará después)
-            try {
-                sincronizarMovimiento(movimiento)
-            } catch (e: Exception) {
-                Log.w(TAG, "Carga guardada localmente, sincronización pendiente.")
+            if (!movimiento.sincronizado) {
+                try {
+                    sincronizarMovimiento(movimiento)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Carga guardada localmente, sincronización pendiente.")
+                }
             }
+        }
+    }
+
+    /**
+     * Solo actualiza el stock local sin disparar sincronización extra (usado al aceptar transferencias oficiales)
+     */
+    suspend fun registrarMovimientoCargaLocal(movimiento: MovimientoInventarioEntity, plantilla: Plantilla_Producto) {
+        withContext(Dispatchers.IO) {
+            movimientoInventarioDao?.insertarMovimiento(movimiento)
+            val idReal = if (!movimiento.almacenNombre.isNullOrEmpty() && !movimiento.productoId.contains("_")) 
+                "${movimiento.productoId}_${movimiento.almacenNombre}" 
+            else 
+                movimiento.productoId
+            sumarStockLocal(idReal, movimiento.cantidad, plantilla, movimiento.productoId)
         }
     }
 
@@ -322,7 +365,7 @@ class RepositoryInventario(
 
     suspend fun sincronizarMovimiento(movimiento: MovimientoInventarioEntity) {
         try {
-            val data = mapOf(
+            val data = mutableMapOf(
                 "productoId" to movimiento.productoId,
                 "nombreProducto" to movimiento.nombreProducto,
                 "cantidad" to movimiento.cantidad,
@@ -334,6 +377,11 @@ class RepositoryInventario(
                 "timestamp" to movimiento.timestamp,
                 "referenciaId" to movimiento.referenciaId
             )
+
+            // Añadir campos de auditoría si existen
+            movimiento.cantidadFisica?.let { data["cantidadFisica"] = it }
+            movimiento.cantidadTeorica?.let { data["cantidadTeorica"] = it }
+
             firestore.collection("ajustes_inventario").document(movimiento.id).set(data).await()
             movimientoInventarioDao?.marcarComoSincronizado(movimiento.id)
         } catch (e: Exception) {

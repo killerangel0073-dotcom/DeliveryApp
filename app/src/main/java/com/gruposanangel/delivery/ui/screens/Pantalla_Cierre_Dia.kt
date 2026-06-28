@@ -207,47 +207,52 @@ fun PantallaCierreDia(
                     }
                 }
 
-                OutlinedButton(
-                    onClick = {
-                        val nombresTiendas = listOf(
-                            "Abarrotes La Esperanza", "Miscelánea San Judas", "Mini Super La Bendición", 
-                            "Tienda El Paso", "Abarrotes Los Primos", "Cervecería El Puerto", 
-                            "Miscelánea Doña Mary", "Abarrotes El Güero", "Mini Super Sol", 
-                            "Tienda La Pasadita", "Miscelánea El Recreo", "Abarrotes Santa Fe", 
-                            "Mini Super Ámbar", "Tienda El Oasis", "Miscelánea Las Flores", 
-                            "Abarrotes El Triunfo", "Mini Super Galaxia", "Tienda La Unión", 
-                            "Miscelánea San José", "Abarrotes Mi Pueblito", "Abarrotes Don Pepe",
-                            "Mini Super El Amigo", "Miscelánea El Sol", "Tienda La Guadalupana",
-                            "Abarrotes El Milagro", "Mini Super La Esquina", "Cervecería La Terraza",
-                            "Miscelánea Los Angeles", "Tienda El Porvenir", "Abarrotes La Union",
-                            "Mini Super Express", "Miscelánea La Fe", "Tienda El Progreso",
-                            "Abarrotes El Ahorro", "Mini Super San Angel"
-                        )
-                        val estados = listOf("VENTA", "VENTA", "VENTA", "SIN VENTA", "CERRADO", "NO LOCALIZADO", "VENTA")
-                        
-                        val demoData = nombresTiendas.take(35).shuffled().map { nombre ->
-                            val estadoAleatorio = estados.random()
-                            val esVenta = estadoAleatorio == "VENTA"
-                            VentaReporteItem(
-                                cliente = nombre,
-                                piezas = if (esVenta) (15..60).random() else 0,
-                                monto = if (esVenta) (450..1800).random().toDouble() else 0.0,
-                                hora = (7..17).random(),
-                                minutos = (0..59).random(),
-                                estado = estadoAleatorio
+                val esVendedor = uiState.puestoTrabajo?.trim() == "Vendedor de Ruta" || 
+                                 uiState.puestoTrabajo?.trim() == "Suplente de Ruta"
+
+                if (!esVendedor) {
+                    OutlinedButton(
+                        onClick = {
+                            val nombresTiendas = listOf(
+                                "Abarrotes La Esperanza", "Miscelánea San Judas", "Mini Super La Bendición", 
+                                "Tienda El Paso", "Abarrotes Los Primos", "Cervecería El Puerto", 
+                                "Miscelánea Doña Mary", "Abarrotes El Güero", "Mini Super Sol", 
+                                "Tienda La Pasadita", "Miscelánea El Recreo", "Abarrotes Santa Fe", 
+                                "Mini Super Ámbar", "Tienda El Oasis", "Miscelánea Las Flores", 
+                                "Abarrotes El Triunfo", "Mini Super Galaxia", "Tienda La Unión", 
+                                "Miscelánea San José", "Abarrotes Mi Pueblito", "Abarrotes Don Pepe",
+                                "Mini Super El Amigo", "Miscelánea El Sol", "Tienda La Guadalupana",
+                                "Abarrotes El Milagro", "Mini Super La Esquina", "Cervecería La Terraza",
+                                "Miscelánea Los Angeles", "Tienda El Porvenir", "Abarrotes La Union",
+                                "Mini Super Express", "Miscelánea La Fe", "Tienda El Progreso",
+                                "Abarrotes El Ahorro", "Mini Super San Angel"
                             )
-                        }.sortedWith(compareBy({ it.hora }, { it.minutos }))
-                        
-                        val file = GenerarPDFCierreCarta(context, uiState, demoData, true)
-                        abrirPdfCierre(context, file)
-                    },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF1A1A1A))
-                ) {
-                    Icon(Icons.Rounded.AutoMode, null, tint = Color(0xFF1A1A1A))
-                    Spacer(Modifier.width(12.dp))
-                    Text("VISTA PREVIA DESEMPEÑO", color = Color(0xFF1A1A1A), fontWeight = FontWeight.Bold)
+                            val estados = listOf("VENTA", "VENTA", "VENTA", "SIN VENTA", "CERRADO", "NO LOCALIZADO", "VENTA")
+                            
+                            val demoData = nombresTiendas.take(35).shuffled().map { nombre ->
+                                val estadoAleatorio = estados.random()
+                                val esVenta = estadoAleatorio == "VENTA"
+                                VentaReporteItem(
+                                    cliente = nombre,
+                                    piezas = if (esVenta) (15..60).random() else 0,
+                                    monto = if (esVenta) (450..1800).random().toDouble() else 0.0,
+                                    hora = (7..17).random(),
+                                    minutos = (0..59).random(),
+                                    estado = estadoAleatorio
+                                )
+                            }.sortedWith(compareBy({ it.hora }, { it.minutos }))
+                            
+                            val file = GenerarPDFCierreCarta(context, uiState, demoData, true)
+                            abrirPdfCierre(context, file)
+                        },
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF1A1A1A))
+                    ) {
+                        Icon(Icons.Rounded.AutoMode, null, tint = Color(0xFF1A1A1A))
+                        Spacer(Modifier.width(12.dp))
+                        Text("VISTA PREVIA DESEMPEÑO", color = Color(0xFF1A1A1A), fontWeight = FontWeight.Bold)
+                    }
                 }
             }
             Spacer(Modifier.height(40.dp))

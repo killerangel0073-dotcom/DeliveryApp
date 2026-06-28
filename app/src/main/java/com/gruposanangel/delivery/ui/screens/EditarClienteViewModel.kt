@@ -126,7 +126,7 @@ class EditarClienteViewModel(
                     repository.sincronizarConFirebase(context)
                 }
 
-                _uiState.update { it.copy(status = RegistroUiStatus.Success) }
+                _uiState.update { it.copy(status = RegistroUiStatus.Success(clienteId)) }
 
             } catch (e: Exception) {
                 _uiState.update { it.copy(status = RegistroUiStatus.Error("Error: ${e.message}")) }
@@ -148,7 +148,7 @@ class EditarClienteViewModel(
                     FirebaseFirestore.getInstance().collection("clientes").document(clienteId).delete().await()
                 }
 
-                _uiState.update { it.copy(status = RegistroUiStatus.Success) }
+                _uiState.update { it.copy(status = RegistroUiStatus.Success(clienteId)) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(status = RegistroUiStatus.Error("Error al eliminar: ${e.message}")) }
             }

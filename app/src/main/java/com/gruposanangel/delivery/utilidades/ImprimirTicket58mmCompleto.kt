@@ -70,7 +70,7 @@ fun ImprimirTicket58mmCompleto(
             outputStream.write("DELISA\n".toByteArray())
             outputStream.write(NORMAL_SIZE)
             outputStream.write(BOLD_ON)
-            outputStream.write("BOTANAS Y PRODUCTOS\n".toByteArray())
+            outputStream.write("BOTANAS Y SNACKS\n".toByteArray())
             outputStream.write(BOLD_OFF)
             outputStream.write("Grupo Corporativo San Angel\n".toByteArray())
             outputStream.write("\n".toByteArray())
@@ -93,13 +93,13 @@ fun ImprimirTicket58mmCompleto(
             outputStream.write("CLIENTE: ${limpiarTexto(cliente).uppercase()}\n".toByteArray())
             outputStream.write(BOLD_OFF)
             
-            vendedorNombre?.let { outputStream.write("Atendio: ${limpiarTexto(it)}\n".toByteArray()) }
+            vendedorNombre?.let { outputStream.write("Atendio: ${limpiarTexto(it).take(23)}\n".toByteArray()) }
             metodoPago?.let { outputStream.write("Metodo: ${limpiarTexto(it)}\n".toByteArray()) }
             outputStream.write("================================\n\n".toByteArray())
 
             // 3. TABLA DE PRODUCTOS
             outputStream.write(BOLD_ON)
-            outputStream.write("CANT DESC.          PRECIO TOTAL\n".toByteArray())
+            outputStream.write("CANT DESCRIPCION    PRECIO TOTAL\n".toByteArray())
             outputStream.write(BOLD_OFF)
             outputStream.write("--------------------------------\n".toByteArray())
 
@@ -110,11 +110,12 @@ fun ImprimirTicket58mmCompleto(
                 
                 // Formateo: 3(CANT) + 1 + 14(DESC) + 1 + 6(PRE) + 1 + 6(TOT) = 32
                 val cant = p.cantidad.toString().padEnd(3)
-                val desc = limpiarTexto(if (p.nombre.length > 14) p.nombre.take(14) else p.nombre.padEnd(14))
+                val nombreAjustado = limpiarTexto(if (p.nombre.length > 14) p.nombre.take(14) else p.nombre.padEnd(14))
                 val pre = String.format("%.2f", p.precio).padStart(6)
                 val tot = String.format("%.2f", subtotal).padStart(6)
                 
-                outputStream.write("$cant $desc $pre $tot\n".toByteArray())
+                outputStream.write("$cant $nombreAjustado $pre $tot\n".toByteArray())
+                outputStream.write("\n".toByteArray()) // Línea entre productos
             }
             outputStream.write("--------------------------------\n".toByteArray())
 
@@ -134,14 +135,14 @@ fun ImprimirTicket58mmCompleto(
             outputStream.write(ALIGN_CENTER)
             outputStream.write("********************************\n".toByteArray())
             outputStream.write(BOLD_ON)
-            outputStream.write("¡GRACIAS POR SU COMPRA!\n".toByteArray())
+            outputStream.write("GRACIAS POR SU COMPRA!\n".toByteArray())
             outputStream.write(BOLD_OFF)
             outputStream.write("Este no es un comprobante fiscal\n".toByteArray())
             outputStream.write("********************************\n\n".toByteArray())
             
             outputStream.write("Siguenos en Redes Sociales:\n".toByteArray())
-            outputStream.write("FB: @DelisaBotanas\n".toByteArray())
-            outputStream.write("IG: @DelisaBotanas\n".toByteArray())
+            outputStream.write("FACEBOOK: @DelisaBotanas\n".toByteArray())
+            outputStream.write("TIKTOK: @DelisaBotanas\n".toByteArray())
             
             // Espacio final largo para que el usuario pueda cortar bien el ticket
             outputStream.write("\n\n\n\n\n".toByteArray())

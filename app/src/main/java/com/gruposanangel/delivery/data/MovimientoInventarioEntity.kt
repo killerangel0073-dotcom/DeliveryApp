@@ -16,5 +16,7 @@ data class MovimientoInventarioEntity(
     val clienteId: String?,
     val timestamp: Long = System.currentTimeMillis(),
     val referenciaId: String?, // ID del ticket de venta original
-    val sincronizado: Boolean = false
+    val sincronizado: Boolean = false,
+    val cantidadFisica: Int? = null,   // Lo que se contó manualmente
+    val cantidadTeorica: Int? = null  // Lo que decía el sistema
 )

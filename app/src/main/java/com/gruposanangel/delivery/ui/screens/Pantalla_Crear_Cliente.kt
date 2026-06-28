@@ -43,6 +43,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.gruposanangel.delivery.R
+import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.data.AppDatabase
+import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.ui.theme.DeliveryTheme
 import kotlinx.coroutines.launch
@@ -50,13 +53,16 @@ import kotlinx.coroutines.launch
 @Composable
 fun CrearClienteScreen(navController: NavController, repository: RepositoryCliente?) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val isPreview = LocalInspectionMode.current
     
+    val db = AppDatabase.getDatabase(context)
+    val firebaseDataSource = FirebaseDataSource()
+    val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
+
     val vm: RegistroClienteViewModel? = if (!isPreview && repository != null) {
         viewModel(factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = RegistroClienteViewModel(repository) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = RegistroClienteViewModel(repository, repoUsuario) as T
         })
     } else null
 
@@ -69,7 +75,23 @@ fun CrearClienteScreen(navController: NavController, repository: RepositoryClien
 
     val launcherCamera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp -> bmp?.let { vm?.let { v -> val file = v.createImageFile(context); v.saveBitmap(it, file); v.onImageSelected(file, it) } } }
 
-    LaunchedEffect(uiState.status) { if (uiState.status is RegistroUiStatus.Success) { Toast.makeText(context, "Cliente registrado", Toast.LENGTH_SHORT).show(); navController.popBackStack() } }
+    LaunchedEffect(uiState.status) {
+        when (val status = uiState.status) {
+            is RegistroUiStatus.Success -> {
+                Toast.makeText(context, "Cliente registrado exitosamente", Toast.LENGTH_SHORT).show()
+                // Navegar a la pantalla de ventas con el ID del nuevo cliente
+                navController.navigate("pantalla_ventas/${status.clienteId}") {
+                    // Opcional: Limpiar la pantalla de creación del historial para que al dar atrás no regrese aquí
+                    popUpTo("crear_cliente") { inclusive = true }
+                }
+            }
+            is RegistroUiStatus.Error -> {
+                Toast.makeText(context, status.message, Toast.LENGTH_LONG).show()
+                vm?.resetStatus()
+            }
+            else -> {}
+        }
+    }
 
     CrearClienteContent(
         uiState = uiState,
@@ -93,10 +115,28 @@ fun CrearClienteContent(
     var nombreDueno by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var telefono by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var correo by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
-    var tipoExhibidor by rememberSaveable { mutableStateOf("No asignado") }
+    var tipoExhibidor by rememberSaveable { mutableStateOf("Selecciona Exhibidor") }
     var expanded by remember { mutableStateOf(false) }
 
     val isLoading = uiState.status is RegistroUiStatus.Loading
+
+    fun formatAsTitleCase(text: String): String {
+        if (text.isBlank()) return ""
+        val minorWords = listOf("el", "la", "los", "las", "de", "del", "y", "en", "con")
+        val words = text.split("\\s+".toRegex())
+        
+        return words.mapIndexed { index, word ->
+            if (word.isBlank()) return@mapIndexed ""
+            val lowerWord = word.lowercase()
+            if (lowerWord.contains(".")) {
+                lowerWord.uppercase()
+            } else if (index > 0 && lowerWord in minorWords) {
+                lowerWord
+            } else {
+                lowerWord.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
+            }
+        }.joinToString(" ")
+    }
 
     Scaffold(containerColor = Color(0xFFF8F9FA)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -117,12 +157,18 @@ fun CrearClienteContent(
             Spacer(Modifier.height(24.dp))
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    ModernOutlinedField("Nombre del negocio", nombreNegocio, Icons.Outlined.Storefront, { nombreNegocio = it })
-                    ModernOutlinedField("Nombre del dueño", nombreDueno, Icons.Outlined.Person, { nombreDueno = it })
+                    ModernOutlinedField("Nombre del negocio", nombreNegocio, Icons.Outlined.Storefront, { 
+                        val formatted = formatAsTitleCase(it.text)
+                        nombreNegocio = it.copy(text = formatted)
+                    })
+                    ModernOutlinedField("Nombre del dueño", nombreDueno, Icons.Outlined.Person, { 
+                        val formatted = formatAsTitleCase(it.text)
+                        nombreDueno = it.copy(text = formatted)
+                    })
                     ModernOutlinedField("Teléfono", telefono, Icons.Outlined.Phone, { telefono = it }, KeyboardType.Number)
                     ModernOutlinedField("Correo", correo, Icons.Outlined.Email, { correo = it }, KeyboardType.Email)
                     ExposedDropdownMenuBox(expanded = expanded && !isLoading, onExpandedChange = { expanded = !expanded }) {
-                        OutlinedTextField(value = tipoExhibidor, onValueChange = {}, readOnly = true, label = { Text("Exhibidor") }, leadingIcon = { Icon(Icons.Outlined.Layers, null, tint = Color.Red) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red))
+                        OutlinedTextField(value = tipoExhibidor, onValueChange = {}, readOnly = true, label = { Text("Exhibidor") }, leadingIcon = { Icon(Icons.Outlined.Layers, null, tint = Color.Red) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red, unfocusedBorderColor = if (tipoExhibidor == "Selecciona Exhibidor") Color.Red.copy(alpha = 0.5f) else Color.Gray))
                         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                             listOf("No asignado", "Mesa", "Normal", "Premium").forEach { opt -> DropdownMenuItem(text = { Text(opt) }, onClick = { tipoExhibidor = opt; expanded = false }) }
                         }

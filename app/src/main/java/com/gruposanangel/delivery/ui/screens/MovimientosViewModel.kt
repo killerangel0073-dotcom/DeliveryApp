@@ -30,15 +30,17 @@ class MovimientosViewModel(
     // 🔥 OFFLINE-FIRST: Catálogo desde Room usando stateIn como se solicitó
     val catalogoProductos: StateFlow<List<Plantilla_Producto>> = inventarioRepo.obtenerProductosLocal()
         .map { entities ->
-            entities.map {
-                Plantilla_Producto(
-                    id = it.id,
-                    nombre = it.nombre,
-                    precio = it.precio,
-                    cantidad = 0,
-                    imagenUrl = it.imagenUrl ?: ""
-                )
-            }
+            // 🛡️ FILTRO: Solo tomar productos base (ID simple) para evitar duplicados en el catálogo
+            entities.filter { !it.id.contains("_") }
+                .map {
+                    Plantilla_Producto(
+                        id = it.id,
+                        nombre = it.nombre,
+                        precio = it.precio,
+                        cantidad = 0,
+                        imagenUrl = it.imagenUrl ?: ""
+                    )
+                }
         }
         .stateIn(
             scope = viewModelScope,
@@ -67,7 +69,9 @@ class MovimientosViewModel(
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
-                val stock = inventarioRepo.obtenerStockAlmacen(almacen)
+                // 🛒 Si es compra, mostramos el stock del Almacen Huasteca como referencia visual
+                val almacenConsultar = if (almacen == "Compra Producto") "Almacen Huasteca" else almacen
+                val stock = inventarioRepo.obtenerStockAlmacen(almacenConsultar)
                 _uiState.update { it.copy(stockOrigen = stock, isLoading = false) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
@@ -140,45 +144,65 @@ class MovimientosViewModel(
         origen: String,
         destino: String,
         productosSeleccionados: List<Plantilla_Producto>,
-        cantidades: Map<String, Int>,
+        cantidadesContadas: Map<String, Int>, // Cambiamos nombre para claridad: conteo físico
+        isLiquidation: Boolean = false,      // Nuevo flag
+        stockTeorico: Map<String, Int> = emptyMap(), // Lo que el sistema cree que hay
         onSuccess: () -> Unit
     ) {
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
-                // Obtenemos el UID de forma robusta para asegurar sincronización con el historial
                 val usuarioRoom = usuarioRepo.obtenerUsuarioActual()
                 val uidActual = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
                 val uid = if (usuarioRoom?.uid?.isNotEmpty() == true) usuarioRoom.uid else uidActual
                 
-                val nombreAlmacen = usuarioRoom?.ultimoAlmacenNombre ?: destino
-                val folioEmergencia = "DIRECT_LOAD_${System.currentTimeMillis()}"
-                
-                Log.d("MOV_VM", "Iniciando Carga Directa. Vendedor: $uid, Almacen: $nombreAlmacen, Folio: $folioEmergencia")
+                val nombreAlmacen = if (isLiquidation) origen else (usuarioRoom?.ultimoAlmacenNombre ?: destino)
+                val folioOperacion = if (isLiquidation) "AUDIT_${System.currentTimeMillis()}" else "DIRECT_LOAD_${System.currentTimeMillis()}"
 
                 productosSeleccionados.forEach { p ->
-                    val cant = cantidades[p.id] ?: 0
-                    if (cant > 0) {
-                        // Limpiar el ID si viene con el nombre del almacén para evitar duplicados en la base de datos de movimientos
-                        val baseId = if (p.id.contains("_")) p.id.split("_")[0] else p.id
+                    val cantidadFisica = cantidadesContadas[p.id] ?: 0
+                    
+                    // --- LÓGICA DE DIFERENCIAL (PARA ARQUEO) ---
+                    var cantidadAMover = cantidadFisica
+                    var tipoAjuste = "CARGA_INVENTARIO"
+                    
+                    if (isLiquidation) {
+                        val teorico = stockTeorico[p.id] ?: 0
+                        // El diferencial es lo que falta o sobra para llegar al físico
+                        cantidadAMover = cantidadFisica - teorico
                         
-                        val movimiento = com.gruposanangel.delivery.data.MovimientoInventarioEntity(
-                            id = java.util.UUID.randomUUID().toString(),
-                            productoId = baseId,
-                            nombreProducto = p.nombre,
-                            cantidad = cant,
-                            tipo = "CARGA_INVENTARIO",
-                            vendedorId = uid,
-                            almacenNombre = nombreAlmacen,
-                            clienteId = null,
-                            referenciaId = folioEmergencia,
-                            timestamp = System.currentTimeMillis(),
-                            sincronizado = false
-                        )
-                        // Persistir en Room y actualizar stock local de inmediato
-                        inventarioRepo.registrarMovimientoCarga(movimiento, p)
+                        tipoAjuste = when {
+                            cantidadAMover > 0 -> "AJUSTE_ARQUEO_SOBRANTE"
+                            cantidadAMover < 0 -> "AJUSTE_ARQUEO_FALTANTE"
+                            else -> "AJUSTE_ARQUEO_OK"
+                        }
                     }
+
+                    val baseId = if (p.id.contains("_")) p.id.split("_")[0] else p.id
+                    val movimiento = com.gruposanangel.delivery.data.MovimientoInventarioEntity(
+                        id = java.util.UUID.randomUUID().toString(),
+                        productoId = baseId,
+                        nombreProducto = p.nombre,
+                        cantidad = Math.abs(cantidadAMover), // Diferencia absoluta
+                        tipo = if (isLiquidation) tipoAjuste else "CARGA_INVENTARIO",
+                        vendedorId = uid,
+                        almacenNombre = nombreAlmacen,
+                        clienteId = null,
+                        referenciaId = folioOperacion,
+                        timestamp = System.currentTimeMillis(),
+                        sincronizado = false,
+                        cantidadFisica = if (isLiquidation) cantidadFisica else null,
+                        cantidadTeorica = if (isLiquidation) (stockTeorico[p.id] ?: 0) else null
+                    )
+                    
+                    // Solo aplicar ajuste de stock si realmente hubo diferencia
+                    val cantidadLocal = if (tipoAjuste == "AJUSTE_ARQUEO_FALTANTE") -Math.abs(cantidadAMover) else Math.abs(cantidadAMover)
+                    inventarioRepo.registrarMovimientoCarga(movimiento, p.copy(cantidad = cantidadLocal))
                 }
+
+                // 2. SI ES LIQUIDACIÓN (RETORNO A BODEGA), HACEMOS EL TRASPASO DEL STOCK FÍSICO CONTADO
+                // (Esta parte solo corre si el switch de retornarABodega estaba ON en la UI, pero 
+                // para esta lógica simple de arqueo, ya ajustamos el stock del vendedor arriba)
 
                 _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true) }
                 onSuccess()

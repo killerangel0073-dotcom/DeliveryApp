@@ -24,9 +24,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.AssignmentReturn
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Inventory2
@@ -36,6 +37,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -45,6 +47,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -82,7 +85,8 @@ fun MovimientosInventarioScreen(
     preSelectedOrigen: String? = null,
     preSelectedDestino: String? = null,
     isEmergency: Boolean = false,
-    isTabMode: Boolean = false
+    isTabMode: Boolean = false,
+    isLiquidationMode: Boolean = false
 ) {
     val context = LocalContext.current
     val isPreview = LocalInspectionMode.current
@@ -119,7 +123,7 @@ fun MovimientosInventarioScreen(
             viewModel.crearOrden(orig, dest, prods, cants, onCompletado)
         }
         ejecutarCargaDirecta = { orig, dest, prods, cants, onCompletado ->
-            viewModel.confirmarCargaDirecta(orig, dest, prods, cants, onCompletado)
+            viewModel.confirmarCargaDirecta(orig, dest, prods, cants, isLiquidationMode, stockOrigen, onCompletado)
         }
         triggerCargarStock = { orig -> viewModel.cargarStockOrigen(orig) }
     } else {
@@ -132,9 +136,16 @@ fun MovimientosInventarioScreen(
     }
 
     var origen by remember { mutableStateOf(preSelectedOrigen ?: if (isTabMode) "Almacen Huasteca" else "Selecciona Origen") }
-    var destino by remember { mutableStateOf(preSelectedDestino ?: "Selecciona Destino") }
+    var destino by remember { mutableStateOf(
+        preSelectedDestino ?: if (origen == "Compra Producto") "Almacen Huasteca" else "Selecciona Destino"
+    ) }
     var expandedOrigen by remember { mutableStateOf(false) }
     var expandedDestino by remember { mutableStateOf(false) }
+    var retornarABodega by remember { mutableStateOf(false) }
+
+    // 🔥 Determinar si es Auditoría de Vendedor o de Almacén Central
+    val esAuditoriaVendedor = isLiquidationMode && origen.startsWith("Vendedor")
+
     
     // 🔥 SISTEMA DE ALERTAS PREMIUM
     val snackbarHostState = remember { SnackbarHostState() }
@@ -171,17 +182,30 @@ fun MovimientosInventarioScreen(
     val cantidades = remember { mutableStateMapOf<String, Int>() }
     var mostrarDialogConfirmacion by remember { mutableStateOf(false) }
 
+    val productosOrdenados = remember(productosCatalogo, stockOrigen, origen) {
+        if (origen == "Selecciona Origen") {
+            productosCatalogo.sortedBy { it.nombre }
+        } else {
+            // Se ordena por Valor Total (Stock * Precio) descendente
+            // Nota: En "Compra Producto", stockOrigen contiene los datos de Almacen Huasteca
+            productosCatalogo.sortedWith(
+                compareByDescending<Plantilla_Producto> { (stockOrigen[it.id] ?: 0) * it.precio }.thenBy { it.nombre }
+            )
+        }
+    }
+
     LaunchedEffect(origen) {
         if (!isPreview) triggerCargarStock(origen)
     }
 
-    val productosOrdenados = remember(productosCatalogo, stockOrigen, origen) {
-        if (origen == "Compra Producto" || origen == "Selecciona Origen") {
-            productosCatalogo.sortedBy { it.nombre }
-        } else {
-            productosCatalogo.sortedWith(
-                compareByDescending<Plantilla_Producto> { stockOrigen[it.id] ?: 0 }.thenBy { it.nombre }
-            )
+    // 🔥 LÓGICA DE ARQUEO/LIQUIDACIÓN: Pre-llenar cantidades cuando el stock de origen esté listo
+    LaunchedEffect(stockOrigen, isLiquidationMode) {
+        if (isLiquidationMode && stockOrigen.isNotEmpty()) {
+            stockOrigen.forEach { (prodId, cant) ->
+                if (cant > 0) {
+                    cantidades[prodId] = cant
+                }
+            }
         }
     }
 
@@ -202,12 +226,12 @@ fun MovimientosInventarioScreen(
                             .padding(16.dp)
                             .fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center // 🔥 Centrado Total
+                        horizontalArrangement = Arrangement.Center
                     ) {
                         Icon(Icons.Default.ErrorOutline, null, tint = Color.White, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            text = data.visuals.message.uppercase(), // 🔥 Mayúsculas para resaltar
+                            text = data.visuals.message.uppercase(),
                             color = Color.White,
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 14.sp,
@@ -246,73 +270,150 @@ fun MovimientosInventarioScreen(
                         }
                     }
                     Text(
-                        text = if (isTabMode) "SURTIR VENDEDORES" else "GESTIÓN DE CARGAS",
+                        text = when {
+                            isLiquidationMode -> "ARQUEO DE RUTA"
+                            isTabMode -> "SURTIR VENDEDORES"
+                            else -> "GESTIÓN DE CARGAS"
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
-                        color = NegroPremium,
+                        color = if (isLiquidationMode) RojoDelisa else NegroPremium,
                         letterSpacing = 0.5.sp
                     )
                 }
             }
 
             // --- SELECTORES DE RUTA (TESLA STYLE) ---
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Selector Origen
-                Box(modifier = Modifier.weight(1f).wrapContentSize(Alignment.TopStart)) {
-                    SelectorCard(
-                        titulo = "ORIGEN",
-                        seleccionado = origen,
-                        placeholder = "Seleccionar",
-                        icon = Icons.Default.HomeWork,
-                        enabled = !isEmergency,
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { expandedOrigen = true }
-                    )
-                    DropdownMenu(
-                        expanded = expandedOrigen,
-                        onDismissRequest = { expandedOrigen = false },
-                        modifier = Modifier.background(Color.White)
-                    ) {
-                        opcionesOrigen.forEach { op ->
-                            DropdownMenuItem(
-                                text = { Text(op, fontWeight = FontWeight.Bold) },
-                                onClick = {
-                                    origen = op
-                                    expandedOrigen = false
-                                    destino = "Selecciona Destino"
+            if (isLiquidationMode) {
+                if (esAuditoriaVendedor) {
+                    // 🔘 DISEÑO MODERNO: Segmented Switch para Liquidación
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        SelectorCard(
+                            titulo = "ALMACÉN AUDITADO",
+                            seleccionado = origen,
+                            placeholder = "Cargando...",
+                            icon = Icons.Default.LocalShipping,
+                            enabled = false,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {}
+                        )
+                        
+                        Spacer(Modifier.height(12.dp))
+                        
+                        // Nuevo Selector de Acción de Auditoría (Tesla Style)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .background(Color(0xFFF1F2F6), RoundedCornerShape(16.dp))
+                                .padding(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (!retornarABodega) Color.White else Color.Transparent)
+                                    .clickable { retornarABodega = false },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("ARQUEO LOCAL", fontSize = 11.sp, fontWeight = if (!retornarABodega) FontWeight.Black else FontWeight.Bold, color = if (!retornarABodega) Color.Black else Color.Gray)
+                                    Text("SE QUEDA EN RUTA", fontSize = 8.sp, color = if (!retornarABodega) Color.Gray else Color.LightGray)
                                 }
-                            )
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (retornarABodega) RojoDelisa else Color.Transparent)
+                                    .clickable { retornarABodega = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("LIQUIDACIÓN", fontSize = 11.sp, fontWeight = if (retornarABodega) FontWeight.Black else FontWeight.Bold, color = if (retornarABodega) Color.White else Color.Gray)
+                                    Text("RETORNAR A BODEGA", fontSize = 8.sp, color = if (retornarABodega) Color.White.copy(0.8f) else Color.LightGray)
+                                }
+                            }
                         }
                     }
-                }
-
-                // Selector Destino
-                Box(modifier = Modifier.weight(1f).wrapContentSize(Alignment.TopStart)) {
+                } else {
+                    // 🔘 DISEÑO PARA ALMACÉN CENTRAL: Solo ajuste directo
                     SelectorCard(
-                        titulo = "DESTINO",
-                        seleccionado = destino,
-                        placeholder = "Seleccionar",
-                        icon = Icons.Default.LocalShipping,
-                        enabled = !isEmergency && origen != "Selecciona Origen",
+                        titulo = "AUDITORÍA ALMACÉN CENTRAL",
+                        seleccionado = origen,
+                        placeholder = "Cargando...",
+                        icon = Icons.Default.Warehouse,
+                        enabled = false,
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { expandedDestino = true }
+                        onClick = {}
                     )
-                    DropdownMenu(
-                        expanded = expandedDestino,
-                        onDismissRequest = { expandedDestino = false },
-                        modifier = Modifier.background(Color.White)
-                    ) {
-                        opcionesDestino.forEach { op ->
-                            DropdownMenuItem(
-                                text = { Text(op, fontWeight = FontWeight.Bold) },
-                                onClick = {
-                                    destino = op
-                                    expandedDestino = false
-                                }
-                            )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Selector Origen
+                    Box(modifier = Modifier.weight(1f).wrapContentSize(Alignment.TopStart)) {
+                        SelectorCard(
+                            titulo = "ORIGEN / VENDEDOR",
+                            seleccionado = origen,
+                            placeholder = "Seleccionar",
+                            icon = Icons.Default.Person,
+                            enabled = !isEmergency,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { expandedOrigen = true }
+                        )
+                        DropdownMenu(
+                            expanded = expandedOrigen,
+                            onDismissRequest = { expandedOrigen = false },
+                            modifier = Modifier.background(Color.White)
+                        ) {
+                            opcionesOrigen.forEach { op ->
+                                DropdownMenuItem(
+                                    text = { Text(op, fontWeight = FontWeight.Bold) },
+                                    onClick = {
+                                        origen = op
+                                        expandedOrigen = false
+                                        if (op == "Compra Producto") {
+                                            destino = "Almacen Huasteca"
+                                        } else {
+                                            destino = "Selecciona Destino"
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Selector Destino
+                    Box(modifier = Modifier.weight(1f).wrapContentSize(Alignment.TopStart)) {
+                        SelectorCard(
+                            titulo = "DESTINO",
+                            seleccionado = destino,
+                            placeholder = "Seleccionar",
+                            icon = Icons.Default.HomeWork,
+                            enabled = !isEmergency && origen != "Selecciona Origen",
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { expandedDestino = true }
+                        )
+                        DropdownMenu(
+                            expanded = expandedDestino,
+                            onDismissRequest = { expandedDestino = false },
+                            modifier = Modifier.background(Color.White)
+                        ) {
+                            opcionesDestino.forEach { op ->
+                                DropdownMenuItem(
+                                    text = { Text(op, fontWeight = FontWeight.Bold) },
+                                    onClick = {
+                                        destino = op
+                                        expandedDestino = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -335,7 +436,8 @@ fun MovimientosInventarioScreen(
                                 producto = producto,
                                 cantidadActual = cantidades[producto.id] ?: 0,
                                 stockDisponible = stockOrigen[producto.id] ?: 0,
-                                esCompra = origen == "Compra Producto" || isEmergency,
+                                esCompra = origen == "Compra Producto" || isEmergency || isLiquidationMode,
+                                isAudit = isLiquidationMode,
                                 onCantidadChange = { cantidades[producto.id] = it },
                                 onStockLimitReached = { mostrarAvisoStock(producto.nombre, stockOrigen[producto.id] ?: 0) }
                             )
@@ -347,20 +449,30 @@ fun MovimientosInventarioScreen(
             // --- RESUMEN Y ACCIÓN ---
             val totalMonto = productosCatalogo.sumOf { (cantidades[it.id] ?: 0) * it.precio }
             val totalPiezas = cantidades.values.sum()
-            val habilitarBoton = totalPiezas > 0 && destino != "Selecciona Destino" && (isEmergency || origen != "Selecciona Origen")
+            val habilitarBoton = totalPiezas > 0 && (isLiquidationMode || (destino != "Selecciona Destino" && (isEmergency || origen != "Selecciona Origen")))
 
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 16.dp),
                 shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = NegroPremium),
+                colors = CardDefaults.cardColors(containerColor = if (isLiquidationMode && retornarABodega) RojoDelisa else if (isLiquidationMode) Color(0xFF1A1A1A) else NegroPremium),
                 elevation = CardDefaults.cardElevation(12.dp)
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                         Column {
-                            Text("RESUMEN DE CARGA", color = Color.White.copy(0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text(
+                                text = when {
+                                    isLiquidationMode && retornarABodega -> "VALOR A RETORNAR"
+                                    isLiquidationMode -> "VALOR AUDITADO"
+                                    else -> "RESUMEN DE CARGA"
+                                }, 
+                                color = Color.White.copy(0.5f), 
+                                fontSize = 10.sp, 
+                                fontWeight = FontWeight.Bold, 
+                                letterSpacing = 1.sp
+                            )
                             Text(text = "$totalPiezas unidades", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
                         }
                         Text(
@@ -377,13 +489,31 @@ fun MovimientosInventarioScreen(
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = RojoDelisa,
+                            containerColor = if (isLiquidationMode && retornarABodega) Color.White else if (isLiquidationMode) Color.White else RojoDelisa,
+                            contentColor = if (isLiquidationMode && retornarABodega) RojoDelisa else if (isLiquidationMode) Color.Black else Color.White,
                             disabledContainerColor = Color.White.copy(0.1f)
                         )
                     ) {
-                        Icon(if (isEmergency) Icons.Default.FlashOn else Icons.Default.CheckCircle, null)
+                        Icon(
+                            imageVector = when {
+                                isLiquidationMode && retornarABodega -> Icons.AutoMirrored.Filled.AssignmentReturn
+                                isLiquidationMode -> Icons.AutoMirrored.Filled.FactCheck
+                                isEmergency -> Icons.Default.FlashOn
+                                else -> Icons.Default.CheckCircle
+                            }, 
+                            contentDescription = null
+                        )
                         Spacer(Modifier.width(12.dp))
-                        Text(if (isEmergency) "CONFIRMAR CARGA DIRECTA" else "ENVIAR CARGA", fontWeight = FontWeight.Black, fontSize = 15.sp)
+                        Text(
+                            text = when {
+                                isLiquidationMode && retornarABodega -> "VACIAR UNIDAD Y RETORNAR TODO"
+                                isLiquidationMode -> "CORREGIR STOCK EN CAMIONETA"
+                                isEmergency -> "CONFIRMAR CARGA DIRECTA"
+                                else -> "ENVIAR CARGA"
+                            }, 
+                            fontWeight = FontWeight.Black, 
+                            fontSize = 14.sp
+                        )
                     }
                 }
             }
@@ -393,13 +523,29 @@ fun MovimientosInventarioScreen(
     if (mostrarDialogConfirmacion) {
         val totalItems = cantidades.values.filter { it > 0 }.size
         DialogoConfirmacion(
-            titulo = if (isEmergency) "Carga Directa" else "Confirmar Carga",
-            mensaje = "¿Estás seguro de transferir $totalItems productos a $destino?",
+            titulo = when {
+                isLiquidationMode && retornarABodega -> "Confirmar Liquidación"
+                isLiquidationMode -> "Confirmar Arqueo"
+                isEmergency -> "Carga Directa"
+                else -> "Confirmar Carga"
+            },
+            mensaje = when {
+                isLiquidationMode && retornarABodega -> "¿Confirmas el retorno de $totalItems productos al almacén central? El vendedor quedará en cero."
+                isLiquidationMode -> "¿Deseas ajustar el inventario de la ruta con estos $totalItems productos? Se registrarán posibles faltantes automáticamente."
+                else -> "¿Estás seguro de transferir $totalItems productos a $destino?"
+            },
             onConfirmar = {
                 mostrarDialogConfirmacion = false
                 val productosConCantidad = productosCatalogo.filter { (cantidades[it.id] ?: 0) > 0 }
                 if (!isPreview) {
-                    if (isEmergency) {
+                    if (isLiquidationMode) {
+                        // En auditoría, el destino define si se queda en el mismo sitio o va a Huasteca
+                        val destinoFinal = if (retornarABodega) "Almacen Huasteca" else origen
+                        ejecutarCargaDirecta(origen, destinoFinal, productosConCantidad, cantidades) {
+                            Toast.makeText(context, if (retornarABodega) "Retorno procesado con éxito" else "Auditoría finalizada con éxito", Toast.LENGTH_LONG).show()
+                            navController.popBackStack()
+                        }
+                    } else if (isEmergency) {
                         ejecutarCargaDirecta(origen, destino, productosConCantidad, cantidades) {
                             Toast.makeText(context, "Carga aplicada localmente", Toast.LENGTH_LONG).show()
                             navController.popBackStack()
@@ -468,41 +614,36 @@ fun ItemProductoCargaModerno(
     cantidadActual: Int, 
     stockDisponible: Int, 
     esCompra: Boolean, 
+    isAudit: Boolean = false,
     onCantidadChange: (Int) -> Unit,
-    onStockLimitReached: () -> Unit // 🔥 Nuevo parámetro
+    onStockLimitReached: () -> Unit
 ) {
     val seleccionado = cantidadActual > 0
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    
-    // 🎭 Animación de Escala y Elevación (Igual que en Ventas)
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.96f else if (seleccionado) 1.02f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
         label = "scale"
     )
-    
-    val elevation by animateDpAsState(
-        targetValue = if (seleccionado) 8.dp else 2.dp,
-        label = "elevation"
-    )
+    val elevation by animateDpAsState(targetValue = if (seleccionado) 8.dp else 2.dp, label = "elevation")
+
+    // 🔥 Lógica de color de texto para Auditoría
+    val textColor = when {
+        !isAudit -> NegroPremium
+        cantidadActual == stockDisponible -> Color(0xFF2E7D32) // Verde Delisa / Bosque (Coincide)
+        cantidadActual < stockDisponible -> Color.Red // Faltante
+        else -> Color(0xFF2196F3) // Azul (Sobrante)
+    }
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer { 
-                scaleX = scale
-                scaleY = scale 
-            },
+        modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale },
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (seleccionado) Color.White else Color.White
-        ),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
         border = if (seleccionado) BorderStroke(1.5.dp, RojoDelisa.copy(alpha = 0.5f)) else null,
         elevation = CardDefaults.cardElevation(elevation)
     ) {
         Box {
-            // Barra de acento lateral premium (Igual que en Ventas)
             if (seleccionado) {
                 Box(
                     modifier = Modifier
@@ -516,40 +657,21 @@ fun ItemProductoCargaModerno(
                 )
             }
 
-            Row(
-                modifier = Modifier
-                    .padding(12.dp)
-                    .padding(start = if (seleccionado) 8.dp else 0.dp), 
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Imagen con badge de stock
+            Row(modifier = Modifier.padding(12.dp).padding(start = if (seleccionado) 8.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(contentAlignment = Alignment.BottomEnd) {
-                    AsyncImage(
-                        model = producto.imagenUrl,
-                        placeholder = painterResource(R.drawable.repartidor),
-                        error = painterResource(R.drawable.repartidor),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(80.dp).clip(RoundedCornerShape(18.dp))
-                    )
-                    if (!esCompra) {
-                        Surface(
-                            color = if (stockDisponible > 0) Color(0xFF4CAF50) else Color.Red,
-                            shape = CircleShape,
-                            modifier = Modifier
-                                .size(32.dp) // Círculo más grande
-                                .offset(x = 6.dp, y = 6.dp)
-                                .border(2.5.dp, Color.White, CircleShape),
-                            shadowElevation = 4.dp
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = stockDisponible.toString(), 
-                                    color = Color.White, 
-                                    fontSize = 12.sp, // Número más grande
-                                    fontWeight = FontWeight.Black
-                                )
-                            }
+                    AsyncImage(model = producto.imagenUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(80.dp).clip(RoundedCornerShape(18.dp)))
+                    
+                    // 🟢 MOSTRAR STOCK SIEMPRE (Como referencia en Compra, o como límite en Traspaso)
+                    val colorBurbuja = if (esCompra) Color(0xFF2196F3) else if (stockDisponible > 0) Color(0xFF4CAF50) else Color.Red
+                    
+                    Surface(
+                        color = colorBurbuja,
+                        shape = CircleShape,
+                        modifier = Modifier.size(32.dp).offset(x = 6.dp, y = 6.dp).border(2.5.dp, Color.White, CircleShape),
+                        shadowElevation = 4.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(text = stockDisponible.toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
                         }
                     }
                 }
@@ -558,39 +680,22 @@ fun ItemProductoCargaModerno(
 
                 Column(Modifier.weight(1f)) {
                     Text(producto.nombre, fontWeight = FontWeight.Black, fontSize = 15.sp, color = NegroPremium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        text = NumberFormat.getCurrencyInstance(Locale("es", "MX")).format(producto.precio),
-                        color = RojoDelisa,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(text = NumberFormat.getCurrencyInstance(Locale("es", "MX")).format(producto.precio), color = RojoDelisa, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     if (cantidadActual > 0) {
-                        Text(
-                            "Subtotal: " + NumberFormat.getCurrencyInstance(Locale("es", "MX")).format(cantidadActual * producto.precio),
-                            fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Medium
-                        )
+                        Text("Subtotal: " + NumberFormat.getCurrencyInstance(Locale("es", "MX")).format(cantidadActual * producto.precio), fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
                     }
                 }
 
-                // Controles de cantidad Premium
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (cantidadActual > 0) {
-                        IconButton(
-                            onClick = { onCantidadChange(cantidadActual - 1) },
-                            modifier = Modifier.size(32.dp).background(Color(0xFFF1F2F6), CircleShape)
-                        ) { Icon(Icons.Default.Remove, null, tint = NegroPremium, modifier = Modifier.size(16.dp)) }
-                        
-                        // ⌨️ INPUT MANUAL POR TECLADO
+                        IconButton(onClick = { onCantidadChange(cantidadActual - 1) }, modifier = Modifier.size(32.dp).background(Color(0xFFF1F2F6), CircleShape)) { Icon(Icons.Default.Remove, null, tint = NegroPremium, modifier = Modifier.size(16.dp)) }
                         var textValue by remember(cantidadActual) { mutableStateOf(cantidadActual.toString()) }
-                        
                         BasicTextField(
                             value = if (textValue == "0") "" else textValue,
                             onValueChange = { newValue ->
-                                // Solo permitir números
                                 if (newValue.all { it.isDigit() }) {
                                     textValue = newValue
                                     val newInt = newValue.toIntOrNull() ?: 0
-                                    // Aplicar límites según stock (si no es compra)
                                     if (!esCompra && newInt > stockDisponible) {
                                         onStockLimitReached()
                                         onCantidadChange(stockDisponible)
@@ -600,36 +705,18 @@ fun ItemProductoCargaModerno(
                                 }
                             },
                             modifier = Modifier.width(40.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(
-                                textAlign = TextAlign.Center,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 17.sp,
-                                color = NegroPremium
-                            ),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number
-                            ),
+                            textStyle = androidx.compose.ui.text.TextStyle(textAlign = TextAlign.Center, fontWeight = FontWeight.Black, fontSize = 17.sp, color = textColor),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true
                         )
                     }
-                    
-                    IconButton(
-                        onClick = { 
-                            if (esCompra || cantidadActual < stockDisponible) {
-                                onCantidadChange(cantidadActual + 1) 
-                            } else {
-                                onStockLimitReached()
-                            }
-                        },
-                        modifier = Modifier.size(38.dp).background(RojoDelisa, CircleShape)
-                    ) { Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
+                    IconButton(onClick = { if (esCompra || cantidadActual < stockDisponible) onCantidadChange(cantidadActual + 1) else onStockLimitReached() }, modifier = Modifier.size(38.dp).background(RojoDelisa, CircleShape)) { Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
                 }
             }
         }
     }
 }
 
-// --- LOGICA DE IMPRESIÓN Y PDF MANTENIDA ---
 fun generarPdfMovimientoInventario(
     context: Context, origen: String, destino: String,
     productos: List<Plantilla_Producto>, cantidades: Map<String, Int>

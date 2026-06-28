@@ -230,7 +230,11 @@ class DashboardVendedorViewModel(
 
                 // 🚀 ACOMODO DE TEXTO: La hora se incrusta en el título para que Android no la recorte
                 val titulo = if (activar) "🚀 Inicio Ruta  $horaStr" else "🏁 Fin Jornada [$horaStr]"
-                val mensaje = "El colaborador $nombreVendedor ya se encuentra activo en su ruta de distribución."
+                val mensaje = if (activar) {
+                    "El colaborador $nombreVendedor ya se encuentra activo en su ruta de distribución."
+                } else {
+                    "El colaborador $nombreVendedor ha finalizado su jornada de trabajo exitosamente."
+                }
 
                 // 3. Obtener tokens de directivos
                 val tokens = usuarioRepository.obtenerTokensDirectivos()

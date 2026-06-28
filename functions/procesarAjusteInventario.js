@@ -69,7 +69,12 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
         switch (tipo) {
           case 'CARGA_INVENTARIO':
           case 'ENTRADA_CAMBIO_BUENO':
+          case 'AJUSTE_ARQUEO_SOBRANTE': // 🔥 Nueva lógica: Suma
             nuevaCantidad = cantidadActual + cantidad;
+            actualizaStockBueno = true;
+            break;
+          case 'AJUSTE_ARQUEO_FALTANTE': // 🔥 Nueva lógica: Resta
+            nuevaCantidad = Math.max(0, cantidadActual - cantidad);
             actualizaStockBueno = true;
             break;
           case 'SALIDA_CAMBIO_BUENO':

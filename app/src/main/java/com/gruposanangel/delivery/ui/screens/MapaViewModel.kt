@@ -36,7 +36,9 @@ data class MapaUiState(
     val vendedorSeleccionadoRuta: String? = null,
     val error: String? = null,
     val puestoTrabajo: String? = null,
-    val miRuta: String? = null
+    val miRuta: String? = null,
+    val filtroRuta: String = "Todas las Rutas",
+    val listaRutas: List<String> = listOf("Todas las Rutas")
 )
 
 class MapaViewModel : ViewModel() {
@@ -69,6 +71,8 @@ class MapaViewModel : ViewModel() {
             try {
                 val doc = db.collection("users").document(uid).get().await()
                 val puesto = doc.getString("puestoTrabajo") ?: ""
+                val esAdmin = puesto.trim() in listOf("CEO", "Gerente General", "Supervisor", "Administración")
+
                 val rutaRef = doc.getDocumentReference("rutaAsignada")
                 var rutaNombre: String? = null
                 if (rutaRef != null) {
@@ -77,11 +81,34 @@ class MapaViewModel : ViewModel() {
                 
                 _uiState.update { it.copy(puestoTrabajo = puesto, miRuta = rutaNombre) }
                 
+                if (esAdmin) {
+                    cargarListaRutas()
+                }
+
                 // 🚀 Una vez que sabemos quién es, activamos la escucha correcta
                 escucharUbicacionesVendedores(uid, puesto, rutaNombre)
             } catch (e: Exception) {
                 Log.e("MapaVM", "Error cargando datos de usuario", e)
             }
+        }
+    }
+
+    private fun cargarListaRutas() {
+        viewModelScope.launch {
+            try {
+                val snapshot = db.collection("rutas").get().await()
+                val rutas = snapshot.documents.mapNotNull { it.getString("nombre") }.sorted()
+                _uiState.update { it.copy(listaRutas = listOf("Todas las Rutas") + rutas) }
+            } catch (e: Exception) {
+                Log.e("MapaVM", "Error cargando rutas", e)
+            }
+        }
+    }
+
+    fun actualizarFiltroRuta(ruta: String) {
+        _uiState.update { it.copy(filtroRuta = ruta, clientes = emptyList()) }
+        if (_uiState.value.markersVisible) {
+            cargarClientes(triggerCenter = true)
         }
     }
 
@@ -105,7 +132,12 @@ class MapaViewModel : ViewModel() {
                                 .whereEqualTo("activo", true)
                                 .get().await().documents.mapNotNull { doc ->
                                     val rRef = doc.getDocumentReference("rutaAsignada")
-                                    Pair(doc.id, rRef?.id ?: "Sin Ruta")
+                                    // 🛡️ FILTRO: Solo considerar vendedores que tengan una ruta asignada
+                                    if (rRef != null) {
+                                        Pair(doc.id, rRef.id)
+                                    } else {
+                                        null
+                                    }
                                 }
                         } catch (e: Exception) { emptyList() }
 
@@ -183,12 +215,28 @@ class MapaViewModel : ViewModel() {
     private fun cargarClientes(triggerCenter: Boolean = false) {
         _uiState.update { it.copy(isLoading = true) }
 
+        val p = _uiState.value.puestoTrabajo?.trim() ?: ""
+        val esAdmin = p in listOf("CEO", "Gerente General", "Supervisor", "Administración")
+        val miRuta = _uiState.value.miRuta
+        val filtroRuta = _uiState.value.filtroRuta
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val result = db.collection("clientes")
+                var query: com.google.firebase.firestore.Query = db.collection("clientes")
                     .whereEqualTo("activo", true)
-                    .get()
-                    .await()
+
+                // 🛡️ Filtro de seguridad por ruta
+                if (esAdmin) {
+                    // Si el CEO eligió una ruta específica
+                    if (filtroRuta != "Todas las Rutas") {
+                        query = query.whereEqualTo("rutaId", filtroRuta)
+                    }
+                } else if (!miRuta.isNullOrEmpty()) {
+                    // Si es vendedor, forzar su propia ruta
+                    query = query.whereEqualTo("rutaId", miRuta)
+                }
+
+                val result = query.get().await()
 
                 val lista = result.documents.mapNotNull { doc ->
                     val geo = doc.getGeoPoint("ubicacion")

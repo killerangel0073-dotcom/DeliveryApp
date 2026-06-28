@@ -9,6 +9,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -25,7 +26,9 @@ data class NotificacionesUiState(
     val authError: String? = null,
     val successMessage: String? = null,
     val ultimoAlmacenNombre: String? = null,
-    val authExito: Boolean = false
+    val authExito: Boolean = false,
+    val fechaInicio: Long = 0L,
+    val fechaFin: Long = 0L
 )
 
 class NotificacionesViewModel(
@@ -39,13 +42,29 @@ class NotificacionesViewModel(
 
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
-    private var listenerRegistration: ListenerRegistration? = null
+    private var listenerCargas: ListenerRegistration? = null
+    private var listenerArqueos: ListenerRegistration? = null
     private val formatoFecha = SimpleDateFormat("EEEE, dd 'de' MMMM, hh:mm a", Locale("es", "MX"))
     
-    private val _notificacionesNube = MutableStateFlow<List<Notificacion>>(emptyList())
+    private val _notificacionesNubeCargas = MutableStateFlow<List<Notificacion>>(emptyList())
+    private val _notificacionesNubeArqueos = MutableStateFlow<List<Notificacion>>(emptyList())
     private val _notificacionesLocales = MutableStateFlow<List<Notificacion>>(emptyList())
 
     init {
+        // Inicializar con la semana actual
+        val cal = Calendar.getInstance(Locale("es", "MX"))
+        cal.firstDayOfWeek = Calendar.MONDAY
+        cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+        val inicio = cal.timeInMillis
+        
+        val calFin = cal.clone() as Calendar
+        calFin.add(Calendar.DAY_OF_YEAR, 6)
+        calFin.set(Calendar.HOUR_OF_DAY, 23); calFin.set(Calendar.MINUTE, 59); calFin.set(Calendar.SECOND, 59); calFin.set(Calendar.MILLISECOND, 999)
+        val fin = calFin.timeInMillis
+
+        _uiState.update { it.copy(fechaInicio = inicio, fechaFin = fin) }
+        
         configurarFlujoMaestro()
     }
 
@@ -56,42 +75,20 @@ class NotificacionesViewModel(
             return
         }
 
-        // 1. COMBINACIÓN INTELIGENTE (LOCAL + NUBE)
-        combine(_notificacionesLocales, _notificacionesNube) { locales, nube ->
-            Log.d("NOTIF_VM", "Sync: Locales=${locales.size}, Nube=${nube.size}")
-            (locales + nube)
-                .distinctBy { it.id } // Evita duplicados cuando la local se sube a la nube
-                .sortedByDescending { it.timestamp }
+        combine(_notificacionesLocales, _notificacionesNubeCargas, _notificacionesNubeArqueos) { locales, cargas, arqueos ->
+            Log.d("NOTIF_VM", "Sync: Locales=${locales.size}, Cargas=${cargas.size}, Arqueos=${arqueos.size}")
+            (locales + cargas + arqueos)
+                .distinctBy { it.id } 
+                .sortedByDescending { it.timestamp } 
         }.onEach { lista ->
             _uiState.update { it.copy(notificaciones = lista, isLoading = false) }
+        }.catch { e ->
+            Log.e("NOTIF_VM", "Error en combine", e)
+            _uiState.update { it.copy(isLoading = false) }
         }.launchIn(viewModelScope)
 
-        // 2. OBSERVADOR LOCAL (ROOM) - Prioridad #1
-        viewModelScope.launch {
-            val hace7Dias = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)
-            inventarioRepo.obtenerMovimientosDesdeFlow(uidActual, hace7Dias)
-                .map { lista ->
-                    lista.filter { 
-                        it.tipo == "CARGA_INVENTARIO" && it.referenciaId?.contains("LOAD") == true 
-                    }
-                    .distinctBy { it.referenciaId ?: it.id }
-                    .map { mov ->
-                        Notificacion(
-                            id = mov.referenciaId ?: mov.id,
-                            titulo = "CARGA MANUAL (LOCAL)",
-                            mensaje = "Se cargaron ${mov.cantidad} pzas de ${mov.nombreProducto}.",
-                            fecha = try { formatoFecha.format(Date(mov.timestamp)) } catch(_:Exception) { "Reciente" },
-                            timestamp = mov.timestamp,
-                            esCarga = true,
-                            aceptada = true
-                        )
-                    }
-                }
-                .onEach { _notificacionesLocales.value = it }
-                .launchIn(viewModelScope)
-        }
-
-        // 3. OBTENER PERFIL Y ACTIVAR NUBE
+        observarLocales()
+        
         viewModelScope.launch {
             try {
                 val usuario = usuarioRepo.obtenerUsuarioActual()
@@ -99,24 +96,90 @@ class NotificacionesViewModel(
                 _uiState.update { it.copy(ultimoAlmacenNombre = nombreAlmacen) }
 
                 if (!nombreAlmacen.isNullOrEmpty()) {
-                    activarListenerNube(nombreAlmacen)
+                    activarListenersNube(nombreAlmacen)
+                } else {
+                    _uiState.update { it.copy(isLoading = false) }
                 }
             } catch (e: Exception) {
                 Log.e("NOTIF_VM", "Error cargando almacén", e)
+                _uiState.update { it.copy(isLoading = false) }
+            }
+        }
+        
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(8000)
+            if (_uiState.value.isLoading) {
+                _uiState.update { it.copy(isLoading = false) }
             }
         }
     }
 
-    private fun activarListenerNube(nombreAlmacen: String) {
-        listenerRegistration?.remove()
-        listenerRegistration = db.collection("ordenesTransferencia")
+    private var localesJob: kotlinx.coroutines.Job? = null
+    private fun observarLocales() {
+        localesJob?.cancel()
+        val uidActual = auth.currentUser?.uid ?: ""
+        localesJob = inventarioRepo.obtenerMovimientosDesdeFlow(uidActual, _uiState.value.fechaInicio)
+            .map { lista ->
+                lista.filter { 
+                    it.timestamp <= _uiState.value.fechaFin &&
+                    ((it.tipo == "CARGA_INVENTARIO" && it.referenciaId?.contains("LOAD") == true) ||
+                    it.tipo == "AJUSTE_ARQUEO_FALTANTE" || 
+                    it.tipo == "AJUSTE_ARQUEO_SOBRANTE" ||
+                    it.tipo == "AJUSTE_ARQUEO_OK")
+                }
+                .map { mov ->
+                    val esArqueo = mov.tipo.contains("ARQUEO")
+                    Notificacion(
+                        id = mov.referenciaId ?: mov.id,
+                        titulo = if (esArqueo) "ARQUEO DE INVENTARIO" else "CARGA MANUAL (LOCAL)",
+                        mensaje = if (esArqueo) {
+                            val prefijo = when {
+                                mov.tipo.contains("FALTANTE") -> "Faltante"
+                                mov.tipo.contains("SOBRANTE") -> "Sobrante"
+                                else -> "Correcto"
+                            }
+                            "Resultado de auditoría: $prefijo de ${mov.cantidad} pzas en ${mov.nombreProducto}."
+                        } else {
+                            "Se cargaron ${mov.cantidad} pzas de ${mov.nombreProducto}."
+                        },
+                        fecha = try { formatoFecha.format(Date(mov.timestamp)) } catch(_:Exception) { "Reciente" },
+                        timestamp = mov.timestamp,
+                        esCarga = !esArqueo,
+                        aceptada = true
+                    )
+                }
+            }
+            .onEach { _notificacionesLocales.value = it }
+            .launchIn(viewModelScope)
+    }
+
+    fun actualizarFiltroFechas(inicio: Long, fin: Long) {
+        _uiState.update { it.copy(fechaInicio = inicio, fechaFin = fin, isLoading = true) }
+        observarLocales()
+        val almacen = _uiState.value.ultimoAlmacenNombre
+        if (!almacen.isNullOrEmpty()) {
+            activarListenersNube(almacen)
+        }
+    }
+
+    private fun activarListenersNube(nombreAlmacen: String) {
+        listenerCargas?.remove()
+        listenerArqueos?.remove()
+
+        val inicioTs = com.google.firebase.Timestamp(Date(_uiState.value.fechaInicio))
+        val finTs = com.google.firebase.Timestamp(Date(_uiState.value.fechaFin))
+
+        listenerCargas = db.collection("ordenesTransferencia")
             .whereEqualTo("destino", nombreAlmacen)
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .limit(30)
+            .whereGreaterThanOrEqualTo("timestamp", inicioTs)
+            .whereLessThanOrEqualTo("timestamp", finTs)
+            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, e ->
-                if (e != null) return@addSnapshotListener
-                
-                val lista = snapshot?.documents?.mapNotNull { doc ->
+                if (e != null) {
+                    Log.e("NOTIF_VM", "Error cargas", e)
+                    return@addSnapshotListener
+                }
+                val ords = snapshot?.documents?.mapNotNull { doc ->
                     val ts = doc.getTimestamp("timestamp")
                     Notificacion(
                         id = doc.id,
@@ -128,8 +191,45 @@ class NotificacionesViewModel(
                         aceptada = doc.getString("estado") == "COMPLETADA" || doc.getString("estado") == "ACEPTADA"
                     )
                 } ?: emptyList()
+                _notificacionesNubeCargas.value = ords
+            }
+
+        listenerArqueos = db.collection("ajustes_inventario")
+            .whereEqualTo("almacenNombre", nombreAlmacen)
+            .whereIn("tipo", listOf("AJUSTE_ARQUEO_FALTANTE", "AJUSTE_ARQUEO_SOBRANTE", "AJUSTE_ARQUEO_OK"))
+            .limit(200)
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    Log.e("NOTIF_VM", "Error arqueos", e)
+                    return@addSnapshotListener
+                }
                 
-                _notificacionesNube.value = lista
+                val arqs = snapshot?.documents?.groupBy { it.getString("referenciaId") ?: it.id }
+                    ?.mapNotNull { (refId, docs) ->
+                        val first = docs.first()
+                        val tsRaw = first.get("timestamp")
+                        val tsMillis = when (tsRaw) {
+                            is com.google.firebase.Timestamp -> tsRaw.toDate().time
+                            is Number -> tsRaw.toLong()
+                            else -> 0L
+                        }
+
+                        if (tsMillis < _uiState.value.fechaInicio || tsMillis > _uiState.value.fechaFin) return@mapNotNull null
+                        
+                        val totalFaltantes = docs.filter { it.getString("tipo") == "AJUSTE_ARQUEO_FALTANTE" }.sumOf { it.getLong("cantidad")?.toInt() ?: 0 }
+                        val totalSobrantes = docs.filter { it.getString("tipo") == "AJUSTE_ARQUEO_SOBRANTE" }.sumOf { it.getLong("cantidad")?.toInt() ?: 0 }
+                        
+                        Notificacion(
+                            id = refId,
+                            titulo = "AUDITORÍA FINALIZADA",
+                            mensaje = "Arqueo registrado. Resumen: -$totalFaltantes faltantes, +$totalSobrantes sobrantes.",
+                            fecha = if (tsMillis > 0) formatoFecha.format(Date(tsMillis)) else "Reciente",
+                            timestamp = tsMillis,
+                            esCarga = false,
+                            aceptada = true
+                        )
+                    } ?: emptyList()
+                _notificacionesNubeArqueos.value = arqs
             }
     }
 
@@ -165,7 +265,8 @@ class NotificacionesViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        listenerRegistration?.remove()
+        listenerCargas?.remove()
+        listenerArqueos?.remove()
     }
 }
 
@@ -175,6 +276,7 @@ class NotificacionesViewModelFactory(
     private val usuarioRepo: RepositoryUsuario
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = 
-        NotificacionesViewModel(productoDao, inventarioRepo, usuarioRepo) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        return NotificacionesViewModel(productoDao, inventarioRepo, usuarioRepo) as T
+    }
 }

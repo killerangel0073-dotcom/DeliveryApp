@@ -3,6 +3,8 @@ package com.gruposanangel.delivery.ui.screens
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -92,7 +95,12 @@ fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (Stri
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
-                value = uiState.searchQuery, onValueChange = onSearchQueryChanged, placeholder = { Text("Buscar negocio...") },
+                value = uiState.searchQuery, 
+                onValueChange = onSearchQueryChanged, 
+                placeholder = { 
+                    val label = if (uiState.totalClientes > 0) "Buscar Cliente (${uiState.totalClientes} disponibles)" else "Buscar negocio..."
+                    Text(label) 
+                },
                 leadingIcon = { Icon(Icons.Default.Search, null, tint = Color.Red) }, modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, cursorColor = Color.Red)
             )
@@ -100,8 +108,32 @@ fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (Stri
             if (uiState.isLoading) { Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = Color.Red) } }
             else {
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 80.dp)) {
-                    items(uiState.clientes) { cliente ->
-                        Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)), modifier = Modifier.fillMaxWidth().clickable { onClienteClick(cliente.id) }) {
+                    items(uiState.clientes, key = { it.id }) { cliente ->
+                        val interactionSource = remember { MutableInteractionSource() }
+                        val isPressed by interactionSource.collectIsPressedAsState()
+                        
+                        val scale by animateFloatAsState(
+                            targetValue = if (isPressed) 0.97f else 1f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+                            label = "clientCardScale"
+                        )
+
+                        Card(
+                            shape = RoundedCornerShape(24.dp), 
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)), 
+                            elevation = CardDefaults.cardElevation(if (isPressed) 2.dp else 4.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
+                                .clickable(
+                                    interactionSource = interactionSource,
+                                    indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = Color.Red.copy(alpha = 0.15f)),
+                                    onClick = { onClienteClick(cliente.id) }
+                                )
+                        ) {
                             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 AsyncImage(model = cliente.fotografiaCliente, contentDescription = null, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentScale = ContentScale.Crop, modifier = Modifier.size(70.dp).clip(RoundedCornerShape(16.dp)))
                                 Spacer(Modifier.width(14.dp))

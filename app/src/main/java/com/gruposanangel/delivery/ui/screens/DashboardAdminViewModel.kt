@@ -180,8 +180,12 @@ class DashboardAdminViewModel(
 
             val uidsActivos = (allVendedoresUids + todasLasVentas.map { it.vendedorId }).filter { it.isNotEmpty() }.toSet()
 
-            val resumen = uidsActivos.map { uid ->
-                val info = usersCache[uid] ?: Triple("Vendedor ($uid)", "Sin Ruta", "")
+            val resumen = uidsActivos.mapNotNull { uid ->
+                val info = usersCache[uid] ?: return@mapNotNull null
+                
+                // 🔥 FILTRO: Solo mostrar vendedores con ruta asignada
+                if (info.second == "Sin Ruta") return@mapNotNull null
+
                 val ventasVendedor = todasLasVentas.filter { it.vendedorId == uid }
                 val totalVendido = ventasVendedor.sumOf { it.total }
                 val clientesUnicos = ventasVendedor.map { it.clienteId }.distinct().size
@@ -214,6 +218,34 @@ class DashboardAdminViewModel(
                     resumenVendedores = resumen.sortedByDescending { it.totalVendido },
                     todasLasVentasHoy = todasLasVentas
                 )
+            }
+        }
+    }
+
+    fun migrarClientesARuta1(onComplete: (Int) -> Unit) {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isLoading = true) }
+                val clientesSnap = db.collection("clientes").get().await()
+                var actualizados = 0
+                
+                val batch = db.batch()
+                clientesSnap.documents.forEach { doc ->
+                    if (!doc.contains("rutaId")) {
+                        batch.update(doc.reference, "rutaId", "Ruta 1 Delisa")
+                        actualizados++
+                    }
+                }
+                
+                if (actualizados > 0) {
+                    batch.commit().await()
+                }
+                
+                _uiState.update { it.copy(isLoading = false) }
+                onComplete(actualizados)
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error migrando clientes", e)
+                _uiState.update { it.copy(isLoading = false, error = "Error migración: ${e.message}") }
             }
         }
     }

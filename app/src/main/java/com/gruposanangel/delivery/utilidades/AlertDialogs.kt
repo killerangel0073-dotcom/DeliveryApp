@@ -62,13 +62,20 @@ fun DialogoConfirmacion(
                         containerColor = Color(0xFFE0E0E0),
                         contentColor = Color.Gray
                     ),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(text = textoCancelar, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = textoCancelar,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
                 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 
                 // Botón CONFIRMAR (Derecha)
                 Button(
@@ -77,10 +84,17 @@ fun DialogoConfirmacion(
                         containerColor = colorConfirmar,
                         contentColor = Color.White
                     ),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(text = textoConfirmar, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = textoConfirmar,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             }
         }

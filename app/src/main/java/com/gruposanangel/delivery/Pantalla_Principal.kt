@@ -86,20 +86,22 @@ fun Pantalla_Principal(
 
     val puestoActual = remember(usuarioActual) { usuarioActual?.puestoTrabajo?.trim() ?: "" }
 
+    // 🔥 VALIDACIONES ROBUSTAS (Ignoran mayúsculas/minúsculas y variaciones de género/acentos)
     val isAdmin = remember(puestoActual) {
-        puestoActual == "CEO" || puestoActual == "Gerente General" || puestoActual == "Supervisor" || puestoActual == "Administración"
+        val p = puestoActual.uppercase()
+        p == "CEO" || p == "GERENTE GENERAL" || p == "SUPERVISOR" || p.contains("ADMINISTRACI")
     }
 
     val esVendedor = remember(puestoActual) {
-        puestoActual == "Vendedor de Ruta" || puestoActual == "Suplente de Ruta"
+        puestoActual.contains("Vendedor", ignoreCase = true) || puestoActual.contains("Suplente", ignoreCase = true)
     }
 
     val esAlmacen = remember(puestoActual) {
-        puestoActual == "Encargado Almacen" || puestoActual == "Auxiliar de almacen"
+        puestoActual.contains("Almacen", ignoreCase = true) || puestoActual.contains("Bodega", ignoreCase = true)
     }
 
     val esProduccion = remember(puestoActual) {
-        puestoActual == "Encargado Produccion" || puestoActual == "Auxiliar de Produccion"
+        puestoActual.contains("Produccion", ignoreCase = true) || puestoActual.contains("Planta", ignoreCase = true)
     }
 
     // 🚀 LISTA DINÁMICA SEGÚN ROL - ORDEN SOLICITADO PARA ALMACÉN

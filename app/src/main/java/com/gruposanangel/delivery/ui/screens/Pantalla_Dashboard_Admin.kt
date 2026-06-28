@@ -480,6 +480,11 @@ fun DashboardContent(
                                 onNavigate("ADMIN_USUARIOS")
                             }
                         }
+                        item {
+                            AccionCard("Auditorías", Icons.Default.FactCheck, Color(0xFF607D8B), Modifier.width(100.dp)) {
+                                onNavigate("HISTORIAL_CARGAS")
+                            }
+                        }
                     }
                 }
 

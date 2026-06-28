@@ -362,7 +362,9 @@ class VentaViewModel(
                 )
 
                 withContext(Dispatchers.Main) {
-                    enviarNotificacionSegundoPlano(clienteNombre, totalVenta, clienteFotoUrl, ventaLocalId)
+                    // 🔔 NOTIFICACIÓN: Se ha eliminado la llamada manual aquí para evitar duplicados.
+                    // Ahora la notificación la gestiona automáticamente la Cloud Function 'notificarNuevaVenta'
+                    // al detectar el registro en Firestore, asegurando que llegue una sola vez y con todos los datos.
                     _uiState.update { it.copy(estaProcesando = false) }
                     onResultado(true, "Venta registrada con éxito", ventaLocalId)
                 }
@@ -371,44 +373,6 @@ class VentaViewModel(
                     _uiState.update { it.copy(estaProcesando = false) }
                     onResultado(false, e.message ?: "Error", "")
                 }
-            }
-        }
-    }
-
-    private fun enviarNotificacionSegundoPlano(cliente: String, total: Double, foto: String?, localId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                // 1. Obtener todos los tokens de directivos (Garantiza que NO le llegue al vendedor)
-                val tokens = repositoryUsuario.obtenerTokensDirectivos()
-                if (tokens.isEmpty()) return@launch
-
-                val totalFormateado = "$${"%.2f".format(total)}"
-                val client = OkHttpClient()
-
-                // 2. Enviar petición masiva (Mucho más eficiente y seguro)
-                val json = JSONObject().apply {
-                    put("tokens", org.json.JSONArray(tokens))
-                    put("titulo", "Nueva venta registrada")
-                    put("mensaje", "👤 Cliente: $cliente\n💰 Total: $totalFormateado")
-                    put("imagen", foto ?: "")
-                    put("ventaId", localId)
-                    put("tipo", "VENTA_NUEVA")
-                }
-                
-                val request = Request.Builder()
-                    .url("https://us-central1-appventas--san-angel.cloudfunctions.net/enviarNotificacion")
-                    .post(json.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        Log.d("VentaVM", "✅ Notificación masiva de venta enviada")
-                    } else {
-                        Log.e("VentaVM", "❌ Error en Cloud Function: ${response.code}")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("VentaViewModel", "❌ Error crítico notificacion venta", e)
             }
         }
     }

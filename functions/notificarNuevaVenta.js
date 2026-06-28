@@ -44,12 +44,13 @@ exports.notificarNuevaVenta = onDocumentCreated("ventas/{ventaId}", async (event
             }
         }
 
-        // 2. OBTENER FOTO DEL CLIENTE
-        let urlImagenCliente = "";
-        if (clienteId) {
+        // 2. DETERMINAR IMAGEN (Priorizar evidencia de visita, luego perfil de cliente)
+        let urlImagenFinal = nuevaVenta.fotoEvidenciaVisita || "";
+
+        if (!urlImagenFinal && clienteId) {
             const clienteDoc = await db.collection("clientes").doc(clienteId).get();
             if (clienteDoc.exists) {
-                urlImagenCliente = clienteDoc.data().FotografiaCliente || "";
+                urlImagenFinal = clienteDoc.data().FotografiaCliente || "";
             }
         }
 
@@ -78,11 +79,11 @@ exports.notificarNuevaVenta = onDocumentCreated("ventas/{ventaId}", async (event
         const tokensUnicos = [...new Set(tokens)].filter(t => t);
         if (tokensUnicos.length === 0) return null;
 
-        // 4. CONSTRUCCIÓN DEL MENSAJE
+        // 4. CONSTRUCCIÓN DEL MENSAJE PREMIUM (Agrupando lo mejor de ambos mundos)
         const message = {
             notification: {
-                title: `💰 Venta en ${nombreRuta}`,
-                body: `${clienteNombre}: ${montoFormateado} (${nombreVendedor})`,
+                title: `💰 VENTA: ${nombreRuta}`,
+                body: `👤 Cliente: ${clienteNombre}\n💵 Total: ${montoFormateado}\n🚚 Vendedor: ${nombreVendedor}`,
             },
             data: {
                 tipo: "VENTA_NUEVA",
@@ -91,7 +92,7 @@ exports.notificarNuevaVenta = onDocumentCreated("ventas/{ventaId}", async (event
                 monto: montoTotal.toString(),
                 nombreRuta: nombreRuta,
                 vendedor: nombreVendedor,
-                imagen: urlImagenCliente,
+                imagen: urlImagenFinal,
                 click_action: "OPEN_VENTA_DETALLE"
             },
             android: {
@@ -99,7 +100,7 @@ exports.notificarNuevaVenta = onDocumentCreated("ventas/{ventaId}", async (event
                 notification: {
                     sound: "default",
                     channelId: "ventas_channel",
-                    ...(urlImagenCliente ? { image: urlImagenCliente } : {})
+                    ...(urlImagenFinal ? { image: urlImagenFinal } : {})
                 }
             },
             tokens: tokensUnicos,
