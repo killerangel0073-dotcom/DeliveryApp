@@ -5,7 +5,7 @@ const db = admin.firestore();
 /**
  * Cloud Function HTTP para registrar una venta completa en Firestore con Idempotencia.
  */
-exports.registrarVenta = functions.https.onRequest(async (req, res) => {
+const registrarVenta = functions.https.onRequest(async (req, res) => {
   try {
     if (req.method !== 'POST') {
       return res.status(405).send({ error: 'Método no permitido' });
@@ -20,9 +20,10 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
         vendedorId,
         almacenVendedorId,
         fotoEvidenciaVisita,
-        fueraDeRango, // 🔥
-        latitudVenta, // 🔥
-        longitudVenta // 🔥
+        fueraDeRango,
+        latitudVenta,
+        longitudVenta,
+        fecha // 🔥 Recibimos la fecha original del dispositivo
       } = req.body;
 
       if (!ventaLocalId || !clienteId || !clienteNombre || !Array.isArray(productos) || productos.length === 0 || !metodoPago || !vendedorId || !almacenVendedorId) {
@@ -45,6 +46,9 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
         return ventaLocalId;
       }
 
+      // Determinar la fecha final de la venta
+      // Si el dispositivo mandó una fecha, la convertimos a objeto Date de JS
+      const fechaFinal = fecha ? new Date(fecha) : admin.firestore.FieldValue.serverTimestamp();
       const ahora = admin.firestore.FieldValue.serverTimestamp();
 
       // 🔹 Leer stocks y productos
@@ -94,9 +98,10 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
         localId: ventaLocalId,
         total,
         totalPiezas,
-        fecha: ahora,
+        fecha: fechaFinal, // 🔥 Usamos la fecha original enviada
         metodoPago,
         vendedorId,
+        almacenId: almacenIdLimpio, // 🔥 AGREGADO: Guardamos el almacén para futuras cancelaciones
         sincronizado: true,
         estado: 'pagada',
         comentarios: 'Registro con Blindaje Financiero',
@@ -138,7 +143,7 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
           cantidad: producto.cantidad,
           almacenRef: db.collection('almacenes').doc(almacenIdLimpio),
           almacenNombre: almacenIdLimpio,
-          timestamp: ahora,
+          timestamp: fechaFinal, // 🔥 Usamos la fecha original de la venta para el historial de stock
           vendedorId,
           clienteId,
           ventaId: ventaRef.id
@@ -155,3 +160,5 @@ exports.registrarVenta = functions.https.onRequest(async (req, res) => {
     res.status(500).send({ success: false, error: error.message });
   }
 });
+
+module.exports = { registrarVenta };

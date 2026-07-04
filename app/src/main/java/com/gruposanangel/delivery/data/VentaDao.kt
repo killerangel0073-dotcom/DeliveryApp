@@ -56,6 +56,9 @@ interface VentaDao {
     @Query("UPDATE productos SET cantidadDisponible = cantidadDisponible - :cantidad WHERE id = :productoId")
     suspend fun descontarStockLocal(productoId: String, cantidad: Int)
 
+    @Query("UPDATE productos SET cantidadDisponible = cantidadDisponible + :cantidad WHERE id = :productoId")
+    suspend fun reponerStockLocal(productoId: String, cantidad: Int)
+
     @Transaction
     suspend fun insertarVentaYActualizarStock(venta: VentaEntity, detalles: List<VentaDetalleEntity>) {
         insertarVenta(venta)

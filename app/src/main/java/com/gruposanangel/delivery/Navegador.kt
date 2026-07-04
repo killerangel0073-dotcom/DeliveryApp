@@ -139,8 +139,12 @@ fun Navegador(
         }
 
         composable("MAPA_SCREEN") {
-            val mapaViewModel: MapaViewModel = viewModel()
-            MapaScreen(navController = navController, viewModel = mapaViewModel)
+            if (repository != null) {
+                val mapaViewModel: com.gruposanangel.delivery.ui.screens.MapaViewModel = viewModel(
+                    factory = com.gruposanangel.delivery.ui.screens.MapaViewModelFactory(repository)
+                )
+                com.gruposanangel.delivery.ui.screens.MapaScreen(navController = navController, viewModel = mapaViewModel)
+            }
         }
 
         composable("ADMIN_USUARIOS") {

@@ -95,6 +95,7 @@ class ClienteViewModel(
 
     fun syncData(context: android.content.Context) {
         viewModelScope.launch {
+            repository.escucharCambiosFirebase(context)
             repository.descargarClientesFirebase(context)
         }
     }

@@ -31,6 +31,10 @@ data class VentaUiState(
     val estadoRuta: EstadoRuta = EstadoRuta.Cargando,
     val isLoadingInventario: Boolean = true,
     
+    // 🔥 BÚSQUEDA Y CARRITO
+    val searchQuery: String = "",
+    val cantidades: Map<String, Int> = emptyMap(),
+
     // 🔥 AUDITORÍA GEOGRÁFICA
     val distanciaAlClienteMetros: Float = -1f,
     val estaEnRango: Boolean = true,
@@ -176,53 +180,90 @@ class VentaViewModel(
     }
 
     private fun observarInventario() {
-        viewModelScope.launch {
-            repositoryInventario.obtenerProductosLocal()
-                .distinctUntilChanged()
-                .collect { entidades ->
-                    // 1. Catálogo completo (Únicos por ID base, para recibir cambios/devoluciones)
-                    val catalogo = entidades.distinctBy { it.productoId }.map { e ->
-                        Plantilla_Producto(
-                            id = e.id,
-                            nombre = e.nombre,
-                            precio = e.precio,
-                            cantidad = 0,
-                            cantidadDisponible = e.cantidadDisponible,
-                            imagenUrl = e.imagenUrl ?: ""
-                        )
-                    }
+        combine(
+            repositoryInventario.obtenerProductosLocal(),
+            _uiState.map { it.searchQuery }.distinctUntilChanged(),
+            _uiState.map { it.cantidades }.distinctUntilChanged()
+        ) { entidades, query, mapaCantidades ->
+            // 1. Catálogo completo (Contiene todos los productos para persistir cantidades fuera de búsqueda)
+            val catalogo = entidades.map { e ->
+                Plantilla_Producto(
+                    id = e.id,
+                    nombre = e.nombre,
+                    precio = e.precio,
+                    cantidad = mapaCantidades[e.id] ?: 0,
+                    cantidadDisponible = e.cantidadDisponible,
+                    imagenUrl = e.imagenUrl ?: ""
+                )
+            }
 
-                    // 2. Carrito para venta (Solo con stock > 0)
-                    val productosMapeados = entidades.asSequence()
-                        .filter { it.cantidadDisponible > 0 }
-                        .map { entidad ->
-                            val cantidadActual = _uiState.value.productosEnCarrito
-                                .find { it.id == entidad.id }?.cantidad ?: 0
-                            
-                            Plantilla_Producto(
-                                id = entidad.id,
-                                nombre = entidad.nombre,
-                                precio = entidad.precio,
-                                cantidad = cantidadActual,
-                                cantidadDisponible = entidad.cantidadDisponible,
-                                imagenUrl = entidad.imagenUrl ?: ""
-                            )
-                        }.toList()
-                    
-                    _uiState.update { it.copy(
-                        productosEnCarrito = productosMapeados,
-                        catalogoCompleto = catalogo,
-                        isLoadingInventario = false
-                    ) }
-                    recalcularTotal()
+            // 2. Productos visibles (Filtrados por búsqueda y con stock)
+            val productosMapeados = entidades.asSequence()
+                .filter { it.cantidadDisponible > 0 }
+                .filter { query.isBlank() || it.nombre.contains(query, ignoreCase = true) }
+                .map { entidad ->
+                    Plantilla_Producto(
+                        id = entidad.id,
+                        nombre = entidad.nombre,
+                        precio = entidad.precio,
+                        cantidad = mapaCantidades[entidad.id] ?: 0,
+                        cantidadDisponible = entidad.cantidadDisponible,
+                        imagenUrl = entidad.imagenUrl ?: ""
+                    )
                 }
-        }
+                .sortedWith(
+                    if (query.isBlank()) {
+                        // Lista General: Seleccionados primero (A-Z), luego resto (A-Z)
+                        compareByDescending<Plantilla_Producto> { it.cantidad > 0 }
+                            .thenBy { it.nombre }
+                    } else {
+                        // En Búsqueda: Siempre alfabético para evitar que el producto se mueva mientras escribes/agregas
+                        compareBy { it.nombre }
+                    }
+                )
+                .toList()
+            
+            Pair(catalogo, productosMapeados)
+        }.onEach { (catalogo, productos) ->
+            _uiState.update { state ->
+                // Recalcular total sumando todos los productos que tienen cantidad > 0 en el catálogo
+                val total = catalogo.sumOf { it.precio * it.cantidad }
+                
+                state.copy(
+                    productosEnCarrito = productos,
+                    catalogoCompleto = catalogo,
+                    isLoadingInventario = false,
+                    totalVenta = total
+                )
+            }
+        }.launchIn(viewModelScope)
     }
 
-    private fun recalcularTotal() {
+    fun onSearchQueryChanged(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+    }
+
+    fun actualizarCantidad(productoId: String, nuevaCantidad: Int) {
         _uiState.update { state ->
-            val nuevoTotal = state.productosEnCarrito.sumOf { it.precio * it.cantidad }
-            state.copy(totalVenta = nuevoTotal)
+            // Buscamos en el catálogo completo para obtener la disponibilidad
+            val producto = state.catalogoCompleto.find { it.id == productoId }
+            if (producto != null) {
+                val valorFinal = nuevaCantidad.coerceIn(0, producto.cantidadDisponible)
+                val nuevasCantidades = state.cantidades.toMutableMap()
+                
+                if (valorFinal > 0) nuevasCantidades[productoId] = valorFinal
+                else nuevasCantidades.remove(productoId)
+
+                // Si estamos incrementando la cantidad, NO limpiamos la búsqueda para que el vendedor
+                // pueda seguir agregando piezas del mismo producto sin que se mueva.
+                state.copy(
+                    cantidades = nuevasCantidades,
+                    searchQuery = state.searchQuery
+                )
+            } else {
+                Log.w("VentaViewModel", "Producto no encontrado en catálogo: $productoId")
+                state
+            }
         }
     }
 
@@ -306,17 +347,6 @@ class VentaViewModel(
         }
     }
 
-    fun actualizarCantidad(index: Int, nuevaCantidad: Int) {
-        _uiState.update { state ->
-            val lista = state.productosEnCarrito.toMutableList()
-            if (index in lista.indices) {
-                val producto = lista[index]
-                val valorFinal = nuevaCantidad.coerceIn(0, producto.cantidadDisponible)
-                lista[index] = producto.copy(cantidad = valorFinal)
-                state.copy(productosEnCarrito = lista, totalVenta = lista.sumOf { it.precio * it.cantidad })
-            } else state
-        }
-    }
 
     fun procesarVenta(
         clienteId: String,
@@ -342,7 +372,7 @@ class VentaViewModel(
                 val almacenId = (_uiState.value.estadoRuta as? EstadoRuta.ConRuta)?.almacenId
                 val miUbicacion = LocationState.ultimaUbicacion.value
                 
-                val productosVenta = _uiState.value.productosEnCarrito.filter { it.cantidad > 0 }
+                val productosVenta = _uiState.value.catalogoCompleto.filter { it.cantidad > 0 }
                 val totalVenta = productosVenta.sumOf { it.precio * it.cantidad }
 
                 val ventaLocalId = ventaRepository.guardarVentaLocal(
@@ -429,6 +459,38 @@ class VentaViewModel(
                 withContext(Dispatchers.Main) { onSuccess() }
             } catch (e: Exception) {
                 Log.e("VentaViewModel", "Error al registrar ajuste", e)
+            }
+        }
+    }
+
+    fun anularVenta(
+        ventaId: String,
+        motivo: String,
+        onResultado: (Boolean, String) -> Unit
+    ) {
+        _uiState.update { it.copy(estaProcesando = true) }
+        viewModelScope.launch {
+            try {
+                val admin = repositoryUsuario.obtenerUsuarioActual()
+                val adminNombre = admin?.nombre ?: "Admin"
+                val adminUid = admin?.uid ?: ""
+
+                val (exito, mensaje) = ventaRepository.anularVenta(
+                    ventaId = ventaId,
+                    motivo = motivo,
+                    adminNombre = adminNombre,
+                    adminUid = adminUid
+                )
+                
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(estaProcesando = false) }
+                    onResultado(exito, mensaje)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(estaProcesando = false) }
+                    onResultado(false, e.message ?: "Error desconocido")
+                }
             }
         }
     }

@@ -30,7 +30,13 @@ data class VentaEntity(
     val fotoEvidenciaVisita: String? = null,
 
     val sincronizado: Boolean,
-    val firestoreId: String? = null
+    val firestoreId: String? = null,
+
+    // --- ESTADO DE LA VENTA ---
+    val estado: String = "pagada", // "pagada", "CANCELADA"
+    val motivoCancelacion: String? = null,
+    val canceladoPorNombre: String? = null,
+    val fechaCancelacion: Long? = null
 )
 
 @Entity(

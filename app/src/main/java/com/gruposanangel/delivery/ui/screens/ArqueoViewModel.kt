@@ -124,7 +124,10 @@ class ArqueoViewModel(
                 // 1. Sincronizamos las ventas del servidor antes de mostrar el resumen
                 ventaRepo.sincronizarVentasPeriodo(vendedorId, startPoint, System.currentTimeMillis())
 
-                val ventas = ventaDao.obtenerVentasPorPeriodo(vendedorId, startPoint, System.currentTimeMillis())
+                val ventasRaw = ventaDao.obtenerVentasPorPeriodo(vendedorId, startPoint, System.currentTimeMillis())
+                // 🔥 FILTRO: Solo considerar ventas que NO estén canceladas
+                val ventas = ventasRaw.filter { it.estado != "CANCELADA" }
+                
                 var totalVUnidades = 0; var valorVSemana = 0.0
                 ventas.forEach { v ->
                     val detalles = ventaDao.obtenerDetallesPorVenta(v.id)
@@ -193,7 +196,9 @@ class ArqueoViewModel(
             val startPoint = if (fechaUltimoArqueoTS > 0) fechaUltimoArqueoTS else inicioSemana
 
             val movimientos = inventarioRepo.obtenerMovimientosDesde(vendedorId, inicioSemana)
-            val ventas = ventaDao.obtenerVentasPorPeriodo(vendedorId, inicioSemana, System.currentTimeMillis())
+            val ventasRaw = ventaDao.obtenerVentasPorPeriodo(vendedorId, inicioSemana, System.currentTimeMillis())
+            // 🔥 FILTRO: Solo considerar ventas que NO estén canceladas
+            val ventas = ventasRaw.filter { it.estado != "CANCELADA" }
             
             val detallesVentas = mutableListOf<VentaDetalleEntity>()
             ventas.forEach { v -> detallesVentas.addAll(ventaDao.obtenerDetallesPorVenta(v.id)) }

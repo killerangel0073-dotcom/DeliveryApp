@@ -62,6 +62,11 @@ fun MapaScreen(
     val scope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
 
+    // 🔥 INICIAR SINCRONIZACIÓN EN TIEMPO REAL
+    LaunchedEffect(Unit) {
+        viewModel.startRealtimeSync(context)
+    }
+
     var mapIsReady by remember { mutableStateOf(false) }
 
     val vendedorStates: SnapshotStateMap<String, AnimatableMarker> = remember { mutableStateMapOf() }
@@ -268,9 +273,26 @@ fun MapaScreen(
                     // 🔘 BOTÓN ÚNICO SEGUIMIENTO (PARA VENDEDORES)
                     uiState.miRuta?.let { rutaAsignada ->
                         val activo = uiState.seguirVendedor == rutaAsignada
+                        val interactionSource = remember { MutableInteractionSource() }
+                        val isPressed by interactionSource.collectIsPressedAsState()
+                        val scale by animateFloatAsState(
+                            targetValue = if (isPressed) 0.92f else 1f,
+                            animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow),
+                            label = "miRutaScale"
+                        )
+
                         Card(
                             modifier = Modifier
-                                .clickable { viewModel.toggleSeguirVendedor(rutaAsignada) },
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(
+                                    interactionSource = interactionSource,
+                                    indication = rememberRipple(color = if (activo) Color.White else Color.Red),
+                                    onClick = { viewModel.toggleSeguirVendedor(rutaAsignada) }
+                                ),
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(
                                 containerColor = if (activo) Color.Red else Color.White
@@ -301,9 +323,26 @@ fun MapaScreen(
                     // 🔘 BOTONES DE RUTA NORMALES (ADMIN / OTROS)
                     uiState.vendedores.forEach { v ->
                         val activo = uiState.seguirVendedor == v.ruta
+                        val interactionSource = remember { MutableInteractionSource() }
+                        val isPressed by interactionSource.collectIsPressedAsState()
+                        val scale by animateFloatAsState(
+                            targetValue = if (isPressed) 0.92f else 1f,
+                            animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow),
+                            label = "routeBtnScale"
+                        )
+
                         Card(
                             modifier = Modifier
-                                .clickable { viewModel.toggleSeguirVendedor(v.ruta) },
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable(
+                                    interactionSource = interactionSource,
+                                    indication = rememberRipple(color = if (activo) Color.White else Color.Red),
+                                    onClick = { viewModel.toggleSeguirVendedor(v.ruta) }
+                                ),
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(
                                 containerColor = if (activo) Color.Red else Color.White
@@ -378,9 +417,26 @@ fun MapaScreen(
                     .padding(top = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                val interactionSource = remember { MutableInteractionSource() }
+                val isPressed by interactionSource.collectIsPressedAsState()
+                val scale by animateFloatAsState(
+                    targetValue = if (isPressed) 0.95f else 1f,
+                    animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
+                    label = "clientesBtnScale"
+                )
+
                 Card(
                     modifier = Modifier
-                        .clickable { viewModel.toggleMarkersVisible() },
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = rememberRipple(color = if (uiState.markersVisible) Color.White else Color.Red),
+                            onClick = { viewModel.toggleMarkersVisible() }
+                        ),
                     shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = if (uiState.markersVisible) Color.DarkGray else Color.White
@@ -416,9 +472,25 @@ fun MapaScreen(
                 // 🔥 Selector de Ruta para Admin (CEO / Gerente)
                 if (!esVendedor && uiState.markersVisible) {
                     Spacer(Modifier.height(8.dp))
+                    val interactionSource = remember { MutableInteractionSource() }
+                    val isPressed by interactionSource.collectIsPressedAsState()
+                    val scale by animateFloatAsState(
+                        targetValue = if (isPressed) 0.95f else 1f,
+                        label = "filterBtnScale"
+                    )
+
                     Card(
                         modifier = Modifier
-                            .clickable { showRouteMenu = true },
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            }
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(
+                                interactionSource = interactionSource,
+                                indication = rememberRipple(color = Color.Red),
+                                onClick = { showRouteMenu = true }
+                            ),
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.9f)),
                         elevation = CardDefaults.cardElevation(2.dp)

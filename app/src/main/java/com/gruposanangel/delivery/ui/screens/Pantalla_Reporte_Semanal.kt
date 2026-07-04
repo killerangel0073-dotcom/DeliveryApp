@@ -122,7 +122,10 @@ class ReporteSemanalViewModel(
                 cal.add(Calendar.DAY_OF_MONTH, 1)
                 val finDia = cal.timeInMillis - 1
                 
-                val ventasDia = ventaRepository.obtenerVentasPorPeriodo(userId, inicioDia, finDia)
+                val ventasDiaRaw = ventaRepository.obtenerVentasPorPeriodo(userId, inicioDia, finDia)
+                // 🔥 FILTRO: Solo considerar ventas que NO estén canceladas
+                val ventasDia = ventasDiaRaw.filter { it.estado != "CANCELADA" }
+
                 val totalDia = ventasDia.sumOf { it.total }
                 
                 var totalPiezasDia = 0

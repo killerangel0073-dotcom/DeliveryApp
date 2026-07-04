@@ -20,5 +20,7 @@ data class TicketVentaCompleto(
     val productos: List<ProductoTicketDetalle> = emptyList(),
     val vendedorNombre: String = "Vendedor",
     val fueraDeRango: Boolean = false,
-    val fotoEvidenciaUrl: String? = null
+    val fotoEvidenciaUrl: String? = null,
+    val estado: String = "pagada",
+    val motivoCancelacion: String? = null
 ) : Parcelable

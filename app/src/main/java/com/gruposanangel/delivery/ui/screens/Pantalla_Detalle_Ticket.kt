@@ -20,9 +20,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Cancel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -98,8 +101,16 @@ fun DetalleTicketContent(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Detalle Ticket #${ticket?.numeroTicket?.takeLast(6)?.uppercase() ?: ""}") },
+            CenterAlignedTopAppBar(
+                title = { 
+                    Text(
+                        text = "DETALLE DE VENTA", 
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    ) 
+                },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.AltRoute, null, tint = Color.Red) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
             )
@@ -109,6 +120,37 @@ fun DetalleTicketContent(
             if (isLoading) { CircularProgressIndicator(color = Color.Red) }
             else if (ticket == null) { Text("No se pudo cargar el ticket") }
             else {
+                // 🔥 BANNER DE CANCELACIÓN
+                if (ticket.estado == "CANCELADA") {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.Black),
+                        elevation = CardDefaults.cardElevation(8.dp)
+                    ) {
+                        Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Cancel, null, tint = Color.Red, modifier = Modifier.size(48.dp))
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "VENTA ANULADA", 
+                                fontWeight = FontWeight.Black, 
+                                color = Color.White, 
+                                fontSize = 20.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "MOTIVO: ${ticket.motivoCancelacion ?: "No especificado"}",
+                                color = Color.LightGray,
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
                 AsyncImage(model = ticket.fotoCliente, contentDescription = null, contentScale = ContentScale.Crop, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), modifier = Modifier.size(120.dp).clip(RoundedCornerShape(16.dp)))
                 Spacer(Modifier.height(16.dp)); Text(ticket.cliente, fontSize = 22.sp, fontWeight = FontWeight.Bold); Text("Ticket #${ticket.numeroTicket.takeLast(6).uppercase()}", color = Color.Gray, fontSize = 14.sp)
                 Spacer(Modifier.height(12.dp)); Text("Fecha: ${formatoFecha.format(ticket.fecha)}", fontSize = 14.sp); Text("Total: ${formatoMoneda.format(ticket.total)}", fontSize = 20.sp, color = Color.Red, fontWeight = FontWeight.Bold)

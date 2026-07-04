@@ -6,6 +6,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.location.Geocoder
 import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Bundle
+import android.util.Log
 import android.util.Patterns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,6 +17,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.gruposanangel.delivery.data.ClienteEntity
 import com.gruposanangel.delivery.data.RepositoryCliente
+import com.gruposanangel.delivery.utilidades.GoogleServicesUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,7 +42,8 @@ data class RegistroUiState(
     val latitud: Double? = null,
     val longitud: Double? = null,
     val imageFile: File? = null,
-    val imageBitmap: Bitmap? = null
+    val imageBitmap: Bitmap? = null,
+    val isGmsAvailable: Boolean = true
 )
 
 class RegistroClienteViewModel(
@@ -54,6 +60,9 @@ class RegistroClienteViewModel(
 
     @SuppressLint("MissingPermission")
     fun fetchInitialLocation(context: Context) {
+        val gmsAvailable = GoogleServicesUtils.isGooglePlayServicesAvailable(context)
+        _uiState.update { it.copy(isGmsAvailable = gmsAvailable) }
+        
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // 1. Intentamos usar la ubicación que ya tiene el LocationService (instantáneo)
@@ -63,12 +72,17 @@ class RegistroClienteViewModel(
 
                 // 2. Si no hay, intentamos una petición rápida al GPS
                 if (location == null) {
-                    val fused = LocationServices.getFusedLocationProviderClient(context)
-                    location = withTimeoutOrNull(5000) {
-                        fused.getCurrentLocation(
-                            Priority.PRIORITY_HIGH_ACCURACY,
-                            com.google.android.gms.tasks.CancellationTokenSource().token
-                        ).await()
+                    if (gmsAvailable) {
+                        val fused = LocationServices.getFusedLocationProviderClient(context)
+                        location = withTimeoutOrNull(5000) {
+                            fused.getCurrentLocation(
+                                Priority.PRIORITY_HIGH_ACCURACY,
+                                com.google.android.gms.tasks.CancellationTokenSource().token
+                            ).await()
+                        }
+                    } else {
+                        // Fallback Nativo para Huawei/Dispositivos sin GMS
+                        location = getPreciseLocationNative(context)
                     }
                 }
 
@@ -145,7 +159,7 @@ class RegistroClienteViewModel(
 
                 // 🔥 OBTENER RUTA DEL VENDEDOR ACTUAL
                 val usuarioActual = usuarioRepo.obtenerUsuarioActual()
-                val idDeRuta = usuarioActual?.ultimoAlmacenNombre ?: "Ruta General"
+                val idDeRuta = usuarioActual?.ultimaRutaId ?: usuarioActual?.ultimoAlmacenNombre ?: "Ruta General"
 
                 // 3. Crear Entidad
                 val clienteId = UUID.randomUUID().toString()
@@ -160,7 +174,7 @@ class RegistroClienteViewModel(
                     ubicacionLon = lon,
                     fotografiaUrl = currentState.imageFile?.absolutePath ?: "",
                     activo = true,
-                    medio = "App Android",
+                    medio = "medio",
                     fechaDeCreacion = System.currentTimeMillis(),
                     syncStatus = false,
                     ownerUid = usuarioActual?.uid ?: "",
@@ -231,13 +245,70 @@ class RegistroClienteViewModel(
 
     @SuppressLint("MissingPermission")
     private suspend fun getPreciseLocationFinal(context: Context): Location? = withContext(Dispatchers.IO) {
-        val fused = LocationServices.getFusedLocationProviderClient(context)
-        try {
-            withTimeoutOrNull(5000) {
-                fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
+        if (GoogleServicesUtils.isGooglePlayServicesAvailable(context)) {
+            val fused = LocationServices.getFusedLocationProviderClient(context)
+            try {
+                withTimeoutOrNull(5000) {
+                    fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
+                }
+            } catch (e: Exception) {
+                null
             }
+        } else {
+            getPreciseLocationNative(context)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun getPreciseLocationNative(context: Context): Location? = withContext(Dispatchers.Main) {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        
+        val providers = locationManager.getProviders(true)
+        if (providers.isEmpty()) return@withContext null
+
+        var bestLocation: Location? = null
+        for (provider in providers) {
+            val l = locationManager.getLastKnownLocation(provider)
+            if (l != null && (bestLocation == null || l.accuracy < bestLocation.accuracy)) {
+                bestLocation = l
+            }
+        }
+
+        if (bestLocation != null && (System.currentTimeMillis() - bestLocation.time) < 60_000 && bestLocation.accuracy < 50f) {
+            return@withContext bestLocation
+        }
+
+        try {
+            withTimeout(10000) {
+                suspendCancellableCoroutine { continuation ->
+                    val locationListener = object : LocationListener {
+                        override fun onLocationChanged(location: Location) {
+                            locationManager.removeUpdates(this)
+                            if (continuation.isActive) continuation.resume(location) { }
+                        }
+                        @Deprecated("Deprecated in Java")
+                        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                        override fun onProviderEnabled(provider: String) {}
+                        override fun onProviderDisabled(provider: String) {}
+                    }
+
+                    val provider = if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                        LocationManager.GPS_PROVIDER
+                    } else {
+                        providers[0]
+                    }
+
+                    locationManager.requestLocationUpdates(provider, 0L, 0f, locationListener)
+
+                    continuation.invokeOnCancellation {
+                        locationManager.removeUpdates(locationListener)
+                    }
+                }
+            }
+        } catch (e: TimeoutCancellationException) {
+            bestLocation
         } catch (e: Exception) {
-            null
+            bestLocation
         }
     }
 

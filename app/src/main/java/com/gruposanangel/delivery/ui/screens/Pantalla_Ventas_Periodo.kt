@@ -41,7 +41,8 @@ data class VentaPeriodo(
     val clienteImagenUrl: String? = null,
     val fecha: Date,
     val total: Double,
-    val sincronizado: Boolean // 🔹 nuevo campo
+    val sincronizado: Boolean,
+    val estado: String = "pagada"
 )
 
 // -----------------------------
@@ -61,7 +62,11 @@ fun PantallaVentaPeriodoContent(
     val formatoFecha = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("es", "MX"))
     val formatoFechaBtn = SimpleDateFormat("dd/MM/yyyy", Locale("es", "MX"))
 
-    val totalPeriodo by remember(listaVentas) { derivedStateOf { listaVentas.sumOf { it.total } } }
+    val totalPeriodo by remember(listaVentas) { 
+        derivedStateOf { 
+            listaVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total } 
+        } 
+    }
 
     // Estados para DatePicker
     val fechaPickerInicio = remember { mutableStateOf(false) }
@@ -164,21 +169,19 @@ fun PantallaVentaPeriodoContent(
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 items(listaVentas) { venta ->
+                    val esCancelada = venta.estado == "CANCELADA"
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         elevation = CardDefaults.cardElevation(8.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (esCancelada) Color(0xFFEEEEEE) else Color.White
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(12.dp)
                         ) {
-
-
-
-
-
                             AsyncImage(
                                 model = venta.clienteImagenUrl,
                                 contentDescription = venta.clienteNombre,
@@ -189,32 +192,38 @@ fun PantallaVentaPeriodoContent(
                                     .size(60.dp)
                                     .clip(RoundedCornerShape(12.dp))
                             )
-
-
-
-
-
-
-
-
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = if (venta.sincronizado) "Sincronizado" else "Por sincronizar",
-                                    fontSize = 12.sp,
-                                    color = if (venta.sincronizado) Color(0xFF388E3C) else Color(0xFFFF0000),
-                                    fontWeight = FontWeight.Medium
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = if (venta.sincronizado) "Sincronizado" else "Por sincronizar",
+                                        fontSize = 12.sp,
+                                        color = if (venta.sincronizado) Color(0xFF388E3C) else Color(0xFFFF0000),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    if (esCancelada) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Surface(color = Color.Red, shape = RoundedCornerShape(4.dp)) {
+                                            Text("ANULADA", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                        }
+                                    }
+                                }
 
                                 Text("Ticket: ${venta.ticketNumero}", fontWeight = FontWeight.Bold)
-                                Text("Cliente: ${venta.clienteNombre}", fontSize = 14.sp, color = Color(0xFF555555))
+                                Text(
+                                    text = "Cliente: ${venta.clienteNombre}", 
+                                    fontSize = 14.sp, 
+                                    color = if (esCancelada) Color.Gray else Color(0xFF555555),
+                                    style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
+                                )
                                 Text("Fecha: ${formatoFecha.format(venta.fecha)}", fontSize = 12.sp, color = Color.Gray)
                             }
                             Text(
-                                formatoMoneda.format(venta.total),
+                                text = formatoMoneda.format(venta.total),
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Red,
-                                fontSize = 16.sp
+                                color = if (esCancelada) Color.Gray else Color.Red,
+                                fontSize = 16.sp,
+                                style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
                             )
                         }
                     }
@@ -237,7 +246,8 @@ fun PantallaVentaPeriodoContent(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        val clientesTotales = listaVentas.map { it.clienteNombre }.distinct().size
+                        val clientesTotales = listaVentas.filter { it.estado != "CANCELADA" }
+                            .map { it.clienteNombre }.distinct().size
                         Text("$clientesTotales", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.Black)
                         Text("Clientes totales", fontWeight = FontWeight.Medium, fontSize = 14.sp, color = Color.Gray)
                     }
@@ -290,7 +300,8 @@ fun PantallaVentaPeriodo(
             clienteImagenUrl = venta.clienteImagenUrl,
             fecha = Date(venta.fecha),
             total = venta.total,
-            sincronizado = venta.sincronizado
+            sincronizado = venta.sincronizado,
+            estado = venta.estado
         )
     }
 

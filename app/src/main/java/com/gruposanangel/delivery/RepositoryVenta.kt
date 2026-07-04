@@ -91,7 +91,9 @@ class VentaRepository(
                 productos = productos,
                 vendedorNombre = vendedorNombre,
                 fueraDeRango = ventaLocal.fueraDeRango,
-                fotoEvidenciaUrl = ventaLocal.fotoEvidenciaVisita
+                fotoEvidenciaUrl = ventaLocal.fotoEvidenciaVisita,
+                estado = ventaLocal.estado,
+                motivoCancelacion = ventaLocal.motivoCancelacion
             )
         }
 
@@ -161,7 +163,9 @@ class VentaRepository(
                 productos = productos,
                 vendedorNombre = vendedorNombre,
                 fueraDeRango = doc.getBoolean("fueraDeRango") ?: false,
-                fotoEvidenciaUrl = doc.getString("fotoEvidenciaVisita")
+                fotoEvidenciaUrl = doc.getString("fotoEvidenciaVisita"),
+                estado = doc.getString("estado") ?: "pagada",
+                motivoCancelacion = doc.getString("motivoCancelacion")
             )
         } catch (e: Exception) {
             Log.e("VentaRepo", "Error crítico buscando ticket en Firestore", e)
@@ -237,7 +241,11 @@ class VentaRepository(
                             fueraDeRango = doc.getBoolean("fueraDeRango") ?: false,
                             fotoEvidenciaVisita = doc.getString("fotoEvidenciaVisita"),
                             sincronizado = true,
-                            firestoreId = doc.id
+                            firestoreId = doc.id,
+                            estado = doc.getString("estado") ?: "pagada",
+                            motivoCancelacion = doc.getString("motivoCancelacion"),
+                            canceladoPorNombre = doc.getString("canceladoPorNombre"),
+                            fechaCancelacion = doc.getTimestamp("fechaCancelacion")?.toDate()?.time
                         )
 
                         val detalles = mutableListOf<VentaDetalleEntity>()
@@ -328,7 +336,11 @@ class VentaRepository(
                         fueraDeRango = doc.getBoolean("fueraDeRango") ?: false,
                         fotoEvidenciaVisita = doc.getString("fotoEvidenciaVisita"),
                         sincronizado = true,
-                        firestoreId = doc.id
+                        firestoreId = doc.id,
+                        estado = doc.getString("estado") ?: "pagada",
+                        motivoCancelacion = doc.getString("motivoCancelacion"),
+                        canceladoPorNombre = doc.getString("canceladoPorNombre"),
+                        fechaCancelacion = doc.getTimestamp("fechaCancelacion")?.toDate()?.time
                     )
 
                     try {
@@ -450,11 +462,12 @@ class VentaRepository(
         vendedorNombre: String,
         almacenVendedorId: String,
         fotoEvidenciaLocal: String? = null,
-        fueraDeRango: Boolean = false, // 🔥
-        latitudVenta: Double = 0.0,    // 🔥
-        longitudVenta: Double = 0.0    // 🔥
+        fueraDeRango: Boolean = false,
+        latitudVenta: Double = 0.0,
+        longitudVenta: Double = 0.0,
+        fecha: Long = System.currentTimeMillis() // 🔥 Nueva: Hora real de la captura
     ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
-        val url = "https://us-central1-appventas--san-angel.cloudfunctions.net/registrarVenta"
+        val url = "https://registrarventa-ffx6p2iwrq-uc.a.run.app"
         val client = OkHttpClient()
 
         // 🛡️ SUBIDA DE IMAGEN A FIREBASE STORAGE
@@ -484,9 +497,10 @@ class VentaRepository(
                 put("clienteNombre", clienteNombre)
                 put("vendedorNombre", vendedorNombre)
                 put("fotoEvidenciaVisita", fotoUrlFinal)
-                put("fueraDeRango", fueraDeRango) // 🔥
-                put("latitudVenta", latitudVenta) // 🔥
-                put("longitudVenta", longitudVenta) // 🔥
+                put("fueraDeRango", fueraDeRango)
+                put("latitudVenta", latitudVenta)
+                put("longitudVenta", longitudVenta)
+                put("fecha", fecha) // 🔥 Enviamos la fecha original al servidor
                 put("productos", JSONArray().apply {
                     productos.forEach { p ->
                         put(
@@ -511,6 +525,59 @@ class VentaRepository(
             Pair(response.isSuccessful, respBody)
         } catch (e: Exception) {
             Log.e("VentaRepo", "Error sincronizando con servidor", e)
+            Pair(false, e.message ?: "Error desconocido")
+        }
+    }
+
+    suspend fun anularVenta(
+        ventaId: String,
+        motivo: String,
+        adminNombre: String,
+        adminUid: String
+    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val url = "https://anularventa-ffx6p2iwrq-uc.a.run.app" // URL tras desplegar
+        val client = OkHttpClient()
+
+        try {
+            val json = JSONObject().apply {
+                put("ventaId", ventaId)
+                put("motivo", motivo)
+                put("adminNombre", adminNombre)
+                put("adminUid", adminUid)
+            }
+            val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val request = Request.Builder().url(url).post(body).build()
+            val response = client.newCall(request).execute()
+            val respBody = response.body?.string() ?: ""
+            
+            if (response.isSuccessful) {
+                // Actualizar localmente si existe
+                val ventaLocal = ventaDao.obtenerVentaPorId(ventaId)
+                if (ventaLocal != null) {
+                    // 1. Marcar como cancelada
+                    ventaDao.actualizarVenta(ventaLocal.copy(
+                        estado = "CANCELADA",
+                        motivoCancelacion = motivo,
+                        canceladoPorNombre = adminNombre,
+                        fechaCancelacion = System.currentTimeMillis()
+                    ))
+
+                    // 2. Reponer stock en la tabla local de productos
+                    val detalles = ventaDao.obtenerDetallesPorVenta(ventaId)
+                    val almacenId = ventaLocal.almacenId
+                    
+                    detalles.forEach { d ->
+                        // Intentamos usar el stockId guardado, 
+                        // si no, lo reconstruimos usando el almacenId de la venta
+                        val idParaStock = d.stockId ?: if (!almacenId.isNullOrEmpty()) "${d.productoId}_$almacenId" else d.productoId
+                        ventaDao.reponerStockLocal(idParaStock, d.cantidad)
+                    }
+                }
+            }
+            
+            Pair(response.isSuccessful, respBody)
+        } catch (e: Exception) {
+            Log.e("VentaRepo", "Error anulando venta", e)
             Pair(false, e.message ?: "Error desconocido")
         }
     }

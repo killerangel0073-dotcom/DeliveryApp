@@ -23,6 +23,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -70,6 +72,14 @@ fun Pantalla_Detalle_Venta_Admin(
     var ticketState by remember { mutableStateOf<TicketVentaCompleto?>(null) }
     var isLoading by remember { mutableStateOf(true) }
 
+    // --- SEGURIDAD ---
+    var userRole by remember { mutableStateOf("") }
+    val esAdminAutorizado = userRole in listOf("CEO", "Gerente General", "Supervisor")
+
+    // --- ESTADOS PARA ANULACIÓN ---
+    var showAnularDialog by remember { mutableStateOf(false) }
+    var motivoAnulacion by remember { mutableStateOf("") }
+
     // --- ESTADOS PARA AJUSTES ---
     var showBottomSheet by remember { mutableStateOf(false) }
     var tipoAjuste by remember { mutableStateOf("") } // "CAMBIO" o "DEVOLUCION"
@@ -81,6 +91,8 @@ fun Pantalla_Detalle_Venta_Admin(
 
     LaunchedEffect(ticketId) {
         isLoading = true
+        val user = repoUsuario.obtenerUsuarioActual()
+        userRole = user?.puestoTrabajo ?: ""
         ticketState = viewModel.obtenerTicketCompleto(ticketId)
         isLoading = false
     }
@@ -133,10 +145,15 @@ fun Pantalla_Detalle_Venta_Admin(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = { 
-                    val folio = ticketState?.numeroTicket?.takeLast(6)?.uppercase() ?: ""
-                    Text("Detalle Venta #$folio", fontWeight = FontWeight.Black) 
+                    Text(
+                        text = "DETALLE DE VENTA", 
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
@@ -145,6 +162,12 @@ fun Pantalla_Detalle_Venta_Admin(
                 },
                 actions = {
                     if (ticketState != null) {
+                        // 🔥 BOTÓN ANULAR (Solo Autorizados y si no está cancelada)
+                        if (esAdminAutorizado && ticketState?.estado != "CANCELADA") {
+                            IconButton(onClick = { showAnularDialog = true }) {
+                                Icon(Icons.Default.DeleteForever, "Anular", tint = Color.Red)
+                            }
+                        }
                         IconButton(onClick = onImprimir) {
                             Icon(Icons.Default.Print, "Imprimir", tint = Color.Red)
                         }
@@ -196,6 +219,39 @@ fun Pantalla_Detalle_Venta_Admin(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // 🔥 BANNER DE CANCELACIÓN
+                if (ticket.estado == "CANCELADA") {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.Black),
+                            elevation = CardDefaults.cardElevation(8.dp)
+                        ) {
+                            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.Cancel, null, tint = Color.Red, modifier = Modifier.size(48.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = "VENTA ANULADA", 
+                                    fontWeight = FontWeight.Black, 
+                                    color = Color.White, 
+                                    fontSize = 20.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "MOTIVO: ${ticket.motivoCancelacion ?: "No especificado"}",
+                                    color = Color.LightGray,
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // 🔹 CARD RESUMEN CABECERA
                 item {
                     HeaderVentaCard(ticket, formatoMoneda, formatoFecha, formatoHora)
@@ -273,21 +329,23 @@ fun Pantalla_Detalle_Venta_Admin(
                             onClick = { tipoAjuste = "CAMBIO"; showBottomSheet = true },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
                         ) {
-                            Icon(Icons.Default.Sync, null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Sync, null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("CAMBIO", fontWeight = FontWeight.Bold)
+                            Text("CAMBIO", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
                         }
                         OutlinedButton(
                             onClick = { tipoAjuste = "DEVOLUCION"; showBottomSheet = true },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF9800))
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF9800)),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
                         ) {
-                            Icon(Icons.Default.AssignmentReturn, null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.AssignmentReturn, null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("DEVOLUCIÓN", fontWeight = FontWeight.Bold)
+                            Text("DEVOLUCIÓN", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
                         }
                     }
                 }
@@ -314,6 +372,66 @@ fun Pantalla_Detalle_Venta_Admin(
     }
 
     // 🔹 BOTTOM SHEET PARA AJUSTES
+    if (showAnularDialog) {
+        AlertDialog(
+            onDismissRequest = { showAnularDialog = false },
+            containerColor = Color.White,
+            title = { 
+                Text(
+                    "ANULAR VENTA", 
+                    fontWeight = FontWeight.Black, 
+                    color = Color.Red,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                ) 
+            },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "Esta acción devolverá los productos al inventario del vendedor y anulará el ticket permanentemente.", 
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = motivoAnulacion,
+                        onValueChange = { motivoAnulacion = it },
+                        label = { Text("Motivo de anulación") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (motivoAnulacion.length < 5) {
+                            Toast.makeText(context, "Escribe un motivo más detallado", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        viewModel.anularVenta(ticketId, motivoAnulacion) { exito, msg ->
+                            if (exito) {
+                                Toast.makeText(context, "Venta anulada correctamente", Toast.LENGTH_SHORT).show()
+                                showAnularDialog = false
+                                // Refrescar el ticket para mostrar el estado CANCELADA
+                                scope.launch {
+                                    ticketState = viewModel.obtenerTicketCompleto(ticketId)
+                                }
+                            } else {
+                                Toast.makeText(context, "Error: $msg", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) { Text("CONFIRMAR ANULACIÓN", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAnularDialog = false }) { Text("CANCELAR", color = Color.Gray) }
+            }
+        )
+    }
+
     if (showBottomSheet) {
         ModalBottomSheet(
             onDismissRequest = { showBottomSheet = false },

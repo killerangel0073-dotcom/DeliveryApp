@@ -12,7 +12,8 @@ const { enviarNotificacionUniversal } = require('./enviarNotificacionUniversal')
 const { onOrdenTransferenciaAceptadaConDetalle } = require('./onOrdenTransferenciaAceptadaConDetalle');
 const { notificarNuevaVenta } = require('./notificarNuevaVenta');
 const { procesarAjusteInventario } = require('./procesarAjusteInventario');
-const { auditarCambiosInventario } = require('./auditarCambiosInventario'); // 🛡️ NUEVA
+const { auditarCambiosInventario } = require('./auditarCambiosInventario');
+const { anularVenta } = require('./anularVenta'); // 🛡️ NUEVA
 
 // EXPORTACIONES OFICIALES
 exports.registrarVenta = registrarVenta;
@@ -21,4 +22,5 @@ exports.enviarNotificacionUniversal = enviarNotificacionUniversal;
 exports.onOrdenTransferenciaAceptadaConDetalle = onOrdenTransferenciaAceptadaConDetalle;
 exports.procesarAjusteInventario = procesarAjusteInventario;
 exports.notificarNuevaVenta = notificarNuevaVenta;
-exports.auditarCambiosInventario = auditarCambiosInventario; // 🛡️ NUEVA
+exports.auditarCambiosInventario = auditarCambiosInventario;
+exports.anularVenta = anularVenta; // 🛡️ NUEVA

@@ -3,6 +3,7 @@ package com.gruposanangel.delivery.ui.screens
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.ViewModelProvider
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
@@ -14,6 +15,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.maps.android.compose.CameraPositionState
 import com.google.maps.android.compose.MapType
+import com.gruposanangel.delivery.data.RepositoryCliente
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -41,7 +43,19 @@ data class MapaUiState(
     val listaRutas: List<String> = listOf("Todas las Rutas")
 )
 
-class MapaViewModel : ViewModel() {
+class MapaViewModel(
+    private var repositoryCliente: RepositoryCliente? = null
+) : ViewModel() {
+
+    fun setRepository(repo: RepositoryCliente) {
+        if (this.repositoryCliente == null) {
+            this.repositoryCliente = repo
+            cargarDatosUsuario()
+            if (_uiState.value.markersVisible) {
+                cargarClientes()
+            }
+        }
+    }
 
     private val _uiState = MutableStateFlow(MapaUiState())
     val uiState: StateFlow<MapaUiState> = _uiState.asStateFlow()
@@ -62,7 +76,9 @@ class MapaViewModel : ViewModel() {
     private var liveTrackingListener: ValueEventListener? = null
 
     init {
-        cargarDatosUsuario()
+        if (repositoryCliente != null) {
+            cargarDatosUsuario()
+        }
     }
 
     private fun cargarDatosUsuario() {
@@ -222,48 +238,45 @@ class MapaViewModel : ViewModel() {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                var query: com.google.firebase.firestore.Query = db.collection("clientes")
-                    .whereEqualTo("activo", true)
-
-                // 🛡️ Filtro de seguridad por ruta
-                if (esAdmin) {
-                    // Si el CEO eligió una ruta específica
-                    if (filtroRuta != "Todas las Rutas") {
-                        query = query.whereEqualTo("rutaId", filtroRuta)
+                // 🔥 CAMBIO A OFFLINE-FIRST CON FLOW LOCAL
+                repositoryCliente?.obtenerClientesLocal()?.collect { entidades ->
+                    val filtrados = entidades.filter { ent ->
+                        val cumpleActivo = ent.activo
+                        val cumpleRuta = if (esAdmin) {
+                            filtroRuta == "Todas las Rutas" || ent.rutaId == filtroRuta
+                        } else {
+                            miRuta.isNullOrEmpty() || ent.rutaId == miRuta
+                        }
+                        cumpleActivo && cumpleRuta
                     }
-                } else if (!miRuta.isNullOrEmpty()) {
-                    // Si es vendedor, forzar su propia ruta
-                    query = query.whereEqualTo("rutaId", miRuta)
-                }
 
-                val result = query.get().await()
-
-                val lista = result.documents.mapNotNull { doc ->
-                    val geo = doc.getGeoPoint("ubicacion")
-                    val valor = doc.getString("medio") ?: "medio"
-                    geo?.let {
+                    val lista = filtrados.map { ent ->
                         Cliente(
-                            id = doc.id,
-                            nombreNegocio = doc.getString("nombreNegocio") ?: "Sin nombre",
-                            ubicacionLat = it.latitude,
-                            ubicacionLng = it.longitude,
-                            valor = valor,
-                            nombreDueno = doc.getString("nombreDueno"),
-                            telefono = doc.getString("telefono"),
-                            fotoUrl = doc.getString("FotografiaCliente")
+                            id = ent.id,
+                            nombreNegocio = ent.nombreNegocio,
+                            ubicacionLat = ent.ubicacionLat,
+                            ubicacionLng = ent.ubicacionLon,
+                            valor = ent.medio,
+                            nombreDueno = ent.nombreDueno,
+                            telefono = ent.telefono,
+                            fotoUrl = ent.fotografiaUrl
                         )
                     }
-                }
 
-                _uiState.update { it.copy(clientes = lista, isLoading = false) }
-                
-                if (triggerCenter && lista.isNotEmpty()) {
-                    _cameraEvents.emit(CameraEvent.CenterOnClients)
+                    _uiState.update { it.copy(clientes = lista, isLoading = false) }
+                    
+                    if (triggerCenter && lista.isNotEmpty()) {
+                        _cameraEvents.emit(CameraEvent.CenterOnClients)
+                    }
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }
+    }
+
+    fun startRealtimeSync(context: android.content.Context) {
+        repositoryCliente?.escucharCambiosFirebase(context)
     }
 
     fun setMapType(type: MapType, styleJson: String? = null) {
@@ -291,5 +304,15 @@ class MapaViewModel : ViewModel() {
         super.onCleared()
         locationsListener?.remove()
         liveTrackingListener?.let { rtdb.child("vendedores_en_vivo").removeEventListener(it) }
+        repositoryCliente?.stopEscuchaFirebase()
+    }
+}
+
+class MapaViewModelFactory(private val repository: RepositoryCliente) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        val vm = MapaViewModel()
+        vm.setRepository(repository)
+        return vm as T
     }
 }

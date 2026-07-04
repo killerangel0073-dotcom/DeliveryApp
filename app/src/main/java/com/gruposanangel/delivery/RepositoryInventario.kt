@@ -74,7 +74,8 @@ class RepositoryInventario(
         val mapaImpacto = mutableMapOf<String, Int>()
         
         // 1. Impacto de Ventas Pendientes (Siempre restan)
-        val ventasPendientes = ventaDao.obtenerVentasPendientes()
+        // 🔥 Solo consideramos ventas pagadas (No canceladas)
+        val ventasPendientes = ventaDao.obtenerVentasPendientes().filter { it.estado != "CANCELADA" }
         for (v in ventasPendientes) {
             ventaDao.obtenerDetallesPorVenta(v.id).forEach { d ->
                 val idPK = d.productoId

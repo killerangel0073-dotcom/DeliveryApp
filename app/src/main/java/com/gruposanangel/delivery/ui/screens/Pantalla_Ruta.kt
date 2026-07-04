@@ -12,11 +12,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -36,7 +38,15 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
-data class TicketVenta(val id: String, val cliente: String, val total: Double, val fecha: Date, val sincronizado: Boolean, val fotoCliente: String = "")
+data class TicketVenta(
+    val id: String, 
+    val cliente: String, 
+    val total: Double, 
+    val fecha: Date, 
+    val sincronizado: Boolean, 
+    val fotoCliente: String = "",
+    val estado: String = "pagada"
+)
 
 @Composable
 fun PaginaVentaScreen(navController: NavController, ventaRepository: VentaRepository) {
@@ -60,7 +70,15 @@ fun PaginaVentaScreen(navController: NavController, ventaRepository: VentaReposi
         val lista = withContext(Dispatchers.IO) { 
             ventasHoy.map { v -> 
                 val c = db.clienteDao().getClientePorId(v.clienteId)
-                TicketVenta(v.id, v.clienteNombre, v.total, Date(v.fecha), v.sincronizado, c?.fotografiaUrl ?: "") 
+                TicketVenta(
+                    id = v.id, 
+                    cliente = v.clienteNombre, 
+                    total = v.total, 
+                    fecha = Date(v.fecha), 
+                    sincronizado = v.sincronizado, 
+                    fotoCliente = c?.fotografiaUrl ?: "",
+                    estado = v.estado
+                )
             } 
         }
         ticketsHoy = lista
@@ -79,12 +97,20 @@ fun PaginaVentaContent(ticketsHoy: List<TicketVenta>, isLoading: Boolean = false
     val fmtFecha = SimpleDateFormat("EEEE d 'de' MMMM, hh:mm a", Locale.forLanguageTag("es-MX"))
     val prefs = remember { PreferenciasMetas(context) }; val metaVals = remember { prefs.obtenerValores(6500.0, 30) }
     var meta by remember { mutableStateOf(metaVals.first) }; var cliTarget by remember { mutableStateOf(metaVals.second) }
-    val totalHoy = ticketsHoy.sumOf { it.total }
+    val totalHoy = ticketsHoy.filter { it.estado != "CANCELADA" }.sumOf { it.total }
+    val visitasHoy = ticketsHoy.count { it.estado != "CANCELADA" }
 
     Column(Modifier.fillMaxSize().background(Color.White)) {
         Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
             Spacer(Modifier.height(10.dp))
-            MedidorDeMetaPremium(metaDelDia = meta, totalClientes = cliTarget, clientesVisitados = ticketsHoy.size, avance = totalHoy, onUpdateMeta = { meta = it; prefs.guardarValores(meta, cliTarget) }, onUpdateClientes = { cliTarget = it; prefs.guardarValores(meta, cliTarget) })
+            MedidorDeMetaPremium(
+                metaDelDia = meta, 
+                totalClientes = cliTarget, 
+                clientesVisitados = visitasHoy, 
+                avance = totalHoy, 
+                onUpdateMeta = { meta = it; prefs.guardarValores(meta, cliTarget) }, 
+                onUpdateClientes = { cliTarget = it; prefs.guardarValores(meta, cliTarget) }
+            )
             Spacer(Modifier.height(16.dp))
             
             if (isLoading && ticketsHoy.isEmpty()) {
@@ -95,24 +121,88 @@ fun PaginaVentaContent(ticketsHoy: List<TicketVenta>, isLoading: Boolean = false
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) { items(ticketsHoy, key = { it.id }) { t -> CardTicketRuta(t, fmtFecha, fmtMoneda, onTicketClick) } } 
             }
         }
-        ResumenVentasCard(ticketsHoy.size, totalHoy, fmtMoneda)
+        ResumenVentasCard(visitasHoy, totalHoy, fmtMoneda)
     }
 }
 
 @Composable
 fun CardTicketRuta(ticket: TicketVenta, fmtFecha: SimpleDateFormat, fmtMoneda: NumberFormat, onClick: (TicketVenta) -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable { onClick(ticket) }, shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)), elevation = CardDefaults.cardElevation(1.dp)) {
+    val esCancelada = ticket.estado == "CANCELADA"
+    
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onClick(ticket) }, 
+        shape = RoundedCornerShape(24.dp), 
+        colors = CardDefaults.cardColors(
+            containerColor = if (esCancelada) Color(0xFFEEEEEE) else Color(0xFFF8F9FA)
+        ), 
+        elevation = CardDefaults.cardElevation(1.dp)
+    ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(model = ticket.fotoCliente, contentDescription = null, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentScale = ContentScale.Crop, modifier = Modifier.size(65.dp).clip(RoundedCornerShape(16.dp)))
+            AsyncImage(
+                model = ticket.fotoCliente, 
+                contentDescription = null, 
+                placeholder = painterResource(R.drawable.repartidor), 
+                error = painterResource(R.drawable.repartidor), 
+                contentScale = ContentScale.Crop, 
+                modifier = Modifier
+                    .size(65.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .then(if (esCancelada) Modifier.graphicsLayer(alpha = 0.5f) else Modifier)
+            )
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text("FOLIO #${ticket.id.takeLast(6).uppercase()}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                Text(ticket.cliente, fontWeight = FontWeight.Black, fontSize = 17.sp, color = Color.Black, maxLines = 1)
+                Text(
+                    text = ticket.cliente, 
+                    fontWeight = FontWeight.Black, 
+                    fontSize = 17.sp, 
+                    color = if (esCancelada) Color.Gray else Color.Black, 
+                    maxLines = 1,
+                    style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
+                )
                 Text(fmtFecha.format(ticket.fecha), fontSize = 11.sp, color = Color.Gray)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(fmtMoneda.format(ticket.total), color = Color.Red, fontWeight = FontWeight.Black, fontSize = 18.sp)
-                Surface(shape = RoundedCornerShape(8.dp), color = if (ticket.sincronizado) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)) { Text(if (ticket.sincronizado) "SINCRONIZADO" else "PENDIENTE", Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 10.sp, fontWeight = FontWeight.Black, color = if (ticket.sincronizado) Color(0xFF2E7D32) else Color(0xFFC62828)) }
+                Text(
+                    text = fmtMoneda.format(ticket.total), 
+                    color = if (esCancelada) Color.Gray else Color.Red, 
+                    fontWeight = FontWeight.Black, 
+                    fontSize = 18.sp,
+                    style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
+                )
+                Surface(
+                    shape = RoundedCornerShape(8.dp), 
+                    color = if (ticket.sincronizado) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                    modifier = Modifier.width(90.dp) // Ancho fijo para ayudar al centrado vertical
+                ) { 
+                    Text(
+                        text = if (ticket.sincronizado) "SINCRONIZADO" else "PENDIENTE", 
+                        modifier = Modifier.padding(vertical = 2.dp).fillMaxWidth(), 
+                        fontSize = 10.sp, 
+                        fontWeight = FontWeight.Black, 
+                        color = if (ticket.sincronizado) Color(0xFF2E7D32) else Color(0xFFC62828),
+                        textAlign = TextAlign.Center
+                    ) 
+                }
+                if (esCancelada) {
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        color = Color.Red, 
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.width(90.dp)
+                    ) {
+                        Text(
+                            text = "ANULADA", 
+                            color = Color.White, 
+                            fontSize = 12.sp, // Más grande
+                            fontWeight = FontWeight.ExtraBold, 
+                            modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
             }
         }
     }

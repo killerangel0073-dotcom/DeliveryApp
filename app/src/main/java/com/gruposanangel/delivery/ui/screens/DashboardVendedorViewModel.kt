@@ -307,8 +307,10 @@ class DashboardVendedorViewModel(
                     val iniSemana = calSem.timeInMillis
 
                     // Filtrado en memoria
-                    val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoy }
-                    val ventasSemana = todasLasVentas.filter { it.fecha >= iniSemana }
+                    // 🔥 Solo considerar ventas que NO estén canceladas para los cálculos financieros
+                    val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoy && it.estado != "CANCELADA" }
+                    val ventasSemana = todasLasVentas.filter { it.fecha >= iniSemana && it.estado != "CANCELADA" }
+                    val ventasBloqueTotal = todasLasVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total }
 
                     // Cálculo por día de la semana (Lunes a Sábado)
                     val ventasPorDia = MutableList(6) { 0.0 }
@@ -340,7 +342,7 @@ class DashboardVendedorViewModel(
                         clientesDia = clientesHoy,
                         ticketPromedioDia = ticketPromedio,
                         ventaSemana = ventasSemana.sumOf { v -> v.total },
-                        ventaBloque = todasLasVentas.sumOf { v -> v.total },
+                        ventaBloque = ventasBloqueTotal,
                         ventasPorDiaSemana = ventasPorDia,
                         ventasHoy = ventasHoy
                     ) }

@@ -352,7 +352,8 @@ class MainActivity : ComponentActivity() {
                                 fotoEvidenciaLocal = v.fotoEvidenciaVisita,
                                 fueraDeRango = v.fueraDeRango,
                                 latitudVenta = v.latitudVenta,
-                                longitudVenta = v.longitudVenta
+                                longitudVenta = v.longitudVenta,
+                                fecha = v.fecha // 🔥 Pasamos la hora original capturada
                             )
                             if (exito) { val fId = try { JSONObject(msg).optString("ventaId") } catch (_: Exception) { null }; if (!fId.isNullOrEmpty()) ventaRepository.marcarVentaConFirestoreId(v.id, fId) }
                         }

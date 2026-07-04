@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -174,20 +175,67 @@ fun CrearClienteContent(
                         }
                     }
                     
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        ModernOutlinedField(
-                            label = "Ubicación GPS", 
-                            value = TextFieldValue(uiState.ubicacionTexto), 
-                            icon = Icons.Outlined.GpsFixed, 
-                            onValueChange = {}, 
-                            readOnly = true
-                        )
-                        if (!uiState.ubicacionValida && !isLoading) {
-                            IconButton(
-                                onClick = onRetryLocation,
-                                modifier = Modifier.padding(end = 8.dp)
-                            ) {
-                                Icon(Icons.Outlined.Refresh, "Reintentar", tint = Color.Red)
+                    if (!uiState.isGmsAvailable) {
+                        // 🔥 TARJETA DE CAPTURA NATIVA (Diseño Especial para Huawei)
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F3F4)),
+                            border = BorderStroke(1.dp, Color.Red.copy(0.2f))
+                        ) {
+                            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                    Icon(Icons.Outlined.GpsFixed, null, tint = Color.Red, modifier = Modifier.size(24.dp))
+                                    Spacer(Modifier.width(12.dp))
+                                    Column {
+                                        Text("MODO CAPTURA NATIVA", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.Gray)
+                                        Text(if (uiState.ubicacionValida) "GPS Conectado" else "Buscando satélites...", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (uiState.ubicacionValida) Color(0xFF2E7D32) else Color.Red)
+                                    }
+                                }
+                                
+                                Spacer(Modifier.height(12.dp))
+                                
+                                Text(
+                                    text = uiState.ubicacionTexto,
+                                    fontSize = 12.sp,
+                                    color = Color.DarkGray,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                                )
+                                
+                                Spacer(Modifier.height(16.dp))
+                                
+                                Button(
+                                    onClick = onRetryLocation,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Red),
+                                    elevation = ButtonDefaults.buttonElevation(2.dp),
+                                    border = BorderStroke(1.dp, Color.Red)
+                                ) {
+                                    Icon(Icons.Outlined.GpsFixed, null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("OBTENER UBICACIÓN GPS", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    } else {
+                        // DISEÑO ESTÁNDAR PARA DISPOSITIVOS CON GOOGLE
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                            ModernOutlinedField(
+                                label = "Ubicación GPS", 
+                                value = TextFieldValue(uiState.ubicacionTexto), 
+                                icon = Icons.Outlined.GpsFixed, 
+                                onValueChange = {}, 
+                                readOnly = true
+                            )
+                            if (!uiState.ubicacionValida && !isLoading) {
+                                IconButton(
+                                    onClick = onRetryLocation,
+                                    modifier = Modifier.padding(end = 8.dp)
+                                ) {
+                                    Icon(Icons.Outlined.Refresh, "Reintentar", tint = Color.Red)
+                                }
                             }
                         }
                     }

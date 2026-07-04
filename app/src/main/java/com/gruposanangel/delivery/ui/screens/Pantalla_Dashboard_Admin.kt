@@ -119,8 +119,9 @@ fun Pantalla_Dashboard_Admin(
         uiState = uiState,
         impresoraBluetooth = impresoraBluetooth,
         onImpresoraSeleccionada = onImpresoraSeleccionada,
-        onDateSelected = { viewModel.cargarDatosDashboard(it) },
-        onNavigate = { route -> navController.navigate(route) }
+        onDateRangeSelected = { inicio, fin -> viewModel.cargarDatosDashboardRango(inicio, fin) },
+        onNavigate = { route -> navController.navigate(route) },
+        onMigrate = { viewModel.migrarRutasClientes(it) }
     )
 }
 
@@ -130,16 +131,25 @@ fun DashboardContent(
     uiState: DashboardUiState,
     impresoraBluetooth: BluetoothDevice? = null,
     onImpresoraSeleccionada: (BluetoothDevice) -> Unit = {},
-    onDateSelected: (Date) -> Unit,
-    onNavigate: (String) -> Unit
+    onDateRangeSelected: (Date, Date) -> Unit,
+    onNavigate: (String) -> Unit,
+    onMigrate: ((Int) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
     val formatoFecha = SimpleDateFormat("hh:mm a", Locale("es", "MX"))
     val formatoDia = SimpleDateFormat("EEEE d 'de' MMMM", Locale("es", "MX"))
+    val formatoRango = SimpleDateFormat("d MMM", Locale("es", "MX"))
 
-    var selectedDate by remember { mutableStateOf(Date()) }
+    var startDate by remember { mutableStateOf(Date()) }
+    var endDate by remember { mutableStateOf(Date()) }
     var showDatePicker by remember { mutableStateOf(false) }
+
+    val textoFecha = if (startDate.time == endDate.time) {
+        formatoDia.format(startDate).uppercase()
+    } else {
+        "${formatoRango.format(startDate)} - ${formatoRango.format(endDate)}".uppercase()
+    }
 
     // Lógica de Velocidad
     var showSpeedDialog by remember { mutableStateOf(false) }
@@ -195,7 +205,11 @@ fun DashboardContent(
     var showSheet by remember { mutableStateOf(false) }
 
     if (showDatePicker) {
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDate.time)
+        val dateRangePickerState = rememberDateRangePickerState(
+            initialSelectedStartDateMillis = startDate.time,
+            initialSelectedEndDateMillis = endDate.time
+        )
+        
         MaterialTheme(
             colorScheme = lightColorScheme(
                 primary = Color.Red,
@@ -209,10 +223,28 @@ fun DashboardContent(
                 onDismissRequest = { showDatePicker = false },
                 confirmButton = {
                     TextButton(onClick = {
-                        datePickerState.selectedDateMillis?.let {
-                            val newDate = Date(it)
-                            selectedDate = newDate
-                            onDateSelected(newDate)
+                        val startMillis = dateRangePickerState.selectedStartDateMillis
+                        val endMillis = dateRangePickerState.selectedEndDateMillis
+                        
+                        if (startMillis != null) {
+                            // 🔥 CORRECCIÓN DE DESFASE (UTC a Local)
+                            val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+                            
+                            cal.timeInMillis = startMillis
+                            val sDate = Calendar.getInstance().apply {
+                                set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+                            }.time
+                            
+                            val eDate = if (endMillis != null) {
+                                cal.timeInMillis = endMillis
+                                Calendar.getInstance().apply {
+                                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+                                }.time
+                            } else sDate
+
+                            startDate = sDate
+                            endDate = eDate
+                            onDateRangeSelected(sDate, eDate)
                         }
                         showDatePicker = false
                     }) { Text("ACEPTAR", fontWeight = FontWeight.Bold) }
@@ -223,16 +255,21 @@ fun DashboardContent(
                     }
                 }
             ) {
-                DatePicker(
-                    state = datePickerState,
+                DateRangePicker(
+                    state = dateRangePickerState,
+                    modifier = Modifier.height(500.dp),
+                    title = { Text("Selecciona Periodo", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold) },
+                    headline = { Text("Filtro de Ventas", modifier = Modifier.padding(horizontal = 16.dp)) },
                     colors = DatePickerDefaults.colors(
+                        containerColor = Color.White,
                         titleContentColor = Color.DarkGray,
                         headlineContentColor = Color.Red,
                         selectedDayContainerColor = Color.Red,
                         selectedDayContentColor = Color.White,
                         todayContentColor = Color.Red,
                         todayDateBorderColor = Color.Red,
-                        weekdayContentColor = Color.Gray
+                        dayInSelectionRangeContainerColor = Color.Red.copy(alpha = 0.15f),
+                        dayInSelectionRangeContentColor = Color.Red
                     )
                 )
             }
@@ -305,13 +342,32 @@ fun DashboardContent(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = formatoDia.format(selectedDate).uppercase(),
+                    text = textoFecha,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Black,
                     color = Color.Gray
                 )
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 🚀 BOTÓN DE MIGRACIÓN (TEMPORAL)
+                    IconButton(
+                        onClick = {
+                            onMigrate { count ->
+                                android.widget.Toast.makeText(context, "Migración completada: $count clientes actualizados", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SyncAlt,
+                            contentDescription = "Migrar Rutas",
+                            tint = Color.Blue,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(12.dp))
+
                     // 🚀 BOTÓN DE VELOCIDAD
                     IconButton(
                         onClick = { showSpeedDialog = true },
@@ -704,7 +760,7 @@ fun VendedorCard(seller: SellerSummary, formato: NumberFormat, onClick: () -> Un
                 MetricDivider()
                 MetricItem("TICKET PROM.", formato.format(seller.ticketPromedio), Modifier.weight(1.3f))
                 MetricDivider()
-                MetricItem("VENTAS", "${seller.ventas.size}", Modifier.weight(1f))
+                MetricItem("VENTAS", "${seller.totalTicketsActivos}", Modifier.weight(1f))
             }
         }
     }
@@ -757,20 +813,43 @@ fun CardVentaAdmin(
                 onClick = onClick
             ),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        colors = CardDefaults.cardColors(
+            containerColor = if (venta.estado == "CANCELADA") Color(0xFFEEEEEE) else Color.White
+        )
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Payments, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+            val icon = if (venta.estado == "CANCELADA") Icons.Default.Cancel else Icons.Default.Payments
+            val tint = if (venta.estado == "CANCELADA") Color.Red else Color.Gray
+            
+            Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("FOLIO #${venta.id.takeLast(6).uppercase()}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                Text(venta.clienteNombre, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("FOLIO #${venta.id.takeLast(6).uppercase()}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                    if (venta.estado == "CANCELADA") {
+                        Spacer(Modifier.width(8.dp))
+                        Surface(color = Color.Red, shape = RoundedCornerShape(4.dp)) {
+                            Text("ANULADA", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                        }
+                    }
+                }
+                Text(
+                    text = venta.clienteNombre, 
+                    fontWeight = FontWeight.Bold, 
+                    fontSize = 15.sp,
+                    style = if (venta.estado == "CANCELADA") androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default,
+                    color = if (venta.estado == "CANCELADA") Color.Gray else Color.Black
+                )
                 Text(fHora.format(Date(venta.fecha)), fontSize = 11.sp, color = Color.Gray)
             }
-            Text(formato.format(venta.total), fontWeight = FontWeight.ExtraBold, color = Color.DarkGray)
+            Text(
+                text = formato.format(venta.total), 
+                fontWeight = FontWeight.ExtraBold, 
+                color = if (venta.estado == "CANCELADA") Color.Gray else Color.DarkGray
+            )
         }
     }
 }
@@ -812,8 +891,9 @@ fun DashboardPreview() {
     DeliveryTheme {
         DashboardContent(
             uiState = uiState,
-            onDateSelected = {},
-            onNavigate = {}
+            onDateRangeSelected = { _, _ -> },
+            onNavigate = {},
+            onMigrate = {}
         )
     }
 }
@@ -824,8 +904,9 @@ fun DashboardCargandoPreview() {
     DeliveryTheme {
         DashboardContent(
             uiState = DashboardUiState(isLoading = true),
-            onDateSelected = {},
-            onNavigate = {}
+            onDateRangeSelected = { _, _ -> },
+            onNavigate = {},
+            onMigrate = {}
         )
     }
 }
@@ -836,8 +917,9 @@ fun DashboardVacioPreview() {
     DeliveryTheme {
         DashboardContent(
             uiState = DashboardUiState(isLoading = false, todasLasVentasHoy = emptyList(), resumenVendedores = emptyList()),
-            onDateSelected = {},
-            onNavigate = {}
+            onDateRangeSelected = { _, _ -> },
+            onNavigate = {},
+            onMigrate = {}
         )
     }
 }

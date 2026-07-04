@@ -1,4 +1,4 @@
-package com.gruposanangel.delivery.ui.screens
+package com.gruposanangel.delivery
 
 import android.bluetooth.BluetoothDevice
 import androidx.compose.animation.animateColorAsState
@@ -45,6 +45,7 @@ import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.screens.*
 
 // ------------------------------------------------------------
 // SCREENS
@@ -198,7 +199,18 @@ fun Pantalla_Principal(
                     }
                     Screen.Clientes -> repository?.let { PantallaClientes(navController, it, isAdmin) }
                     Screen.Ruta -> PaginaVentaScreen(navController, ventaRepository)
-                    Screen.Mapa -> MapaScreen(navController = navController, viewModel = viewModel())
+                    Screen.Mapa -> {
+                        if (repository != null) {
+                            val mapaVm: com.gruposanangel.delivery.ui.screens.MapaViewModel = viewModel(
+                                factory = com.gruposanangel.delivery.ui.screens.MapaViewModelFactory(repository)
+                            )
+                            com.gruposanangel.delivery.ui.screens.MapaScreen(navController = navController, viewModel = mapaVm)
+                        } else {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = Color.Red)
+                            }
+                        }
+                    }
                 }
             }
         }

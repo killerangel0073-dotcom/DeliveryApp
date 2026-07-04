@@ -213,33 +213,29 @@ fun PantallaVentas(
         showSuccess = showSuccessScreen,
         onBack = handleBack,
         onIrAInicio = irAInicio,
+        onSearchQueryChanged = { ventaViewModel.onSearchQueryChanged(it) },
         onSumar = { p -> 
-            val index = uiState.productosEnCarrito.indexOfFirst { it.id == p.id }
-            if (index != -1) {
-                if (p.cantidad < p.cantidadDisponible) {
-                    ventaViewModel.actualizarCantidad(index, p.cantidad + 1) 
-                } else {
-                    val ahora = System.currentTimeMillis()
-                    if (ahora - ultimoAvisoStock > 2500) { // Limita la frecuencia de la alerta visual
-                        scope.launch {
-                            snackbarHostState.currentSnackbarData?.dismiss() // Quita el anterior si existe
-                            snackbarHostState.showSnackbar(
-                                message = "Stock insuficiente: ${p.cantidadDisponible} disponibles",
-                                duration = SnackbarDuration.Short
-                            )
-                        }
-                        ultimoAvisoStock = ahora
+            if (p.cantidad < p.cantidadDisponible) {
+                ventaViewModel.actualizarCantidad(p.id, p.cantidad + 1) 
+            } else {
+                val ahora = System.currentTimeMillis()
+                if (ahora - ultimoAvisoStock > 2500) { 
+                    scope.launch {
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        snackbarHostState.showSnackbar(
+                            message = "Stock insuficiente: ${p.cantidadDisponible} disponibles",
+                            duration = SnackbarDuration.Short
+                        )
                     }
+                    ultimoAvisoStock = ahora
                 }
             }
         },
         onRestar = { p -> 
-            val index = uiState.productosEnCarrito.indexOfFirst { it.id == p.id }
-            if (index != -1 && p.cantidad > 0) ventaViewModel.actualizarCantidad(index, p.cantidad - 1) 
+            if (p.cantidad > 0) ventaViewModel.actualizarCantidad(p.id, p.cantidad - 1) 
         },
         onCantidadCambiada = { p, n -> 
-            val index = uiState.productosEnCarrito.indexOfFirst { it.id == p.id }
-            if (index != -1) ventaViewModel.actualizarCantidad(index, n)
+            ventaViewModel.actualizarCantidad(p.id, n)
         },
         onFinalizar = {
             if (uiState.requiereFotoEvidencia) {
@@ -260,6 +256,7 @@ fun PantallaVentasContent(
     showSuccess: Boolean = false,
     onBack: () -> Unit, 
     onIrAInicio: () -> Unit = {},
+    onSearchQueryChanged: (String) -> Unit,
     onSumar: (Plantilla_Producto) -> Unit, 
     onRestar: (Plantilla_Producto) -> Unit, 
     onCantidadCambiada: (Plantilla_Producto, Int) -> Unit, 
@@ -295,6 +292,14 @@ fun PantallaVentasContent(
                     estaEnRango = uiState.estaEnRango,
                     onBack = onBack
                 )
+
+                if (uiState.enRuta) {
+                    // 🔍 BARRA DE BÚSQUEDA
+                    SearchBar(
+                        query = uiState.searchQuery,
+                        onQueryChange = onSearchQueryChanged
+                    )
+                }
 
                 if (!uiState.enRuta) {
                     Box(
@@ -351,9 +356,30 @@ fun PantallaVentasContent(
                             }
                             is EstadoRuta.ConRuta -> {
                                 if (uiState.productosEnCarrito.isEmpty()) {
-                                    item { EmptyStateProductos(false) }
+                                    item { EmptyStateProductos(uiState.searchQuery.isNotEmpty()) }
                                 } else {
-                                    itemsIndexed(uiState.productosEnCarrito, key = { _, p -> p.id }) { _, producto ->
+                                    val seleccionados = uiState.productosEnCarrito.filter { it.cantidad > 0 }
+                                    val resto = uiState.productosEnCarrito.filter { it.cantidad == 0 }
+
+                                    // Solo mostrar encabezados si NO estamos buscando
+                                    val mostrarHeaders = uiState.searchQuery.isBlank()
+
+                                    if (mostrarHeaders && seleccionados.isNotEmpty()) {
+                                        item { SeccionHeader("PRODUCTOS EN CARRITO") }
+                                        itemsIndexed(seleccionados, key = { _, p -> "sel_${p.id}" }) { _, producto ->
+                                            ItemVentaProductoModerno(
+                                                producto = producto, 
+                                                formato = formatoMoneda, 
+                                                onSumar = { onSumar(producto) }, 
+                                                onRestar = { onRestar(producto) }
+                                            )
+                                        }
+                                        if (resto.isNotEmpty()) {
+                                            item { SeccionHeader("CATÁLOGO DISPONIBLE") }
+                                        }
+                                    }
+
+                                    itemsIndexed(if (mostrarHeaders) resto else uiState.productosEnCarrito, key = { _, p -> p.id }) { _, producto ->
                                         ItemVentaProductoModerno(
                                             producto = producto, 
                                             formato = formatoMoneda, 
@@ -759,4 +785,50 @@ fun EmptyStateProductos(isSearch: Boolean) {
             fontWeight = FontWeight.Medium
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SeccionHeader(titulo: String) {
+    Text(
+        text = titulo,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Black,
+        color = RojoDelisa,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 8.dp)
+            .padding(top = 8.dp)
+    )
+}
+
+@Composable
+fun SearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        placeholder = { Text("Buscar producto...", color = Color.Gray) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = RojoDelisa) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(Icons.Default.Close, contentDescription = null, tint = Color.Gray)
+                }
+            }
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(16.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = RojoDelisa,
+            unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f),
+            focusedContainerColor = Color.White,
+            unfocusedContainerColor = Color.White
+        )
+    )
 }
