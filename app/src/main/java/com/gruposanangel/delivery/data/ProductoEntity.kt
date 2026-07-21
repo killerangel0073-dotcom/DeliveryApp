@@ -11,5 +11,9 @@ data class ProductoEntity(
     val precio: Double,
     val cantidadDisponible: Int,          // stock real en inventario
     val imagenUrl: String?,
-    val syncStatus: Boolean = false
+    val syncStatus: Boolean = false,
+    val cantidadUnitario: Long? = null,
+    val unidadesPorDisplay: Long? = null,
+    val gramosVenta: Long? = null,
+    val precioCompra: Double = 0.0
 )

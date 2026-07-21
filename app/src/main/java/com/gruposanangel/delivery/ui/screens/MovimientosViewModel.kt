@@ -8,6 +8,7 @@ import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import com.gruposanangel.delivery.utilidades.enviarNotificacion
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -16,16 +17,24 @@ data class MovimientosUiState(
     val stockOrigen: Map<String, Int> = emptyMap(),
     val error: String? = null,
     val ordenCreadaExito: Boolean = false,
-    val listaAlmacenes: List<String> = emptyList()
+    val listaAlmacenes: List<String> = emptyList(),
+    val origen: String = "Selecciona Origen",
+    val destino: String = "Selecciona Destino",
+    val cantidades: Map<String, Int> = emptyMap(),
+    val isAlmacenRole: Boolean = false
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class MovimientosViewModel(
     private val inventarioRepo: RepositoryInventario,
-    private val usuarioRepo: RepositoryUsuario
+    private val usuarioRepo: RepositoryUsuario,
+    private val prefs: android.content.SharedPreferences
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MovimientosUiState())
     val uiState: StateFlow<MovimientosUiState> = _uiState.asStateFlow()
+
+    private val _almacenSeleccionado = MutableStateFlow<String?>(null)
 
     // 🔥 OFFLINE-FIRST: Catálogo desde Room usando stateIn como se solicitó
     val catalogoProductos: StateFlow<List<Plantilla_Producto>> = inventarioRepo.obtenerProductosLocal()
@@ -49,11 +58,118 @@ class MovimientosViewModel(
         )
 
     init {
+        // 🔥 MOTOR REACTIVO PARA EL STOCK DE ORIGEN
+        _almacenSeleccionado
+            .filterNotNull()
+            .filter { it != "Selecciona Origen" }
+            .flatMapLatest { almacen ->
+                val almacenConsultar = if (almacen == "Compra Producto") "Almacen Huasteca" else almacen
+                inventarioRepo.obtenerStockAlmacenFlow(almacenConsultar)
+                    .onStart { _uiState.update { it.copy(isLoading = true) } }
+                    .catch { e -> _uiState.update { it.copy(isLoading = false, error = e.message) } }
+            }
+            .onEach { stock ->
+                _uiState.update { it.copy(stockOrigen = stock, isLoading = false) }
+            }
+            .launchIn(viewModelScope)
+
+        recuperarEstado()
+        
+        // 🔥 DETECTAR ROL DE ALMACÉN Y APLICAR RESTRICCIONES
+        viewModelScope.launch {
+            val user = usuarioRepo.obtenerUsuarioActual()
+            val puesto = user?.puestoTrabajo ?: ""
+            val esAlmacen = puesto.contains("Almacen", ignoreCase = true) || puesto.contains("Bodega", ignoreCase = true)
+            
+            _uiState.update { it.copy(isAlmacenRole = esAlmacen) }
+            
+            if (esAlmacen) {
+                // Forzamos Almacen Huasteca como origen
+                actualizarOrigen("Almacen Huasteca")
+            }
+        }
+
         // Aseguramos que el catálogo esté actualizado al entrar
         viewModelScope.launch {
             inventarioRepo.descargarCatalogoProductos()
             cargarAlmacenes()
         }
+    }
+
+    private fun recuperarEstado() {
+        val origen = prefs.getString("origen", "Selecciona Origen") ?: "Selecciona Origen"
+        val destino = prefs.getString("destino", "Selecciona Destino") ?: "Selecciona Destino"
+        val cantidadesJson = prefs.getString("cantidades", "{}") ?: "{}"
+        
+        // Simple manual parse of " {id:cant, id2:cant2} "
+        val cantidades = mutableMapOf<String, Int>()
+        try {
+            val clean = cantidadesJson.removeSurrounding("{", "}")
+            if (clean.isNotEmpty()) {
+                clean.split(",").forEach { pair ->
+                    val parts = pair.split(":")
+                    if (parts.size == 2) {
+                        cantidades[parts[0].trim()] = parts[1].trim().toInt()
+                    }
+                }
+            }
+        } catch (e: Exception) { Log.e("MOV_VM", "Error parsing quantities", e) }
+
+        _uiState.update { it.copy(origen = origen, destino = destino, cantidades = cantidades) }
+        _almacenSeleccionado.value = origen
+    }
+
+    private fun guardarEstado() {
+        val state = _uiState.value
+        val cantidadesJson = state.cantidades.entries.joinToString(",", prefix = "{", postfix = "}") { 
+            "${it.key}:${it.value}" 
+        }
+        prefs.edit().apply {
+            putString("origen", state.origen)
+            putString("destino", state.destino)
+            putString("cantidades", cantidadesJson)
+            apply()
+        }
+    }
+
+    fun actualizarOrigen(nuevo: String) {
+        _uiState.update { it.copy(origen = nuevo) }
+        _almacenSeleccionado.value = nuevo
+        guardarEstado()
+    }
+
+    fun actualizarDestino(nuevo: String) {
+        _uiState.update { it.copy(destino = nuevo) }
+        guardarEstado()
+    }
+
+    fun actualizarCantidad(productoId: String, cantidad: Int) {
+        val nuevasCantidades = _uiState.value.cantidades.toMutableMap()
+        if (cantidad <= 0) nuevasCantidades.remove(productoId)
+        else nuevasCantidades[productoId] = cantidad
+        
+        _uiState.update { it.copy(cantidades = nuevasCantidades) }
+        guardarEstado()
+    }
+
+    fun limpiarPantalla() {
+        val currentState = _uiState.value
+        val esAlmacen = currentState.isAlmacenRole
+        
+        _uiState.update { 
+            it.copy(
+                origen = if (esAlmacen) "Almacen Huasteca" else "Selecciona Origen",
+                destino = "Selecciona Destino",
+                cantidades = emptyMap(),
+                stockOrigen = if (esAlmacen) currentState.stockOrigen else emptyMap()
+            ) 
+        }
+        
+        if (!esAlmacen) {
+            _almacenSeleccionado.value = "Selecciona Origen"
+        }
+
+        guardarEstado()
     }
 
     private fun cargarAlmacenes() {
@@ -64,19 +180,7 @@ class MovimientosViewModel(
     }
 
     fun cargarStockOrigen(almacen: String) {
-        if (almacen == "Selecciona Origen") return
-        
-        _uiState.update { it.copy(isLoading = true) }
-        viewModelScope.launch {
-            try {
-                // 🛒 Si es compra, mostramos el stock del Almacen Huasteca como referencia visual
-                val almacenConsultar = if (almacen == "Compra Producto") "Almacen Huasteca" else almacen
-                val stock = inventarioRepo.obtenerStockAlmacen(almacenConsultar)
-                _uiState.update { it.copy(stockOrigen = stock, isLoading = false) }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
-            }
-        }
+        actualizarOrigen(almacen)
     }
 
     fun crearOrden(
@@ -132,6 +236,7 @@ class MovimientosViewModel(
                     }
                 }
 
+                limpiarPantalla() // Limpiar tras éxito
                 _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true) }
                 onSuccess(docId)
             } catch (e: Exception) {
@@ -200,10 +305,7 @@ class MovimientosViewModel(
                     inventarioRepo.registrarMovimientoCarga(movimiento, p.copy(cantidad = cantidadLocal))
                 }
 
-                // 2. SI ES LIQUIDACIÓN (RETORNO A BODEGA), HACEMOS EL TRASPASO DEL STOCK FÍSICO CONTADO
-                // (Esta parte solo corre si el switch de retornarABodega estaba ON en la UI, pero 
-                // para esta lógica simple de arqueo, ya ajustamos el stock del vendedor arriba)
-
+                limpiarPantalla() // Limpiar tras éxito
                 _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true) }
                 onSuccess()
             } catch (e: Exception) {
@@ -218,11 +320,15 @@ class MovimientosViewModel(
     }
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class MovimientosViewModelFactory(
     private val inventarioRepo: RepositoryInventario,
-    private val usuarioRepo: RepositoryUsuario
+    private val usuarioRepo: RepositoryUsuario,
+    context: android.content.Context
 ) : ViewModelProvider.Factory {
+    private val appContext = context.applicationContext
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return MovimientosViewModel(inventarioRepo, usuarioRepo) as T
+        val prefs = appContext.getSharedPreferences("movimientos_prefs", android.content.Context.MODE_PRIVATE)
+        return MovimientosViewModel(inventarioRepo, usuarioRepo, prefs) as T
     }
 }

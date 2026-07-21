@@ -79,6 +79,13 @@ class RepositoryRuta(
     }
 
     /**
+     * Obtiene un cliente por su ID desde la DB local.
+     */
+    suspend fun obtenerClienteLocal(id: String): ClienteEntity? = withContext(Dispatchers.IO) {
+        clienteDao.getClientePorId(id)
+    }
+
+    /**
      * Guarda un itinerario en la colección puente 'rutas_itinerarios'.
      * No toca la colección 'clientes'.
      */

@@ -23,12 +23,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.gruposanangel.delivery.model.Plantila_carga
+import android.widget.Toast
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
@@ -38,7 +41,13 @@ import java.util.*
 fun PantallaHistorialCargas(
     navController: NavController
 ) {
-    val vm: HistorialCargasViewModel = viewModel()
+    val context = LocalContext.current
+    val db = com.gruposanangel.delivery.data.AppDatabase.getDatabase(context)
+    val repoUsuario = com.gruposanangel.delivery.RepositoryUsuario(com.gruposanangel.delivery.data.FirebaseDataSource(), db.usuarioDao())
+    
+    val vm: HistorialCargasViewModel = viewModel(
+        factory = HistorialCargasViewModelFactory(repoUsuario)
+    )
     val uiState by vm.uiState.collectAsState()
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
     val formatoFechaSimple = SimpleDateFormat("dd/MM/yyyy", Locale("es", "MX"))
@@ -46,6 +55,11 @@ fun PantallaHistorialCargas(
     var showVendedorFilter by remember { mutableStateOf(false) }
     var showDateRangePicker by remember { mutableStateOf(false) }
     var tabIndex by remember { mutableIntStateOf(0) }
+    
+    // --- ESTADOS PARA CANCELACIÓN ---
+    var cargaSeleccionadaParaCancelar by remember { mutableStateOf<CargaResumen?>(null) }
+    var motivoCancelacion by remember { mutableStateOf("") }
+    val esAdminAutorizado = vm.userRole in listOf("CEO", "Gerente General")
 
     Column(
         modifier = Modifier
@@ -169,8 +183,10 @@ fun PantallaHistorialCargas(
         // --- RESUMEN DE TOTALES ---
         val listaActual = if (tabIndex == 0) uiState.cargas else uiState.arqueos
         if (listaActual.isNotEmpty() && !uiState.isLoading) {
-            val totalMonto = if (tabIndex == 0) listaActual.sumOf { it.montoTotal } else 0.0
-            val totalPiezas = listaActual.sumOf { it.totalPiezas }
+            val listaFiltrada = if (tabIndex == 0) listaActual.filter { it.estado != "CANCELADA" } else listaActual
+            
+            val totalMonto = if (tabIndex == 0) listaFiltrada.sumOf { it.montoTotal } else 0.0
+            val totalPiezas = if (tabIndex == 0) listaFiltrada.sumOf { it.totalPiezas } else listaActual.sumOf { it.totalPiezas }
             
             Card(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -186,7 +202,7 @@ fun PantallaHistorialCargas(
                     // 1. IZQUIERDA: CANTIDAD DE EVENTOS
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                         Text(if (tabIndex == 0) "CARGAS" else "ARQUEOS", color = Color.White.copy(0.5f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        Text(text = "${listaActual.size}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        Text(text = "${if (tabIndex == 0) listaFiltrada.size else listaActual.size}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
                     }
                     
                     Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.15f)))
@@ -224,18 +240,89 @@ fun PantallaHistorialCargas(
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 0.dp, 16.dp, 80.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(listaActual) { item ->
-                    ItemHistorialCarga(item, formatoMoneda) {
-                        val objCarga = Plantila_carga(id = item.id, nombreCarga = if (tabIndex == 0) "Carga a ${item.destino}" else "Arqueo de ${item.destino}", aceptada = true, plantillaProductos = item.productos)
-                        navController.currentBackStackEntry?.savedStateHandle?.set("carga", objCarga)
-                        if (tabIndex == 1) {
-                            navController.navigate("DETALLE_ARQUEO")
-                        } else {
-                            navController.navigate("DETALLE_CARGA")
+                    ItemHistorialCarga(
+                        carga = item, 
+                        formato = formatoMoneda, 
+                        esAdmin = esAdminAutorizado,
+                        onCancel = { cargaSeleccionadaParaCancelar = item },
+                        onClick = {
+                            val objCarga = Plantila_carga(id = item.id, nombreCarga = if (tabIndex == 0) "Carga a ${item.destino}" else "Arqueo de ${item.destino}", aceptada = true, plantillaProductos = item.productos)
+                            navController.currentBackStackEntry?.savedStateHandle?.set("carga", objCarga)
+                            if (tabIndex == 1) {
+                                navController.navigate("DETALLE_ARQUEO")
+                            } else {
+                                navController.navigate("DETALLE_CARGA")
+                            }
                         }
-                    }
+                    )
                 }
             }
         }
+    }
+
+    if (cargaSeleccionadaParaCancelar != null) {
+        AlertDialog(
+            onDismissRequest = { cargaSeleccionadaParaCancelar = null },
+            containerColor = Color.White,
+            title = {
+                Text(
+                    "ANULAR CARGA", 
+                    fontWeight = FontWeight.Black, 
+                    color = Color.Red,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "Esta acción cancelará permanentemente la orden de transferencia a ${cargaSeleccionadaParaCancelar?.destino}.",
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = motivoCancelacion,
+                        onValueChange = { motivoCancelacion = it },
+                        label = { Text("Motivo de cancelación") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (motivoCancelacion.length < 5) {
+                            Toast.makeText(context, "Escribe un motivo más detallado", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val cargaId = cargaSeleccionadaParaCancelar?.id ?: return@Button
+                        vm.cancelarCarga(cargaId, motivoCancelacion) { exito, msg ->
+                            if (exito) {
+                                Toast.makeText(context, "Carga anulada correctamente", Toast.LENGTH_SHORT).show()
+                                cargaSeleccionadaParaCancelar = null
+                                motivoCancelacion = ""
+                            } else {
+                                Toast.makeText(context, "Error: $msg", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("CONFIRMAR ANULACIÓN", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { cargaSeleccionadaParaCancelar = null }) {
+                    Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
+                }
+            },
+            shape = RoundedCornerShape(28.dp)
+        )
     }
 
     if (showDateRangePicker) {
@@ -279,28 +366,95 @@ fun PantallaHistorialCargas(
 }
 
 @Composable
-fun ItemHistorialCarga(carga: CargaResumen, formato: NumberFormat, onClick: () -> Unit) {
+fun ItemHistorialCarga(
+    carga: CargaResumen, 
+    formato: NumberFormat, 
+    esAdmin: Boolean,
+    onCancel: () -> Unit,
+    onClick: () -> Unit
+) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(targetValue = if (isPressed) 0.96f else 1f, animationSpec = spring(0.6f, 300f), label = "")
-    val statusColor = when (carga.estado) { "ACEPTADA", "ARQUEADO", "COMPLETADA" -> Color(0xFF2E7D32); "PENDIENTE" -> Color(0xFFF57C00); else -> Color.Gray }
-    Card(modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }.shadow(if (isPressed) 1.dp else 4.dp, RoundedCornerShape(24.dp)).clickable(interactionSource = interactionSource, indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = Color.Red.copy(0.1f)), onClick = onClick), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    
+    val esCancelada = carga.estado == "CANCELADA"
+    
+    val statusColor = when (carga.estado) { 
+        "ACEPTADA", "ARQUEADO", "COMPLETADA" -> Color(0xFF2E7D32)
+        "PENDIENTE" -> Color(0xFFF57C00)
+        "CANCELADA" -> Color.Red
+        else -> Color.Gray 
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .shadow(if (isPressed) 1.dp else 4.dp, RoundedCornerShape(24.dp))
+            .clickable(
+                interactionSource = interactionSource, 
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = Color.Red.copy(0.1f)), 
+                onClick = onClick
+            ), 
+        shape = RoundedCornerShape(24.dp), 
+        colors = CardDefaults.cardColors(
+            containerColor = if (esCancelada) Color(0xFFEEEEEE) else Color.White
+        )
+    ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(52.dp).clip(CircleShape).background(statusColor.copy(0.08f)).border(0.5.dp, statusColor.copy(0.15f), CircleShape), contentAlignment = Alignment.Center) {
-                Icon(imageVector = if (carga.estado == "PENDIENTE") Icons.Default.Inventory else Icons.Default.CheckCircle, contentDescription = null, tint = statusColor, modifier = Modifier.size(26.dp))
+                Icon(
+                    imageVector = when(carga.estado) {
+                        "PENDIENTE" -> Icons.Default.Inventory
+                        "CANCELADA" -> Icons.Default.Cancel
+                        else -> Icons.Default.CheckCircle
+                    }, 
+                    contentDescription = null, 
+                    tint = statusColor, 
+                    modifier = Modifier.size(26.dp)
+                )
             }
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = carga.destino, fontWeight = FontWeight.Black, fontSize = 15.sp, color = Color(0xFF1A1A1A))
+                Text(
+                    text = carga.destino, 
+                    fontWeight = FontWeight.Black, 
+                    fontSize = 15.sp, 
+                    color = if (esCancelada) Color.Gray else Color(0xFF1A1A1A),
+                    style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
+                )
                 Text(text = carga.fechaFormateada, fontSize = 11.sp, color = Color.Gray)
                 Spacer(Modifier.height(6.dp))
-                Surface(color = statusColor.copy(0.1f), shape = RoundedCornerShape(8.dp)) { Text(text = carga.estado, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = statusColor) }
+                Surface(color = statusColor.copy(0.1f), shape = RoundedCornerShape(8.dp)) { 
+                    Text(text = carga.estado, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = statusColor) 
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(text = "${carga.totalPiezas} pzas", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.Gray)
-                if (carga.montoTotal > 0) Text(text = formato.format(carga.montoTotal), fontWeight = FontWeight.Black, fontSize = 17.sp, color = Color.Red)
+                Text(
+                    text = "${carga.totalPiezas} pzas", 
+                    fontWeight = FontWeight.Bold, 
+                    fontSize = 13.sp, 
+                    color = Color.Gray,
+                    style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
+                )
+                if (carga.montoTotal > 0) {
+                    Text(
+                        text = formato.format(carga.montoTotal), 
+                        fontWeight = FontWeight.Black, 
+                        fontSize = 17.sp, 
+                        color = if (esCancelada) Color.Gray else Color.Red,
+                        style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
+                    )
+                }
             }
-            Icon(Icons.Default.ChevronRight, null, tint = Color.LightGray, modifier = Modifier.padding(start = 12.dp).size(20.dp))
+            
+            if (esAdmin && carga.estado == "PENDIENTE") {
+                IconButton(onClick = onCancel) {
+                    Icon(Icons.Default.DeleteForever, null, tint = Color.Red)
+                }
+            } else {
+                Icon(Icons.Default.ChevronRight, null, tint = Color.LightGray, modifier = Modifier.padding(start = 12.dp).size(20.dp))
+            }
         }
     }
 }

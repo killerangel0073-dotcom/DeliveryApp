@@ -6,6 +6,8 @@ import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.data.UsuarioDao
 import com.gruposanangel.delivery.data.UsuarioEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -95,8 +97,7 @@ class RepositoryUsuario(
                 ultimoAlmacenNombre = ultimoAlmacenNombre
             )
 
-            // Guardar en Room (reemplazando cualquier sesión anterior)
-            usuarioDao.limpiarTabla()
+            // Guardar en Room (Se usa REPLACE en el DAO por lo que no es necesario limpiar la tabla)
             usuarioDao.insertar(entity)
             Log.d("RepositoryUsuario", "Usuario sincronizado y guardado en local: $uid")
 
@@ -106,10 +107,18 @@ class RepositoryUsuario(
     }
 
     /**
-     * Devuelve un Flow del usuario actual directamente desde Room para reactividad en la UI.
+     * Devuelve un Flow del usuario logueado actualmente directamente desde Room.
+     * Se mantiene reactivo tanto a cambios en la sesión de Firebase como a actualizaciones en Room.
      */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun getUsuarioActual(): Flow<UsuarioEntity?> {
-        return usuarioDao.obtenerUsuarioActualFlow()
+        return firebaseDataSource.authStateFlow().flatMapLatest { firebaseUser ->
+            if (firebaseUser != null) {
+                usuarioDao.obtenerPorIdFlow(firebaseUser.uid)
+            } else {
+                flowOf(null)
+            }
+        }
     }
 
     /**
@@ -140,7 +149,8 @@ class RepositoryUsuario(
     // --- MÉTODOS DE COMPATIBILIDAD ---
 
     suspend fun obtenerUsuarioActual(): UsuarioEntity? {
-        return usuarioDao.obtenerUsuarioActual()
+        val uid = getUidActual() ?: return null
+        return usuarioDao.obtenerPorId(uid)
     }
 
     suspend fun sincronizarVendedorLocal(uid: String) {

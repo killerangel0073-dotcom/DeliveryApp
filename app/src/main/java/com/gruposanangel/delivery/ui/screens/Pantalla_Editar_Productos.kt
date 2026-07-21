@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.text.style.TextAlign
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.gruposanangel.delivery.R
@@ -74,7 +75,11 @@ data class ProductoEditarModelo(
     val subcategoria: String,
     val descripcion: String,
     val precio: Double,
-    val imagenUrl: String
+    val imagenUrl: String,
+    val cantidadUnitario: String = "",
+    val unidadesPorDisplay: String = "",
+    val gramosVenta: Long? = null,
+    val precioCompra: Double = 0.0
 )
 
 @Composable
@@ -136,15 +141,18 @@ fun ModernFieldEditar(
     value: TextFieldValue,
     icon: ImageVector,
     maxLines: Int = 1,
+    prefix: String? = null,
     keyboardType: KeyboardType = KeyboardType.Text,
     onChange: (TextFieldValue) -> Unit
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        label = { Text(label) },
+        label = { Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
         leadingIcon = { Icon(icon, null, tint = Color.Red) },
+        prefix = if (prefix != null) { { Text(prefix) } } else null,
         maxLines = maxLines,
+        singleLine = maxLines == 1,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -180,6 +188,11 @@ fun EditarProductoScreen(
     var marca by rememberSaveable { mutableStateOf(previewProducto?.marca ?: "") }
     var categoria by rememberSaveable { mutableStateOf(previewProducto?.categoria ?: "") }
     var subcategoria by rememberSaveable { mutableStateOf(previewProducto?.subcategoria ?: "") }
+
+    var cantidadUnitario by remember { mutableStateOf(TextFieldValue(previewProducto?.cantidadUnitario ?: "")) }
+    var unidadesPorDisplay by remember { mutableStateOf(TextFieldValue(previewProducto?.unidadesPorDisplay ?: "")) }
+    var gramosVenta by remember { mutableStateOf(TextFieldValue(previewProducto?.gramosVenta?.toString() ?: "")) }
+    var precioCompra by remember { mutableStateOf(TextFieldValue(previewProducto?.precioCompra?.toString() ?: "")) }
 
     // Imagen vinculada
     var imageBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -226,6 +239,10 @@ fun EditarProductoScreen(
                     marca = doc.getString("marca") ?: ""
                     categoria = doc.getString("categoria") ?: ""
                     subcategoria = doc.getString("subcategoria") ?: ""
+                    cantidadUnitario = TextFieldValue(doc.get("cantidadUnitario")?.toString() ?: "")
+                    unidadesPorDisplay = TextFieldValue(doc.get("unidadesPorDisplay")?.toString() ?: "")
+                    gramosVenta = TextFieldValue(doc.get("gramosVenta")?.toString() ?: "")
+                    precioCompra = TextFieldValue(doc.get("precioCompra")?.toString() ?: "")
 
                     val imageUrl = doc.getString("imagenUrl")
                     if (!imageUrl.isNullOrEmpty()) {
@@ -412,7 +429,44 @@ fun EditarProductoScreen(
 
                     ModernFieldEditar("Descripción", descripcion, Icons.Outlined.Description, maxLines = 3) { descripcion = it }
 
-                    ModernFieldEditar("Precio al Público", precio, Icons.Outlined.AttachMoney, keyboardType = KeyboardType.Number) {
+                    Text(
+                        "CONFIGURACIÓN DE COMPRA",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Black,
+                        color = Color.Red,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        textAlign = TextAlign.Center
+                    )
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            ModernFieldEditar("Gramos Bolsa", cantidadUnitario, Icons.Outlined.Scale, keyboardType = KeyboardType.Number) {
+                                if (it.text.all { c -> c.isDigit() }) cantidadUnitario = it
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            ModernFieldEditar("Display", unidadesPorDisplay, Icons.Outlined.Inventory2, keyboardType = KeyboardType.Number) {
+                                if (it.text.all { c -> c.isDigit() }) unidadesPorDisplay = it 
+                            }
+                        }
+                    }
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            ModernFieldEditar("Precio Compra", precioCompra, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number, prefix = "$") {
+                                if (it.text.all { c -> c.isDigit() || c == '.' }) precioCompra = it
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            ModernFieldEditar("Gramos Bolsita", gramosVenta, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number) {
+                                if (it.text.all { c -> c.isDigit() }) gramosVenta = it
+                            }
+                        }
+                    }
+                    
+                    Text("Solo números: Ej. 900, 20, 45", fontSize = 10.sp, color = Color.Gray)
+
+                    ModernFieldEditar("Precio al Público", precio, Icons.Outlined.AttachMoney, keyboardType = KeyboardType.Number, prefix = "$") {
                         if (it.text.all { c -> c.isDigit() || c == '.' }) precio = it
                     }
                 }
@@ -466,7 +520,11 @@ fun EditarProductoScreen(
                                     "categoria" to categoria,
                                     "subcategoria" to subcategoria,
                                     "descripcion" to descripcion.text,
-                                    "precio" to precioDouble
+                                    "precio" to precioDouble,
+                                    "cantidadUnitario" to (cantidadUnitario.text.toLongOrNull() ?: 0L),
+                                    "unidadesPorDisplay" to (unidadesPorDisplay.text.toLongOrNull() ?: 0L),
+                                    "gramosVenta" to (gramosVenta.text.toLongOrNull() ?: 0L),
+                                    "precioCompra" to (precioCompra.text.toDoubleOrNull() ?: 0.0)
                                 )
                                 imageUrl?.let { updateData["imagenUrl"] = it }
 
@@ -549,7 +607,11 @@ fun EditarProductoPreview() {
         subcategoria = "Mix",
         descripcion = "Papas fritas crujientes con un toque delicioso de chile y limón.",
         precio = 15.0,
-        imagenUrl = ""
+        imagenUrl = "",
+        cantidadUnitario = "900",
+        unidadesPorDisplay = "20",
+        gramosVenta = 45L,
+        precioCompra = 150.0
     )
     MaterialTheme {
         EditarProductoScreen(

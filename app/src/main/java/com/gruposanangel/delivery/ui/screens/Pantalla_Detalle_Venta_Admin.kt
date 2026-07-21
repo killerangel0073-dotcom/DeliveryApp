@@ -51,7 +51,8 @@ import java.util.*
 fun Pantalla_Detalle_Venta_Admin(
     navController: NavController,
     ticketId: String,
-    impresoraBluetooth: BluetoothDevice? = null
+    impresoraBluetooth: BluetoothDevice? = null,
+    mostrarAcciones: Boolean = true // 🔥 Nuevo: Controlar visibilidad de botones
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -320,32 +321,34 @@ fun Pantalla_Detalle_Venta_Admin(
                 }
 
                 // 🔹 ACCIONES DE AJUSTE (AUDITORÍA)
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { tipoAjuste = "CAMBIO"; showBottomSheet = true },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
-                            contentPadding = PaddingValues(horizontal = 4.dp)
+                if (mostrarAcciones && ticket.estado != "CANCELADA") {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Default.Sync, null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("CAMBIO", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
-                        }
-                        OutlinedButton(
-                            onClick = { tipoAjuste = "DEVOLUCION"; showBottomSheet = true },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF9800)),
-                            contentPadding = PaddingValues(horizontal = 4.dp)
-                        ) {
-                            Icon(Icons.Default.AssignmentReturn, null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("DEVOLUCIÓN", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                            OutlinedButton(
+                                onClick = { tipoAjuste = "CAMBIO"; showBottomSheet = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Sync, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("CAMBIO", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = { tipoAjuste = "DEVOLUCION"; showBottomSheet = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF9800)),
+                                contentPadding = PaddingValues(horizontal = 4.dp)
+                            ) {
+                                Icon(Icons.Default.AssignmentReturn, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("DEVOLUCIÓN", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                            }
                         }
                     }
                 }

@@ -174,7 +174,7 @@ class RegistroClienteViewModel(
                     ubicacionLon = lon,
                     fotografiaUrl = currentState.imageFile?.absolutePath ?: "",
                     activo = true,
-                    medio = "medio",
+                    valorCliente = "medio",
                     fechaDeCreacion = System.currentTimeMillis(),
                     syncStatus = false,
                     ownerUid = usuarioActual?.uid ?: "",

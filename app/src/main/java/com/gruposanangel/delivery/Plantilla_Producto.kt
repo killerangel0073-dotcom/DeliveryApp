@@ -10,5 +10,9 @@ data class Plantilla_Producto(
     val precio: Double = 0.0,
     val cantidad: Int = 0,          // lo que quiere vender
     val cantidadDisponible: Int = 0, // lo que hay en inventario
-    val imagenUrl: String = ""
+    val imagenUrl: String = "",
+    val cantidadUnitario: Long? = null,
+    val unidadesPorDisplay: Long? = null,
+    val gramosVenta: Long? = null,
+    val precioCompra: Double = 0.0
 ) : Parcelable

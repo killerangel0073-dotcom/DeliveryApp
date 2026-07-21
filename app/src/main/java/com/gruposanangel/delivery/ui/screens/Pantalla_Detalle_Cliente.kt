@@ -109,7 +109,7 @@ fun DetalleClienteScreen(
                 ubicacionLon = 0.0,
                 fotografiaUrl = "",
                 activo = true,
-                medio = "medio",
+                valorCliente = "medio",
                 fechaDeCreacion = System.currentTimeMillis(),
                 syncStatus = true
             )
@@ -263,13 +263,13 @@ fun DetalleClienteScreen(
                         val context = LocalContext.current
                         var mapReady by remember { mutableStateOf(false) }
 
-                        val iconCliente = remember(mapReady, c.medio) {
+                        val iconCliente = remember(mapReady, c.valorCliente) {
                             if (!mapReady) return@remember null
 
-                            when (c.medio.lowercase()) {
+                            when (c.valorCliente.lowercase()) {
                                 "alto" -> bitmapDescriptorFromVector(context, R.drawable.marcadorverde, 120, 160)
-                                "medio" -> bitmapDescriptorFromVector(context, R.drawable.marcadorrojo, 120, 160)
-                                "bajo" -> bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo, 120, 160)
+                                "medio" -> bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo, 120, 160)
+                                "bajo" -> bitmapDescriptorFromVector(context, R.drawable.marcadorrojo, 120, 160)
                                 else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
                             }
                         }
@@ -571,7 +571,7 @@ fun DetalleClienteScreen(
                         MapaClienteDetalle(
                             lat = c.ubicacionLat,
                             lon = c.ubicacionLon,
-                            valor = c.medio
+                            valor = c.valorCliente
                         )
 
                         Box(
@@ -629,8 +629,8 @@ fun MapaClienteDetalle(
 
         when (valor.lowercase()) {
             "alto" -> bitmapDescriptorFromVector(context, R.drawable.marcadorverde, 120, 160)
-            "medio" -> bitmapDescriptorFromVector(context, R.drawable.marcadorrojo, 120, 160)
-            "bajo" -> bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo, 120, 160)
+            "medio" -> bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo, 120, 160)
+            "bajo" -> bitmapDescriptorFromVector(context, R.drawable.marcadorrojo, 120, 160)
             else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
         }
     }

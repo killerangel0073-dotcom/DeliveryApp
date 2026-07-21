@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -121,7 +122,7 @@ fun Pantalla_Dashboard_Admin(
         onImpresoraSeleccionada = onImpresoraSeleccionada,
         onDateRangeSelected = { inicio, fin -> viewModel.cargarDatosDashboardRango(inicio, fin) },
         onNavigate = { route -> navController.navigate(route) },
-        onMigrate = { viewModel.migrarRutasClientes(it) }
+        onAnalyticsClick = { start, end -> navController.navigate("analytics_admin/$start/$end") }
     )
 }
 
@@ -133,7 +134,7 @@ fun DashboardContent(
     onImpresoraSeleccionada: (BluetoothDevice) -> Unit = {},
     onDateRangeSelected: (Date, Date) -> Unit,
     onNavigate: (String) -> Unit,
-    onMigrate: ((Int) -> Unit) -> Unit
+    onAnalyticsClick: (Long, Long) -> Unit
 ) {
     val context = LocalContext.current
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
@@ -156,9 +157,19 @@ fun DashboardContent(
     val prefs = remember { context.getSharedPreferences("config_gps", Context.MODE_PRIVATE) }
     var speedLimit by remember { mutableFloatStateOf(prefs.getFloat("limite_velocidad", 70f)) }
 
+    // Lógica de Configuración Financiera
+    var showFinanceDialog by remember { mutableStateOf(false) }
+    var sueldoBaseBase by remember { mutableStateOf(300.0) }
+    var comisionBase by remember { mutableStateOf(3.0) }
+
+    // Lógica de Ranking de Clientes (Niveles de Tienda)
+    var showRankingDialog by remember { mutableStateOf(false) }
+
     // 🔥 SINCRONIZACIÓN EN TIEMPO REAL CON FIREBASE
     LaunchedEffect(Unit) {
         val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+        
+        // 1. Escuchar GPS para la velocidad
         firestore.collection("config").document("gps")
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot != null && snapshot.exists()) {
@@ -167,10 +178,21 @@ fun DashboardContent(
                     prefs.edit().putFloat("limite_velocidad", fireLimit).apply()
                 }
             }
+
+        // 2. Escuchar PAGOS para sueldo y comisión
+        firestore.collection("config").document("pagos")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    sueldoBaseBase = snapshot.getDouble("sueldo_base") ?: 300.0
+                    comisionBase = snapshot.getDouble("comision_porcentaje") ?: 3.0
+                }
+            }
     }
 
     // Lógica de Impresora
     var showPrinterDialog by remember { mutableStateOf(false) }
+    var showPasswordDialog by remember { mutableStateOf(false) }
+    var passwordInput by remember { mutableStateOf("") }
     var pairedDevices by remember { mutableStateOf<List<BluetoothDevice>>(emptyList()) }
     
     // 🔥 USAMOS UNA REFERENCIA ESTABLE AL ADAPTER
@@ -349,19 +371,30 @@ fun DashboardContent(
                 )
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 🚀 BOTÓN DE MIGRACIÓN (TEMPORAL)
+                    // 🚀 BOTÓN RANKING DE TIENDAS
                     IconButton(
-                        onClick = {
-                            onMigrate { count ->
-                                android.widget.Toast.makeText(context, "Migración completada: $count clientes actualizados", android.widget.Toast.LENGTH_LONG).show()
-                            }
-                        },
+                        onClick = { showRankingDialog = true },
                         modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.SyncAlt,
-                            contentDescription = "Migrar Rutas",
-                            tint = Color.Blue,
+                            imageVector = Icons.Default.Stars,
+                            contentDescription = "Configurar Ranking",
+                            tint = Color(0xFFFFB300), // Dorado/Ambar
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(12.dp))
+
+                    // 🚀 BOTÓN CONFIGURACIÓN FINANCIERA
+                    IconButton(
+                        onClick = { showFinanceDialog = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = "Configurar Pagos",
+                            tint = Color(0xFF4CAF50),
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -433,6 +466,205 @@ fun DashboardContent(
                 )
             }
 
+            if (showFinanceDialog) {
+                var tempSueldo by remember { mutableStateOf(sueldoBaseBase.toInt().toString()) }
+                var tempComision by remember { mutableStateOf(comisionBase.toString()) }
+                
+                AlertDialog(
+                    onDismissRequest = { showFinanceDialog = false },
+                    containerColor = Color.White,
+                    title = {
+                        Text(
+                            text = "Configuración de Pagos",
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        )
+                    },
+                    icon = {
+                        Icon(
+                            Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            tint = Color(0xFF4CAF50),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Ajusta los valores base para el cálculo de ganancias de los vendedores.",
+                                fontSize = 14.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(24.dp))
+                            
+                            OutlinedTextField(
+                                value = tempSueldo,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) tempSueldo = it },
+                                label = { Text("Sueldo Base Diario") },
+                                prefix = { Text("$ ") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF4CAF50), focusedLabelColor = Color(0xFF4CAF50))
+                            )
+                            
+                            Spacer(Modifier.height(12.dp))
+                            
+                            OutlinedTextField(
+                                value = tempComision,
+                                onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) tempComision = it },
+                                label = { Text("Porcentaje Comisión") },
+                                suffix = { Text("%") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF4CAF50), focusedLabelColor = Color(0xFF4CAF50))
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val nuevoSueldo = tempSueldo.toDoubleOrNull() ?: 300.0
+                                val nuevaComision = tempComision.toDoubleOrNull() ?: 3.0
+                                
+                                val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                firestore.collection("config").document("pagos")
+                                    .set(mapOf(
+                                        "sueldo_base" to nuevoSueldo,
+                                        "comision_porcentaje" to nuevaComision
+                                    ), com.google.firebase.firestore.SetOptions.merge())
+                                
+                                showFinanceDialog = false
+                                android.widget.Toast.makeText(context, "Configuración financiera actualizada", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("GUARDAR", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showFinanceDialog = false }) {
+                            Text("CANCELAR", color = Color.Gray)
+                        }
+                    }
+                )
+            }
+
+            if (showRankingDialog) {
+                var tempAlto by remember { mutableStateOf(uiState.rankingAlto.toInt().toString()) }
+                var tempMedio by remember { mutableStateOf(uiState.rankingMedio.toInt().toString()) }
+                var tempBajo by remember { mutableStateOf(uiState.rankingBajo.toInt().toString()) }
+
+                AlertDialog(
+                    onDismissRequest = { showRankingDialog = false },
+                    containerColor = Color.White,
+                    title = {
+                        Text(
+                            text = "Ranking de Tiendas",
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        )
+                    },
+                    icon = {
+                        Icon(
+                            Icons.Default.Stars,
+                            contentDescription = null,
+                            tint = Color(0xFFFFB300),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Define los umbrales de venta mensual para categorizar a los clientes.",
+                                fontSize = 14.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(24.dp))
+
+                            OutlinedTextField(
+                                value = tempAlto,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) tempAlto = it },
+                                label = { Text("Umbral ALTO (Verde)") },
+                                prefix = { Text("$ ") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF2E7D32), focusedLabelColor = Color(0xFF2E7D32))
+                            )
+
+                            Spacer(Modifier.height(12.dp))
+
+                            OutlinedTextField(
+                                value = tempMedio,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) tempMedio = it },
+                                label = { Text("Umbral MEDIO (Amarillo)") },
+                                prefix = { Text("$ ") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFFB300), focusedLabelColor = Color(0xFFFFB300))
+                            )
+
+                            Spacer(Modifier.height(12.dp))
+
+                            OutlinedTextField(
+                                value = tempBajo,
+                                onValueChange = { if (it.all { c -> c.isDigit() }) tempBajo = it },
+                                label = { Text("Umbral BAJO (Rojo)") },
+                                prefix = { Text("$ ") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val nAlto = tempAlto.toDoubleOrNull() ?: 500.0
+                                val nMedio = tempMedio.toDoubleOrNull() ?: 300.0
+                                val nBajo = tempBajo.toDoubleOrNull() ?: 150.0
+
+                                val firestore = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                firestore.collection("config").document("valor_clientes")
+                                    .set(mapOf(
+                                        "alto" to nAlto,
+                                        "medio" to nMedio,
+                                        "bajo" to nBajo
+                                    ), com.google.firebase.firestore.SetOptions.merge())
+
+                                showRankingDialog = false
+                                android.widget.Toast.makeText(context, "Ranking de tiendas actualizado", android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("GUARDAR", fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRankingDialog = false }) {
+                            Text("CANCELAR", color = Color.Gray)
+                        }
+                    }
+                )
+            }
+
             if (showSpeedDialog) {
                 var tempValue by remember { mutableStateOf(speedLimit.toInt().toString()) }
                 AlertDialog(
@@ -491,6 +723,77 @@ fun DashboardContent(
                 )
             }
 
+            if (showPasswordDialog) {
+                AlertDialog(
+                    onDismissRequest = { 
+                        showPasswordDialog = false
+                        passwordInput = ""
+                    },
+                    containerColor = Color.White,
+                    title = { 
+                        Text(
+                            "Acceso Restringido", 
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        ) 
+                    },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "Ingresa la contraseña de administrador para ver el resumen financiero.", 
+                                fontSize = 14.sp, 
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            OutlinedTextField(
+                                value = passwordInput,
+                                onValueChange = { if (it.length <= 4) passwordInput = it },
+                                label = { Text("Contraseña") },
+                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(onClick = { 
+                                showPasswordDialog = false
+                                passwordInput = ""
+                            }) {
+                                Text("CANCELAR", color = Color.Gray)
+                            }
+                            Spacer(Modifier.width(16.dp))
+                            Button(
+                                onClick = {
+                                    if (passwordInput == "0000") {
+                                        showPasswordDialog = false
+                                        passwordInput = ""
+                                        onNavigate("RESUMEN_OPERATIVO")
+                                    } else {
+                                        android.widget.Toast.makeText(context, "Contraseña Incorrecta", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("ENTRAR", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                )
+            }
+
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 16.dp, start = 16.dp, end = 16.dp),
@@ -501,7 +804,8 @@ fun DashboardContent(
                         total = uiState.totalVentasDia,
                         tickets = uiState.totalTicketsDia,
                         promedio = uiState.ticketPromedioGlobal,
-                        formato = formatoMoneda
+                        formato = formatoMoneda,
+                        onClick = { onAnalyticsClick(startDate.time, endDate.time) }
                     )
                 }
 
@@ -512,12 +816,17 @@ fun DashboardContent(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         item {
-                            AccionCard("Inventario", Icons.Default.Inventory, Color(0xFF00AAFF), Modifier.width(100.dp)) {
+                            AccionCard("Productos", Icons.Default.Inventory, Color(0xFF00AAFF), Modifier.width(100.dp)) {
                                 onNavigate("PRODUCTOS")
                             }
                         }
                         item {
-                            AccionCard("Cargas", Icons.Default.Category, Color(0xFF4CAF50), Modifier.width(100.dp)) {
+                            AccionCard("Finanzas", Icons.Default.AccountBalanceWallet, Color(0xFF4CAF50), Modifier.width(100.dp)) {
+                                showPasswordDialog = true
+                            }
+                        }
+                        item {
+                            AccionCard("Cargas", Icons.Default.Category, Color(0xFF607D8B), Modifier.width(100.dp)) {
                                 onNavigate("LISTA PRODUCTOS")
                             }
                         }
@@ -555,10 +864,17 @@ fun DashboardContent(
                 }
 
                 items(uiState.resumenVendedores, key = { it.uid }) { seller ->
-                    VendedorCard(seller, formatoMoneda) {
-                        sellerSeleccionado = seller
-                        showSheet = true
-                    }
+                    VendedorCard(
+                        seller = seller, 
+                        formato = formatoMoneda,
+                        onClick = {
+                            sellerSeleccionado = seller
+                            showSheet = true
+                        },
+                        onPhotoClick = { uid ->
+                            onNavigate("REPORTE_SEMANAL?userId=$uid")
+                        }
+                    )
                 }
 
                 if (uiState.resumenVendedores.isEmpty()) {
@@ -633,12 +949,37 @@ fun AccionCard(titulo: String, icon: ImageVector, color: Color, modifier: Modifi
 }
 
 @Composable
-fun ResumenTotalCard(total: Double, tickets: Int, promedio: Double, formato: NumberFormat) {
+fun ResumenTotalCard(
+    total: Double, 
+    tickets: Int, 
+    promedio: Double, 
+    formato: NumberFormat,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.97f else 1f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow),
+        label = "totalCardScale"
+    )
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = rememberRipple(bounded = true, color = Color.White),
+                onClick = onClick
+            ),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Red),
-        elevation = CardDefaults.cardElevation(8.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
         Box(
             modifier = Modifier
@@ -683,7 +1024,12 @@ fun ResumenTotalCard(total: Double, tickets: Int, promedio: Double, formato: Num
 }
 
 @Composable
-fun VendedorCard(seller: SellerSummary, formato: NumberFormat, onClick: () -> Unit) {
+fun VendedorCard(
+    seller: SellerSummary, 
+    formato: NumberFormat, 
+    onClick: () -> Unit,
+    onPhotoClick: (String) -> Unit // 🔥 Nuevo: Clic en la foto
+) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -711,33 +1057,132 @@ fun VendedorCard(seller: SellerSummary, formato: NumberFormat, onClick: () -> Un
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (seller.photoUrl.isNotEmpty()) {
-                    AsyncImage(
-                        model = seller.photoUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                    )
-                } else {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color.Red.copy(alpha = 0.1f),
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Group,
-                            null,
-                            tint = Color.Red,
-                            modifier = Modifier.padding(10.dp)
+                // 📸 FOTO CON SUPER EFECTO (Clickable para Reporte Semanal)
+                val photoInteractionSource = remember { MutableInteractionSource() }
+                val isPhotoPressed by photoInteractionSource.collectIsPressedAsState()
+                val photoScale by animateFloatAsState(
+                    targetValue = if (isPhotoPressed) 1.3f else 1f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+                    label = "photoScale"
+                )
+
+                val infiniteTransition = rememberInfiniteTransition(label = "photoEffect")
+                val glowAlpha by infiniteTransition.animateFloat(
+                    initialValue = 0.6f,
+                    targetValue = 0f,
+                    animationSpec = infiniteRepeatable(tween(1400, easing = LinearOutSlowInEasing), RepeatMode.Restart),
+                    label = "glowAlpha"
+                )
+                val glowScale by infiniteTransition.animateFloat(
+                    initialValue = 1f,
+                    targetValue = 1.8f,
+                    animationSpec = infiniteRepeatable(tween(1400, easing = LinearOutSlowInEasing), RepeatMode.Restart),
+                    label = "glowScale"
+                )
+                val rotation by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(tween(3000, easing = LinearEasing)),
+                    label = "rotation"
+                )
+
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.size(56.dp)) {
+                    // 🔥 EFECTO DE BORDE ANIMADO Y PULSO (Solo si está en ruta)
+                    if (seller.estaEnRuta) {
+                        // Borde de Neón Rotatorio
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .graphicsLayer { rotationZ = rotation }
+                                .background(
+                                    Brush.sweepGradient(listOf(Color.Red, Color.White.copy(alpha = 0.1f), Color.Red)),
+                                    CircleShape
+                                )
+                        )
+                        
+                        // Onda de Choque (Pulso)
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .graphicsLayer {
+                                    scaleX = glowScale
+                                    scaleY = glowScale
+                                    alpha = glowAlpha
+                                }
+                                .background(Color.Red.copy(alpha = 0.5f), CircleShape)
                         )
                     }
+
+                    Box(
+                        contentAlignment = Alignment.BottomEnd,
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = photoScale
+                                scaleY = photoScale
+                            }
+                            .size(44.dp)
+                            .shadow(if (isPhotoPressed) 12.dp else 2.dp, RoundedCornerShape(12.dp), spotColor = Color.Red)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White)
+                            .clickable(
+                                interactionSource = photoInteractionSource,
+                                indication = rememberRipple(bounded = false, radius = 30.dp, color = Color.Red),
+                                onClick = { onPhotoClick(seller.uid) }
+                            )
+                    ) {
+                        if (seller.photoUrl.isNotEmpty()) {
+                            AsyncImage(
+                                model = seller.photoUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Red.copy(alpha = 0.1f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Group,
+                                    null,
+                                    tint = Color.Red,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+
+                        // 🟢 LUZ DE ESTADO (JORNADA)
+                        Box(
+                            modifier = Modifier
+                                .offset(x = 3.dp, y = 3.dp)
+                                .size(14.dp)
+                                .background(Color.White, CircleShape)
+                                .padding(2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        if (seller.estaEnRuta) Color(0xFF4CAF50) else Color(0xFFBDBDBD),
+                                        CircleShape
+                                    )
+                            )
+                        }
+                    }
                 }
+                
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(seller.rutaNombre, fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color.Black)
-                    Text(seller.nombre, fontSize = 11.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (seller.estaEnRuta) "RUTA ACTIVA" else "JORNADA DETENIDA",
+                        fontSize = 9.sp,
+                        color = if (seller.estaEnRuta) Color(0xFF2E7D32) else Color.Gray,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.5.sp
+                    )
                 }
                 Text(
                     formato.format(seller.totalVendido),
@@ -893,7 +1338,7 @@ fun DashboardPreview() {
             uiState = uiState,
             onDateRangeSelected = { _, _ -> },
             onNavigate = {},
-            onMigrate = {}
+            onAnalyticsClick = { _, _ -> }
         )
     }
 }
@@ -906,7 +1351,7 @@ fun DashboardCargandoPreview() {
             uiState = DashboardUiState(isLoading = true),
             onDateRangeSelected = { _, _ -> },
             onNavigate = {},
-            onMigrate = {}
+            onAnalyticsClick = { _, _ -> }
         )
     }
 }
@@ -919,7 +1364,7 @@ fun DashboardVacioPreview() {
             uiState = DashboardUiState(isLoading = false, todasLasVentasHoy = emptyList(), resumenVendedores = emptyList()),
             onDateRangeSelected = { _, _ -> },
             onNavigate = {},
-            onMigrate = {}
+            onAnalyticsClick = { _, _ -> }
         )
     }
 }

@@ -17,7 +17,7 @@ data class ClienteEntity(
     val fotografiaUrl: String?,      // local o URL remota
 
     val activo: Boolean = true,
-    val medio: String = "medio",
+    val valorCliente: String = "medio",
 
     val fechaDeCreacion: Long = System.currentTimeMillis(),
 

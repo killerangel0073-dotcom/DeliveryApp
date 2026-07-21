@@ -47,6 +47,8 @@ import com.gruposanangel.delivery.data.RepositoryRuta
 import java.text.SimpleDateFormat
 import java.util.*
 
+private val RojoDelisa = Color(0xFFE53935)
+
 @Composable
 fun Pantalla_Historial_Ruta(navController: NavController) {
     val context = LocalContext.current
@@ -94,24 +96,48 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
                 properties = MapProperties(mapType = MapType.NORMAL),
                 uiSettings = MapUiSettings(zoomControlsEnabled = false)
             ) {
-                // 🛣️ DIBUJO DE RUTA SEGMENTADA POR VELOCIDAD (Heatmap Style)
+                // 🛣️ DIBUJO DE RUTA OPTIMIZADO (Contiguous Segment Grouping)
                 if (uiState.puntos.size > 1) {
-                    for (i in 0 until uiState.puntos.size - 1) {
-                        val p1 = uiState.puntos[i]
-                        val p2 = uiState.puntos[i+1]
-                        
-                        // Color dinámico según la velocidad del segmento
-                        val segmentColor = when {
-                            p1.vel > 80.0 -> Color(0xFFFF1744) // Rojo vibrante (Exceso)
-                            p1.vel > 50.0 -> Color(0xFFFFD600) // Amarillo (Rápido)
-                            p1.vel < 5.0 -> Color(0xFF9E9E9E)  // Gris (Detenido/Tráfico)
-                            else -> Color(0xFF00E676)          // Verde (Normal)
-                        }
+                    val polylines = remember(uiState.puntos) {
+                        val result = mutableListOf<Pair<List<LatLng>, Color>>()
+                        var currentPoints = mutableListOf<LatLng>()
+                        var lastColor: Color? = null
 
+                        for (i in 0 until uiState.puntos.size - 1) {
+                            val p1 = uiState.puntos[i]
+                            val p2 = uiState.puntos[i+1]
+                            
+                            val segmentColor = when {
+                                p1.vel > 80.0 -> Color(0xFFFF1744)
+                                p1.vel > 50.0 -> Color(0xFFFFD600)
+                                p1.vel < 5.0 -> Color(0xFF9E9E9E)
+                                else -> Color(0xFF00E676)
+                            }
+
+                            if (lastColor == null) {
+                                lastColor = segmentColor
+                                currentPoints.add(LatLng(p1.lat, p1.lng))
+                            }
+
+                            if (segmentColor == lastColor) {
+                                currentPoints.add(LatLng(p2.lat, p2.lng))
+                            } else {
+                                result.add(currentPoints to lastColor)
+                                currentPoints = mutableListOf(LatLng(p1.lat, p1.lng), LatLng(p2.lat, p2.lng))
+                                lastColor = segmentColor
+                            }
+                        }
+                        if (currentPoints.isNotEmpty() && lastColor != null) {
+                            result.add(currentPoints to lastColor)
+                        }
+                        result
+                    }
+
+                    polylines.forEach { (points, color) ->
                         Polyline(
-                            points = listOf(LatLng(p1.lat, p1.lng), LatLng(p2.lat, p2.lng)),
-                            color = segmentColor,
-                            width = 12f,
+                            points = points,
+                            color = color,
+                            width = 10f,
                             jointType = JointType.ROUND,
                             startCap = RoundCap(),
                             endCap = RoundCap(),
@@ -154,29 +180,51 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
                     )
                 }
 
-                // 📸 MARCADORES DE VENTAS (Thumbnail del Cliente)
+                // 📸 MARCADORES DE VENTAS (Thumbnail del Cliente - CARGA BASADA EN PANTALLA RUTA)
                 uiState.ventas.forEach { venta ->
-                    MarkerComposable(
-                        state = rememberMarkerState(position = venta.latLng),
-                        title = venta.clienteNombre,
-                        snippet = "Venta Total: $${venta.total}"
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(50.dp)
-                                .shadow(8.dp, CircleShape)
-                                .background(if (venta.fueraDeRango) Color.Red else Color.White, CircleShape)
-                                .padding(3.dp)
-                                .clip(CircleShape)
+                    key(venta.id, venta.fotoUrl) {
+                        val markerState = rememberMarkerState(position = venta.latLng)
+                        
+                        MarkerComposable(
+                            state = markerState,
+                            title = venta.clienteNombre,
+                            snippet = "Venta Total: $${venta.total}"
                         ) {
-                            AsyncImage(
-                                model = venta.fotoUrl,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                                placeholder = painterResource(R.drawable.repartidor),
-                                error = painterResource(R.drawable.repartidor)
-                            )
+                            // 🚩 Variable de estado para detectar el cambio y forzar redibujado
+                            var isImageLoaded by remember { mutableStateOf(false) }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(if (isImageLoaded) 48.dp else 47.9.dp) // Oscilamos el tamaño para que Google Maps tome una nueva foto del marcador
+                                    .shadow(8.dp, CircleShape)
+                                    .background(if (venta.fueraDeRango) Color.Red else RojoDelisa, CircleShape)
+                                    .padding(2.5.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!venta.fotoUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = venta.fotoUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                        onSuccess = { 
+                                            isImageLoaded = true // ✨ Aquí es donde ocurre la magia: al cargar, cambiamos el estado
+                                        },
+                                        // 🏥 Si la imagen falla o mientras carga, usamos al repartidor de la misma forma que Pantalla Ruta
+                                        placeholder = painterResource(R.drawable.repartidor),
+                                        error = painterResource(R.drawable.repartidor)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Storefront,
+                                        contentDescription = null,
+                                        tint = Color.DarkGray,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -230,9 +278,27 @@ fun RouteAndDatePicker(
                     Icon(Icons.Default.ArrowDropDown, null, tint = Color.Red, modifier = Modifier.size(16.dp))
                 }
             }
-            DropdownMenu(expanded = showRutaMenu, onDismissRequest = { showRutaMenu = false }) {
-                rutas.forEach { ruta ->
-                    DropdownMenuItem(text = { Text(ruta) }, onClick = { onRutaSelect(ruta); showRutaMenu = false })
+            DropdownMenu(
+                expanded = showRutaMenu, 
+                onDismissRequest = { showRutaMenu = false },
+                modifier = Modifier.background(Color.White)
+            ) {
+                if (rutas.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("Cargando rutas...", fontSize = 12.sp, color = Color.Gray) },
+                        onClick = { },
+                        enabled = false
+                    )
+                } else {
+                    rutas.forEach { ruta ->
+                        DropdownMenuItem(
+                            text = { Text(ruta, fontWeight = FontWeight.Medium) }, 
+                            onClick = { 
+                                onRutaSelect(ruta)
+                                showRutaMenu = false 
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -254,17 +320,49 @@ fun RouteAndDatePicker(
     }
 
     if (showDatePicker) {
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDate.time)
+        // Convertimos la fecha seleccionada actual a UTC para que el Picker la muestre correctamente
+        val calendar = Calendar.getInstance().apply { time = selectedDate }
+        val utcMillisForPicker = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            set(calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = utcMillisForPicker)
+        
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { onDateSelect(Date(it)) }
+                    datePickerState.selectedDateMillis?.let { utcMillis ->
+                        // 🔥 CORRECCIÓN DE DESFASE (UTC a Local)
+                        // El DatePicker siempre devuelve el inicio del día en UTC.
+                        val calUtc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                            timeInMillis = utcMillis
+                        }
+                        
+                        // Creamos una fecha local con el mismo día/mes/año
+                        val localDate = Calendar.getInstance().apply {
+                            set(calUtc.get(Calendar.YEAR), calUtc.get(Calendar.MONTH), calUtc.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }.time
+                        
+                        onDateSelect(localDate)
+                    }
                     showDatePicker = false
-                }) { Text("ACEPTAR") }
+                }) { Text("ACEPTAR", fontWeight = FontWeight.Bold, color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("CANCELAR", color = Color.Gray) }
             }
         ) {
-            DatePicker(state = datePickerState)
+            DatePicker(
+                state = datePickerState,
+                colors = DatePickerDefaults.colors(
+                    selectedDayContainerColor = Color.Red,
+                    todayDateBorderColor = Color.Red,
+                    todayContentColor = Color.Red
+                )
+            )
         }
     }
 }
@@ -281,7 +379,12 @@ fun HistorialMetricsCard(uiState: HistorialUiState, onDemoClick: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 MetricTeslaItem("Distancia", "${"%.1f".format(uiState.distanciaTotalKm)} km", Icons.Default.Route)
                 MetricTeslaItem("V. Máx", "${uiState.velocidadMaxima.toInt()} km/h", Icons.Default.Speed)
-                MetricTeslaItem("Tiempo", "${uiState.tiempoTotalMinutos} min", Icons.Default.Timer)
+                
+                val horas = uiState.tiempoTotalMinutos / 60
+                val mins = uiState.tiempoTotalMinutos % 60
+                val tiempoTexto = if (horas > 0) "${horas}h ${mins}m" else "${mins} min"
+                
+                MetricTeslaItem("Tiempo", tiempoTexto, Icons.Default.Timer)
             }
             
             if (uiState.incidencias.isNotEmpty()) {

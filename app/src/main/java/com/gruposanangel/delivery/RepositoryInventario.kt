@@ -33,14 +33,22 @@ class RepositoryInventario(
         try {
             val data = firebaseDataSource.obtenerProductosCatalog()
             val entities = data.map { map ->
+                val id = map["id"] as String
+                val prev = productoDao.getProductoById(id)
+                val img = (map["imagenUrl"] as? String) ?: (map["fotoUrl"] as? String) ?: prev?.imagenUrl ?: ""
+
                 ProductoEntity(
-                    id = map["id"] as String,
-                    productoId = map["id"] as String,
+                    id = id,
+                    productoId = id,
                     nombre = map["nombre"] as? String ?: "",
                     precio = map["precio"] as? Double ?: 0.0,
-                    cantidadDisponible = 0,
-                    imagenUrl = map["imagenUrl"] as? String ?: "",
-                    syncStatus = true
+                    cantidadDisponible = prev?.cantidadDisponible ?: 0,
+                    imagenUrl = img,
+                    syncStatus = true,
+                    cantidadUnitario = (map["cantidadUnitario"] as? Number)?.toLong(),
+                    unidadesPorDisplay = (map["unidadesPorDisplay"] as? Number)?.toLong(),
+                    gramosVenta = (map["gramosVenta"] as? Number)?.toLong(),
+                    precioCompra = (map["precioCompra"] as? Number)?.toDouble() ?: 0.0
                 )
             }
             productoDao.insertAll(entities)
@@ -48,6 +56,10 @@ class RepositoryInventario(
     }
 
     suspend fun obtenerStockAlmacen(almacen: String): Map<String, Int> = firebaseDataSource.obtenerStockAlmacen(almacen)
+
+    fun obtenerStockAlmacenFlow(almacen: String): Flow<Map<String, Int>> {
+        return firebaseDataSource.obtenerStockAlmacenFlow(almacen)
+    }
 
     suspend fun crearOrdenTransferencia(ordenData: Map<String, Any>): String = firebaseDataSource.crearOrdenTransferencia(ordenData)
 
@@ -70,7 +82,7 @@ class RepositoryInventario(
         }
     }
 
-    private suspend fun obtenerImpactoInventarioPendiente(): Map<String, Int> {
+    private suspend fun obtenerImpactoInventarioPendiente(cloudTimestamps: Map<String, Long>): Map<String, Int> {
         val mapaImpacto = mutableMapOf<String, Int>()
         
         // 1. Impacto de Ventas Pendientes (Siempre restan)
@@ -78,15 +90,13 @@ class RepositoryInventario(
         val ventasPendientes = ventaDao.obtenerVentasPendientes().filter { it.estado != "CANCELADA" }
         for (v in ventasPendientes) {
             ventaDao.obtenerDetallesPorVenta(v.id).forEach { d ->
-                val idPK = d.productoId
+                // Usamos el ID completo (producto_almacen) si está disponible, sino el base
+                val idPK = d.stockId ?: d.productoId
                 mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) - d.cantidad
             }
         }
 
         // 2. Impacto de Ajustes (BLINDAJE CONTRA DUPLICIDAD)
-        // 🔥 CRÍTICO: Solo incluimos los movimientos que aún NO se han sincronizado con Firebase.
-        // Si ya se sincronizaron, confiamos en que el snapshot de Firestore eventualmente los traerá.
-        // Incluir sincronizados "recientes" causaba que se sumaran dos veces (Nube + Local).
         val movimientosAuditoria = movimientoInventarioDao?.obtenerMovimientosPendientes() ?: emptyList()
         
         for (a in movimientosAuditoria) {
@@ -95,13 +105,21 @@ class RepositoryInventario(
                 "${a.productoId}_$almacen" 
             else a.productoId
 
-            when (a.tipo) {
-                "ENTRADA_CAMBIO_BUENO", "CARGA_INVENTARIO" -> {
-                    mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) + a.cantidad
+            // 🔥 FILTRO DE TIEMPO QUIRÚRGICO: 
+            // Si el movimiento local ocurrió ANTES o AL MISMO TIEMPO que la última actualización de la nube,
+            // asumimos que la nube ya lo tiene procesado y lo ignoramos para no duplicar.
+            val ultimaActNube = cloudTimestamps[idPK] ?: 0L
+            if (a.timestamp > ultimaActNube) {
+                when (a.tipo) {
+                    "ENTRADA_CAMBIO_BUENO", "CARGA_INVENTARIO" -> {
+                        mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) + a.cantidad
+                    }
+                    "SALIDA_CAMBIO_BUENO", "SALIDA_REPOSICION_BUENO" -> {
+                        mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) - a.cantidad
+                    }
                 }
-                "SALIDA_CAMBIO_BUENO", "SALIDA_REPOSICION_BUENO" -> {
-                    mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) - a.cantidad
-                }
+            } else {
+                Log.d(TAG, "Ignorando impacto pendiente de $idPK: La nube ya está más actualizada (${a.timestamp} <= $ultimaActNube)")
             }
         }
         return mapaImpacto
@@ -116,7 +134,11 @@ class RepositoryInventario(
             val nombreAlmacen = rutaDoc?.getString("almacenNombre") ?: rutaDoc?.getDocumentReference("almacenAsignado")?.id ?: userDoc.getString("ultimoAlmacenNombre") ?: return
             val snapshot = firestore.collection("inventarioStock").whereEqualTo("almacenNombre", nombreAlmacen).get().await()
             
-            val impactoPendiente = obtenerImpactoInventarioPendiente()
+            // 🔥 Extraemos los timestamps de última actualización de la nube
+            val cloudTimestamps = snapshot.documents.associate { 
+                it.id to (it.getTimestamp("ultimaActualizacion")?.toDate()?.time ?: 0L)
+            }
+            val impactoPendiente = obtenerImpactoInventarioPendiente(cloudTimestamps)
             
             val entities = snapshot.documents.mapNotNull { doc ->
                 val id = doc.id
@@ -126,14 +148,27 @@ class RepositoryInventario(
                 val nombreNube = doc.getString("productoNombre")
                 val precioNube = (doc.get("precioUnitario") as? Number)?.toDouble() ?: 0.0
 
-                val nombreFinal = if (!nombreNube.isNullOrEmpty()) nombreNube else (cat?.nombre ?: "Producto")
-                val precioFinal = if (precioNube > 0) precioNube else (cat?.precio ?: 0.0)
+                // 🔥 CORRECCIÓN: Prioridad al Catálogo Maestro (cat) sobre el nombre guardado en Stock (nombreNube)
+                val nombreFinal = if (!cat?.nombre.isNullOrEmpty()) cat!!.nombre else (nombreNube ?: "Producto")
+                val precioFinal = if (cat != null && cat.precio > 0) cat.precio else (if (precioNube > 0) precioNube else 0.0)
 
                 // Ajustamos el stock de la nube con lo que el vendedor ya hizo localmente
                 val cantNube = (doc.getLong("cantidad") ?: 0L).toInt()
                 val cantFinal = (cantNube + (impactoPendiente[id] ?: 0)).coerceAtLeast(0)
                 
-                ProductoEntity(id, baseId, nombreFinal, precioFinal, cantFinal, cat?.imagenUrl ?: doc.getString("imagenUrl") ?: "", true)
+                ProductoEntity(
+                    id = id, 
+                    productoId = baseId, 
+                    nombre = nombreFinal, 
+                    precio = precioFinal, 
+                    cantidadDisponible = cantFinal, 
+                    imagenUrl = cat?.imagenUrl ?: doc.getString("imagenUrl") ?: "", 
+                    syncStatus = true,
+                    cantidadUnitario = cat?.cantidadUnitario ?: doc.getLong("cantidadUnitario"),
+                    unidadesPorDisplay = cat?.unidadesPorDisplay ?: doc.getLong("unidadesPorDisplay"),
+                    gramosVenta = cat?.gramosVenta ?: doc.getLong("gramosVenta"),
+                    precioCompra = cat?.precioCompra ?: doc.getDouble("precioCompra") ?: 0.0
+                )
             }
             if (entities.isNotEmpty()) productoDao.insertAll(entities)
         } catch (e: Exception) { Log.e(TAG, "Error descargar stock", e) }
@@ -158,7 +193,11 @@ class RepositoryInventario(
 
                         repositoryScope.launch {
                             try {
-                                val impactoPendiente = obtenerImpactoInventarioPendiente()
+                                // 🔥 Extraemos los timestamps de última actualización de la nube
+                                val cloudTimestamps = snap.documents.associate { 
+                                    it.id to (it.getTimestamp("ultimaActualizacion")?.toDate()?.time ?: 0L)
+                                }
+                                val impactoPendiente = obtenerImpactoInventarioPendiente(cloudTimestamps)
                                 val entities = snap.documents.mapNotNull { d ->
                                     val id = d.id
                                     val baseId = id.split("_")[0]
@@ -168,14 +207,23 @@ class RepositoryInventario(
                                     val cat = productoDao.getProductoById(baseId)
                                     val prev = productoDao.getProductoById(id)
 
+                                    // 🔥 CORRECCIÓN: Prioridad al Catálogo Maestro (cat) sobre el nombre guardado en Stock
+                                    val nombreFinal = cat?.nombre ?: d.getString("productoNombre") ?: prev?.nombre ?: "Producto"
+                                    val precioFinal = if (cat != null && cat.precio > 0) cat.precio else ((d.get("precioUnitario") as? Number)?.toDouble() ?: prev?.precio ?: 0.0)
+                                    val imgFinal = cat?.imagenUrl ?: prev?.imagenUrl ?: d.getString("imagenUrl") ?: d.getString("fotoUrl") ?: ""
+
                                     ProductoEntity(
                                         id = id,
                                         productoId = baseId,
-                                        nombre = d.getString("productoNombre") ?: cat?.nombre ?: prev?.nombre ?: "Producto",
-                                        precio = (d.get("precioUnitario") as? Number)?.toDouble() ?: cat?.precio ?: prev?.precio ?: 0.0,
+                                        nombre = nombreFinal,
+                                        precio = precioFinal,
                                         cantidadDisponible = cantFinal,
-                                        imagenUrl = cat?.imagenUrl ?: prev?.imagenUrl ?: d.getString("imagenUrl") ?: "",
-                                        syncStatus = true
+                                        imagenUrl = imgFinal,
+                                        syncStatus = true,
+                                        cantidadUnitario = cat?.cantidadUnitario ?: prev?.cantidadUnitario ?: d.getLong("cantidadUnitario"),
+                                        unidadesPorDisplay = cat?.unidadesPorDisplay ?: prev?.unidadesPorDisplay ?: d.getLong("unidadesPorDisplay"),
+                                        gramosVenta = cat?.gramosVenta ?: prev?.gramosVenta ?: d.getLong("gramosVenta"),
+                                        precioCompra = cat?.precioCompra ?: prev?.precioCompra ?: d.getDouble("precioCompra") ?: 0.0
                                     )
                                 }
                                 
@@ -356,7 +404,11 @@ class RepositoryInventario(
                 precio = plantilla.precio,
                 cantidadDisponible = cantidad,
                 imagenUrl = plantilla.imagenUrl,
-                syncStatus = false
+                syncStatus = false,
+                cantidadUnitario = plantilla.cantidadUnitario,
+                unidadesPorDisplay = plantilla.unidadesPorDisplay,
+                gramosVenta = plantilla.gramosVenta,
+                precioCompra = plantilla.precioCompra
             )
             productoDao.insertAll(listOf(producto))
         } else {

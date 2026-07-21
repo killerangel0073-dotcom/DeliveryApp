@@ -20,6 +20,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -91,62 +92,36 @@ fun MovimientosInventarioScreen(
     val context = LocalContext.current
     val isPreview = LocalInspectionMode.current
 
-    // Inicialización de lógica segura
-    var uiStateLoading by remember { mutableStateOf(false) }
-    var productosCatalogo by remember { mutableStateOf(emptyList<Plantilla_Producto>()) }
-    var stockOrigen by remember { mutableStateOf(emptyMap<String, Int>()) }
-    var listaAlmacenesDinamica by remember { mutableStateOf(emptyList<String>()) }
-
-    var ejecutarCrearOrden: (String, String, List<Plantilla_Producto>, Map<String, Int>, (String) -> Unit) -> Unit = { _, _, _, _, _ -> }
-    var ejecutarCargaDirecta: (String, String, List<Plantilla_Producto>, Map<String, Int>, () -> Unit) -> Unit = { _, _, _, _, _ -> }
-    var triggerCargarStock: (String) -> Unit = {}
-
-    if (!isPreview) {
-        val db = AppDatabase.getDatabase(context)
-        val firebaseDataSource = FirebaseDataSource()
-        val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
-        val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
-
-        val viewModel: MovimientosViewModel = viewModel(
-            factory = MovimientosViewModelFactory(inventarioRepo, usuarioRepo)
-        )
-
-        val state by viewModel.uiState.collectAsState()
-        val catalogo by viewModel.catalogoProductos.collectAsState()
-
-        uiStateLoading = state.isLoading
-        productosCatalogo = catalogo
-        stockOrigen = state.stockOrigen
-        listaAlmacenesDinamica = state.listaAlmacenes
-
-        ejecutarCrearOrden = { orig, dest, prods, cants, onCompletado ->
-            viewModel.crearOrden(orig, dest, prods, cants, onCompletado)
+    val viewModel: MovimientosViewModel = viewModel(
+        factory = remember {
+            val db = AppDatabase.getDatabase(context.applicationContext)
+            val firebaseDataSource = FirebaseDataSource()
+            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao())
+            val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
+            MovimientosViewModelFactory(inventarioRepo, usuarioRepo, context.applicationContext)
         }
-        ejecutarCargaDirecta = { orig, dest, prods, cants, onCompletado ->
-            viewModel.confirmarCargaDirecta(orig, dest, prods, cants, isLiquidationMode, stockOrigen, onCompletado)
-        }
-        triggerCargarStock = { orig -> viewModel.cargarStockOrigen(orig) }
-    } else {
-        listaAlmacenesDinamica = listOf("Almacen Huasteca", "Vendedor Delisa R1")
-        productosCatalogo = listOf(
-            Plantilla_Producto("1", "Papas Fritas Adobadas Delisa", 15.0, 0, 50),
-            Plantilla_Producto("2", "Chiles Guajillo El Cazador", 45.0, 0, 20)
-        )
-        stockOrigen = mapOf("1" to 50, "2" to 20)
-    }
+    )
 
-    var origen by remember { mutableStateOf(preSelectedOrigen ?: if (isTabMode) "Almacen Huasteca" else "Selecciona Origen") }
-    var destino by remember { mutableStateOf(
-        preSelectedDestino ?: if (origen == "Compra Producto") "Almacen Huasteca" else "Selecciona Destino"
-    ) }
+    val state by viewModel.uiState.collectAsState()
+    val catalogo by viewModel.catalogoProductos.collectAsState()
+
     var expandedOrigen by remember { mutableStateOf(false) }
     var expandedDestino by remember { mutableStateOf(false) }
     var retornarABodega by remember { mutableStateOf(false) }
 
-    // 🔥 Determinar si es Auditoría de Vendedor o de Almacén Central
-    val esAuditoriaVendedor = isLiquidationMode && origen.startsWith("Vendedor")
+    // 🔥 ESTADO DE DESPLAZAMIENTO PARA REINICIAR AL INICIO
+    val listState = rememberLazyListState()
 
-    
+    // Reiniciar scroll al principio cuando se cambia de almacén o el stock termina de cargar
+    LaunchedEffect(state.origen, state.stockOrigen, state.isLoading) {
+        if (catalogo.isNotEmpty() && !state.isLoading) {
+            listState.scrollToItem(0)
+        }
+    }
+
+    // 🔥 Determinar si es Auditoría de Vendedor o de Almacén Central
+    val esAuditoriaVendedor = isLiquidationMode && state.origen.startsWith("Vendedor")
+
     // 🔥 SISTEMA DE ALERTAS PREMIUM
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -166,44 +141,38 @@ fun MovimientosInventarioScreen(
         }
     }
 
-    val opcionesOrigen = remember(listaAlmacenesDinamica, isTabMode) {
-        val base = listaAlmacenesDinamica.filter { !it.startsWith("Vendedor") && it != "Compra Producto" }
+    val opcionesOrigen = remember(state.listaAlmacenes, isTabMode) {
+        val base = state.listaAlmacenes.filter { !it.startsWith("Vendedor") && it != "Compra Producto" }
         if (isTabMode) base else listOf("Compra Producto") + base
     }
     
-    val opcionesDestino = remember(listaAlmacenesDinamica, origen) {
+    val opcionesDestino = remember(state.listaAlmacenes, state.origen) {
         when {
-            origen == "Compra Producto" -> listaAlmacenesDinamica.filter { !it.startsWith("Vendedor") }
-            origen != "Selecciona Origen" -> listaAlmacenesDinamica.filter { it.startsWith("Vendedor") }
+            state.origen == "Compra Producto" -> state.listaAlmacenes.filter { !it.startsWith("Vendedor") && it != "Compra Producto" }
+            state.origen != "Selecciona Origen" -> state.listaAlmacenes.filter { it.startsWith("Vendedor") && it != state.origen }
             else -> emptyList()
         }
     }
 
-    val cantidades = remember { mutableStateMapOf<String, Int>() }
     var mostrarDialogConfirmacion by remember { mutableStateOf(false) }
 
-    val productosOrdenados = remember(productosCatalogo, stockOrigen, origen) {
-        if (origen == "Selecciona Origen") {
-            productosCatalogo.sortedBy { it.nombre }
+    val productosOrdenados = remember(catalogo, state.stockOrigen, state.origen) {
+        if (state.origen == "Selecciona Origen") {
+            catalogo.sortedBy { it.nombre }
         } else {
-            // Se ordena por Valor Total (Stock * Precio) descendente
-            // Nota: En "Compra Producto", stockOrigen contiene los datos de Almacen Huasteca
-            productosCatalogo.sortedWith(
-                compareByDescending<Plantilla_Producto> { (stockOrigen[it.id] ?: 0) * it.precio }.thenBy { it.nombre }
+            catalogo.sortedWith(
+                compareByDescending<Plantilla_Producto> { (state.stockOrigen[it.id] ?: 0) * it.precio }.thenBy { it.nombre }
             )
         }
     }
 
-    LaunchedEffect(origen) {
-        if (!isPreview) triggerCargarStock(origen)
-    }
-
     // 🔥 LÓGICA DE ARQUEO/LIQUIDACIÓN: Pre-llenar cantidades cuando el stock de origen esté listo
-    LaunchedEffect(stockOrigen, isLiquidationMode) {
-        if (isLiquidationMode && stockOrigen.isNotEmpty()) {
-            stockOrigen.forEach { (prodId, cant) ->
+    // Nota: Solo hacemos esto si las cantidades están vacías (primera vez que entra en este modo)
+    LaunchedEffect(state.stockOrigen, isLiquidationMode) {
+        if (isLiquidationMode && state.stockOrigen.isNotEmpty() && state.cantidades.isEmpty()) {
+            state.stockOrigen.forEach { (prodId, cant) ->
                 if (cant > 0) {
-                    cantidades[prodId] = cant
+                    viewModel.actualizarCantidad(prodId, cant)
                 }
             }
         }
@@ -260,26 +229,38 @@ fun MovimientosInventarioScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = if (isTabMode) Arrangement.Center else Arrangement.Start
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    if (!isTabMode) {
-                        IconButton(onClick = { navController.popBackStack() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RojoDelisa)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (!isTabMode) {
+                            IconButton(onClick = { navController.popBackStack() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RojoDelisa)
+                            }
                         }
+                        Text(
+                            text = when {
+                                isLiquidationMode -> "ARQUEO DE RUTA"
+                                isTabMode -> "SURTIR VENDEDORES"
+                                else -> "GESTIÓN DE CARGAS"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = if (isLiquidationMode) RojoDelisa else NegroPremium,
+                            letterSpacing = 0.5.sp
+                        )
                     }
-                    Text(
-                        text = when {
-                            isLiquidationMode -> "ARQUEO DE RUTA"
-                            isTabMode -> "SURTIR VENDEDORES"
-                            else -> "GESTIÓN DE CARGAS"
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        color = if (isLiquidationMode) RojoDelisa else NegroPremium,
-                        letterSpacing = 0.5.sp
-                    )
+                    
+                    // 🔥 BOTÓN VACIAR / RESET
+                    TextButton(
+                        onClick = { viewModel.limpiarPantalla() },
+                        colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray)
+                    ) {
+                        Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("VACIAR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 
@@ -290,7 +271,7 @@ fun MovimientosInventarioScreen(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         SelectorCard(
                             titulo = "ALMACÉN AUDITADO",
-                            seleccionado = origen,
+                            seleccionado = state.origen,
                             placeholder = "Cargando...",
                             icon = Icons.Default.LocalShipping,
                             enabled = false,
@@ -343,7 +324,7 @@ fun MovimientosInventarioScreen(
                     // 🔘 DISEÑO PARA ALMACÉN CENTRAL: Solo ajuste directo
                     SelectorCard(
                         titulo = "AUDITORÍA ALMACÉN CENTRAL",
-                        seleccionado = origen,
+                        seleccionado = state.origen,
                         placeholder = "Cargando...",
                         icon = Icons.Default.Warehouse,
                         enabled = false,
@@ -360,10 +341,10 @@ fun MovimientosInventarioScreen(
                     Box(modifier = Modifier.weight(1f).wrapContentSize(Alignment.TopStart)) {
                         SelectorCard(
                             titulo = "ORIGEN / VENDEDOR",
-                            seleccionado = origen,
+                            seleccionado = state.origen,
                             placeholder = "Seleccionar",
                             icon = Icons.Default.Person,
-                            enabled = !isEmergency,
+                            enabled = !isEmergency && !state.isAlmacenRole,
                             modifier = Modifier.fillMaxWidth(),
                             onClick = { expandedOrigen = true }
                         )
@@ -376,12 +357,12 @@ fun MovimientosInventarioScreen(
                                 DropdownMenuItem(
                                     text = { Text(op, fontWeight = FontWeight.Bold) },
                                     onClick = {
-                                        origen = op
+                                        viewModel.actualizarOrigen(op)
                                         expandedOrigen = false
                                         if (op == "Compra Producto") {
-                                            destino = "Almacen Huasteca"
+                                            viewModel.actualizarDestino("Almacen Huasteca")
                                         } else {
-                                            destino = "Selecciona Destino"
+                                            viewModel.actualizarDestino("Selecciona Destino")
                                         }
                                     }
                                 )
@@ -393,10 +374,10 @@ fun MovimientosInventarioScreen(
                     Box(modifier = Modifier.weight(1f).wrapContentSize(Alignment.TopStart)) {
                         SelectorCard(
                             titulo = "DESTINO",
-                            seleccionado = destino,
+                            seleccionado = state.destino,
                             placeholder = "Seleccionar",
                             icon = Icons.Default.HomeWork,
-                            enabled = !isEmergency && origen != "Selecciona Origen",
+                            enabled = !isEmergency && state.origen != "Selecciona Origen" && state.origen != "Compra Producto",
                             modifier = Modifier.fillMaxWidth(),
                             onClick = { expandedDestino = true }
                         )
@@ -409,7 +390,7 @@ fun MovimientosInventarioScreen(
                                 DropdownMenuItem(
                                     text = { Text(op, fontWeight = FontWeight.Bold) },
                                     onClick = {
-                                        destino = op
+                                        viewModel.actualizarDestino(op)
                                         expandedDestino = false
                                     }
                                 )
@@ -423,10 +404,11 @@ fun MovimientosInventarioScreen(
 
             // --- LISTADO DE PRODUCTOS ---
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                if (uiStateLoading) {
+                if (state.isLoading && catalogo.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = RojoDelisa) }
                 } else {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(bottom = 16.dp)
@@ -434,12 +416,12 @@ fun MovimientosInventarioScreen(
                         items(productosOrdenados, key = { it.id }) { producto ->
                             ItemProductoCargaModerno(
                                 producto = producto,
-                                cantidadActual = cantidades[producto.id] ?: 0,
-                                stockDisponible = stockOrigen[producto.id] ?: 0,
-                                esCompra = origen == "Compra Producto" || isEmergency || isLiquidationMode,
+                                cantidadActual = state.cantidades[producto.id] ?: 0,
+                                stockDisponible = state.stockOrigen[producto.id] ?: 0,
+                                esCompra = state.origen == "Compra Producto" || isEmergency || isLiquidationMode,
                                 isAudit = isLiquidationMode,
-                                onCantidadChange = { cantidades[producto.id] = it },
-                                onStockLimitReached = { mostrarAvisoStock(producto.nombre, stockOrigen[producto.id] ?: 0) }
+                                onCantidadChange = { viewModel.actualizarCantidad(producto.id, it) },
+                                onStockLimitReached = { mostrarAvisoStock(producto.nombre, state.stockOrigen[producto.id] ?: 0) }
                             )
                         }
                     }
@@ -447,9 +429,9 @@ fun MovimientosInventarioScreen(
             }
 
             // --- RESUMEN Y ACCIÓN ---
-            val totalMonto = productosCatalogo.sumOf { (cantidades[it.id] ?: 0) * it.precio }
-            val totalPiezas = cantidades.values.sum()
-            val habilitarBoton = totalPiezas > 0 && (isLiquidationMode || (destino != "Selecciona Destino" && (isEmergency || origen != "Selecciona Origen")))
+            val totalMonto = catalogo.sumOf { (state.cantidades[it.id] ?: 0) * it.precio }
+            val totalPiezas = state.cantidades.values.sum()
+            val habilitarBoton = totalPiezas > 0 && (isLiquidationMode || (state.destino != "Selecciona Destino" && (isEmergency || state.origen != "Selecciona Origen")))
 
             Card(
                 modifier = Modifier
@@ -521,7 +503,7 @@ fun MovimientosInventarioScreen(
     }
 
     if (mostrarDialogConfirmacion) {
-        val totalItems = cantidades.values.filter { it > 0 }.size
+        val totalItems = state.cantidades.values.filter { it > 0 }.size
         DialogoConfirmacion(
             titulo = when {
                 isLiquidationMode && retornarABodega -> "Confirmar Liquidación"
@@ -532,31 +514,28 @@ fun MovimientosInventarioScreen(
             mensaje = when {
                 isLiquidationMode && retornarABodega -> "¿Confirmas el retorno de $totalItems productos al almacén central? El vendedor quedará en cero."
                 isLiquidationMode -> "¿Deseas ajustar el inventario de la ruta con estos $totalItems productos? Se registrarán posibles faltantes automáticamente."
-                else -> "¿Estás seguro de transferir $totalItems productos a $destino?"
+                else -> "¿Estás seguro de transferir $totalItems productos a ${state.destino}?"
             },
             onConfirmar = {
                 mostrarDialogConfirmacion = false
-                val productosConCantidad = productosCatalogo.filter { (cantidades[it.id] ?: 0) > 0 }
+                val productosConCantidad = catalogo.filter { (state.cantidades[it.id] ?: 0) > 0 }
                 if (!isPreview) {
                     if (isLiquidationMode) {
                         // En auditoría, el destino define si se queda en el mismo sitio o va a Huasteca
-                        val destinoFinal = if (retornarABodega) "Almacen Huasteca" else origen
-                        ejecutarCargaDirecta(origen, destinoFinal, productosConCantidad, cantidades) {
+                        val destinoFinal = if (retornarABodega) "Almacen Huasteca" else state.origen
+                        viewModel.confirmarCargaDirecta(state.origen, destinoFinal, productosConCantidad, state.cantidades, true, state.stockOrigen) {
                             Toast.makeText(context, if (retornarABodega) "Retorno procesado con éxito" else "Auditoría finalizada con éxito", Toast.LENGTH_LONG).show()
                             navController.popBackStack()
                         }
                     } else if (isEmergency) {
-                        ejecutarCargaDirecta(origen, destino, productosConCantidad, cantidades) {
+                        viewModel.confirmarCargaDirecta(state.origen, state.destino, productosConCantidad, state.cantidades) {
                             Toast.makeText(context, "Carga aplicada localmente", Toast.LENGTH_LONG).show()
                             navController.popBackStack()
                         }
                     } else {
-                        ejecutarCrearOrden(origen, destino, productosConCantidad, cantidades) { docId ->
-                            val file = generarPdfMovimientoInventario(context, origen, destino, productosConCantidad, cantidades)
+                        viewModel.crearOrden(state.origen, state.destino, productosConCantidad, state.cantidades) { docId ->
+                            val file = generarPdfMovimientoInventario(context, state.origen, state.destino, productosConCantidad, state.cantidades)
                             abrirPdfConFileProvider(context, file)
-                            cantidades.clear()
-                            origen = "Selecciona Origen"
-                            destino = "Selecciona Destino"
                             Toast.makeText(context, "Carga enviada con éxito", Toast.LENGTH_SHORT).show()
                         }
                     }

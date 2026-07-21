@@ -10,6 +10,7 @@ import androidx.navigation.navArgument
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryInventario
+import com.gruposanangel.delivery.data.RepositoryGasto
 import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.model.Plantila_carga
@@ -130,6 +131,10 @@ fun Navegador(
             ListaProductosScreen(navController)
         }
 
+        composable("RESUMEN_OPERATIVO") {
+            PantallaResumenOperativo(navController)
+        }
+
         composable(
             "EDITAR_PRODUCTOS/{productoId}",
             arguments = listOf(navArgument("productoId") { type = NavType.StringType })
@@ -149,6 +154,18 @@ fun Navegador(
 
         composable("ADMIN_USUARIOS") {
             Pantalla_Usuarios_Admin(navController)
+        }
+
+        composable(
+            "analytics_admin/{start}/{end}",
+            arguments = listOf(
+                navArgument("start") { type = NavType.LongType },
+                navArgument("end") { type = NavType.LongType }
+            )
+        ) { backStackEntry ->
+            val start = backStackEntry.arguments?.getLong("start") ?: 0L
+            val end = backStackEntry.arguments?.getLong("end") ?: 0L
+            Pantalla_Analiticas_Admin(navController, start, end)
         }
 
         composable(
@@ -220,22 +237,13 @@ fun Navegador(
             val firebaseDataSource = FirebaseDataSource()
             val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
             val ventaRepo = VentaRepository(db.VentaDao(), db.productoDao())
-            val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
             val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
             
-            val viewModel: DashboardVendedorViewModel = viewModel(
-                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
-                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = 
-                        DashboardVendedorViewModel(ventaRepo, usuarioRepo, inventarioRepo, uid) as T
-                }
-            )
-            val uiState by viewModel.uiState.collectAsState()
-
             Pantalla_Mi_Rendimiento(
                 navController = navController,
-                nombreVendedor = uiState.nombreVendedor,
-                ventaDia = uiState.ventaDia,
-                clientesDia = uiState.clientesDia
+                ventaRepository = ventaRepo,
+                usuarioRepository = usuarioRepo,
+                userId = uid
             )
         }
 
@@ -245,12 +253,13 @@ fun Navegador(
             val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
             val ventaRepo = VentaRepository(db.VentaDao(), db.productoDao())
             val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
+            val gastoRepo = RepositoryGasto(db.gastoDao())
             val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
             val viewModel: DashboardVendedorViewModel = viewModel(
                 factory = object : androidx.lifecycle.ViewModelProvider.Factory {
                     override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = 
-                        DashboardVendedorViewModel(ventaRepo, usuarioRepo, inventarioRepo, uid) as T
+                        DashboardVendedorViewModel(ventaRepo, usuarioRepo, inventarioRepo, gastoRepo, uid) as T
                 }
             )
             val uiState by viewModel.uiState.collectAsState()
@@ -261,31 +270,58 @@ fun Navegador(
             )
         }
 
-        composable("REPORTE_SEMANAL") {
+        composable(
+            route = "REPORTE_SEMANAL?userId={userId}",
+            arguments = listOf(navArgument("userId") { type = NavType.StringType; nullable = true })
+        ) { backStackEntry ->
+            val userIdArg = backStackEntry.arguments?.getString("userId")
             val db = AppDatabase.getDatabase(context)
             val firebaseDataSource = FirebaseDataSource()
             val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
             val ventaRepo = VentaRepository(db.VentaDao(), db.productoDao())
             val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
-            val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+            val gastoRepo = RepositoryGasto(db.gastoDao())
+            val uid = userIdArg ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
             PantallaReporteSemanal(
                 navController = navController,
                 ventaRepository = ventaRepo,
                 usuarioRepository = usuarioRepo,
                 inventarioRepository = inventarioRepo,
+                gastoRepository = gastoRepo,
                 userId = uid
             )
         }
 
-        composable("ventas_room") {
+        composable(
+            route = "ventas_room?clienteId={clienteId}",
+            arguments = listOf(navArgument("clienteId") { type = NavType.StringType; nullable = true })
+        ) { backStackEntry ->
+            val clienteId = backStackEntry.arguments?.getString("clienteId")
             val db = AppDatabase.getDatabase(context)
             val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
 
             VentasRoomScreen(
                 context = context,
                 navController = navController,
-                ventaRepository = ventaRepository
+                ventaRepository = ventaRepository,
+                clienteId = clienteId
+            )
+        }
+
+        composable(
+            route = "historial_cliente/{clienteId}",
+            arguments = listOf(navArgument("clienteId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val clienteId = backStackEntry.arguments?.getString("clienteId") ?: ""
+            val db = AppDatabase.getDatabase(context)
+            val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
+
+            VentasRoomScreen(
+                context = context,
+                navController = navController,
+                ventaRepository = ventaRepository,
+                clienteId = clienteId
             )
         }
 
@@ -306,11 +342,15 @@ fun Navegador(
         }
 
         composable(
-            route = "detalle_venta_admin/{ticketId}",
-            arguments = listOf(navArgument("ticketId") { type = NavType.StringType })
+            route = "detalle_venta_admin/{ticketId}?mostrarAcciones={mostrarAcciones}",
+            arguments = listOf(
+                navArgument("ticketId") { type = NavType.StringType },
+                navArgument("mostrarAcciones") { type = NavType.BoolType; defaultValue = true }
+            )
         ) { backStackEntry ->
             val ticketId = backStackEntry.arguments?.getString("ticketId") ?: ""
-            Pantalla_Detalle_Venta_Admin(navController, ticketId, impresoraBluetooth)
+            val mostrarAcciones = backStackEntry.arguments?.getBoolean("mostrarAcciones") ?: true
+            Pantalla_Detalle_Venta_Admin(navController, ticketId, impresoraBluetooth, mostrarAcciones)
         }
 
         composable(

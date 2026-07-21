@@ -140,13 +140,13 @@ fun MapaScreen(navController: NavController) {
 
     val iconClienteMedio = remember(mapIsReady) {
         if (mapIsReady)
-            bitmapDescriptorFromVector(context, R.drawable.marcadorrojo)
+            bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo)
         else null
     }
 
     val iconClienteBajo = remember(mapIsReady) {
         if (mapIsReady)
-            bitmapDescriptorFromVector(context, R.drawable.marcadoramarillo)
+            bitmapDescriptorFromVector(context, R.drawable.marcadorrojo)
         else null
     }
 
@@ -620,7 +620,7 @@ fun MapaScreen(navController: NavController) {
                         .addOnSuccessListener { result ->
                             val lista = result.documents.mapNotNull { doc ->
                                 val geo = doc.getGeoPoint("ubicacion")
-                                val valor = doc.getString("valor") ?: "medio"
+                                val valor = doc.getString("valorCliente") ?: "medio"
                                 geo?.let {
                                     Cliente(
                                         id = doc.id,

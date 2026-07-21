@@ -13,6 +13,7 @@ import com.gruposanangel.delivery.model.Plantilla_Producto
 import com.gruposanangel.delivery.SegundoPlano.LocationState
 import TicketVentaCompleto
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,7 +40,11 @@ data class VentaUiState(
     val distanciaAlClienteMetros: Float = -1f,
     val estaEnRango: Boolean = true,
     val requiereFotoEvidencia: Boolean = false,
-    val enRuta: Boolean = true // Por defecto true para no bloquear mientras carga
+    val enRuta: Boolean = true, // Por defecto true para no bloquear mientras carga
+    
+    // 🔥 VISITA SIN VENTA
+    val mostrarDialogoSinVenta: Boolean = false,
+    val motivoSinVenta: String? = null
 )
 
 sealed class EstadoRuta {
@@ -68,41 +73,134 @@ class VentaViewModel(
     val ventasPeriodo: StateFlow<List<VentaEntity>> = _ventasPeriodo.asStateFlow()
 
     // 🔥 OFFLINE-FIRST: Observamos las ventas de hoy de forma reactiva
-    val ventasHoyFlow: StateFlow<List<VentaEntity>> = flow {
-        val usuario = repositoryUsuario.obtenerUsuarioActual()
-        val uid = usuario?.uid ?: ""
-        val puesto = usuario?.puestoTrabajo?.trim() ?: ""
-        // 🛡️ Si es admin, idParaQuery es "" para ver todo
-        val idParaQuery = if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") uid else ""
-        
-        // 🔥 AUDITORÍA DE TIEMPO: Límites basados en Hora Real
-        val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
-        val cal = Calendar.getInstance()
-        cal.timeInMillis = ahoraReal
-        
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        val inicio = cal.timeInMillis
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val ventasHoyFlow: StateFlow<List<VentaEntity>> = repositoryUsuario.getUsuarioActual()
+        .flatMapLatest { usuario ->
+            val uid = usuario?.uid ?: ""
+            val puesto = usuario?.puestoTrabajo?.trim() ?: ""
+            // 🛡️ Búsqueda más flexible del puesto para evitar fallos por mayúsculas o espacios
+            val esVendedor = puesto.contains("Vendedor", ignoreCase = true) || puesto.contains("Suplente", ignoreCase = true)
+            val idParaQuery = if (esVendedor) uid else ""
+            
+            // 🔥 AUDITORÍA DE TIEMPO: Límites basados en Hora Real
+            val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
+            val cal = Calendar.getInstance()
+            cal.timeInMillis = ahoraReal
+            
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            val inicio = cal.timeInMillis
 
-        cal.set(Calendar.HOUR_OF_DAY, 23)
-        cal.set(Calendar.MINUTE, 59)
-        cal.set(Calendar.SECOND, 59)
-        cal.set(Calendar.MILLISECOND, 999)
-        val fin = cal.timeInMillis
-        
-        emitAll(ventaRepository.obtenerVentasPorPeriodoFlow(idParaQuery, inicio, fin))
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyList()
-    )
+            cal.set(Calendar.HOUR_OF_DAY, 23)
+            cal.set(Calendar.MINUTE, 59)
+            cal.set(Calendar.SECOND, 59)
+            cal.set(Calendar.MILLISECOND, 999)
+            val fin = cal.timeInMillis
+            
+            ventaRepository.obtenerVentasPorPeriodoFlow(idParaQuery, inicio, fin)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
 
     init {
         observarInventario()
         escucharVentasNube()
         observarEstadoJornada()
+    }
+
+    fun precargarUltimaVenta(clienteId: String) {
+        viewModelScope.launch {
+            try {
+                Log.d("VentaDebug", "🚀 INICIANDO PRECARGA - Cliente: $clienteId")
+
+                // 🔄 1. ESPERAR A QUE LA RUTA ESTÉ LISTA
+                var retryRoute = 0
+                while (uiState.value.estadoRuta !is EstadoRuta.ConRuta && retryRoute < 40) {
+                    delay(150)
+                    retryRoute++
+                }
+                
+                val rutaEstado = uiState.value.estadoRuta
+                if (rutaEstado !is EstadoRuta.ConRuta) {
+                    Log.e("VentaDebug", "❌ ABORTO: No se pudo determinar la ruta del vendedor tras 6 segundos.")
+                    return@launch
+                }
+                Log.d("VentaDebug", "📍 RUTA DETECTADA: ${rutaEstado.nombreAlmacen}")
+
+                // 🔄 2. OBTENER LA ÚLTIMA VENTA
+                val ultimaVenta = ventaRepository.obtenerUltimaVentaConProductosPorCliente(clienteId)
+                if (ultimaVenta == null) {
+                    Log.w("VentaDebug", "ℹ️ SIN HISTORIAL: El cliente no tiene ventas previas registradas en Room.")
+                    return@launch
+                }
+                Log.d("VentaDebug", "📄 VENTA ENCONTRADA: ID=${ultimaVenta.id} | Fecha=${ultimaVenta.fecha}")
+
+                // 🔄 3. ESPERAR A QUE EL CATÁLOGO ESTÉ CARGADO
+                var retryCatalog = 0
+                while (uiState.value.catalogoCompleto.isEmpty() && retryCatalog < 40) {
+                    delay(150)
+                    retryCatalog++
+                }
+                
+                val stockLocal = uiState.value.catalogoCompleto
+                if (stockLocal.isEmpty()) {
+                    Log.e("VentaDebug", "❌ ABORTO: El catálogo de productos está vacío.")
+                    return@launch
+                }
+                Log.d("VentaDebug", "📦 CATÁLOGO LISTO: ${stockLocal.size} productos en inventario.")
+
+                // 🔄 4. PROCESAR DETALLES Y CRUZAR CON STOCK
+                val detalles = ventaRepository.obtenerDetallesDeVenta(ultimaVenta.id)
+                Log.d("VentaDebug", "🛒 DETALLES VENTA ANTERIOR: ${detalles.size} items.")
+
+                val nuevasCantidades = mutableMapOf<String, Int>()
+                val nombreAlmacenActual = rutaEstado.nombreAlmacen
+
+                    detalles.forEach { detalle ->
+                        val pIdLimpio = detalle.productoId.trim()
+                        val idConstruido = "${pIdLimpio}_$nombreAlmacenActual"
+                        
+                        Log.d("VentaDebug", "🔍 BUSCANDO: ${detalle.nombre} | ID Sugerido: $idConstruido")
+
+                        // Búsqueda profunda
+                        val productoMatch = stockLocal.find { 
+                            it.id.trim() == idConstruido || 
+                            it.id.trim() == detalle.stockId?.trim() || 
+                            it.id.trim() == pIdLimpio ||
+                            it.nombre.lowercase().trim() == detalle.nombre.lowercase().trim()
+                        }
+
+                        if (productoMatch != null) {
+                            // 🔥 TOPE ESTRICTO AL STOCK ACTUAL:
+                            // Si pidió 10 y traemos 5, ponemos 5. Si traemos 0, ponemos 0.
+                            val stockDisponible = productoMatch.cantidadDisponible
+                            val cantidadSugerida = Math.min(detalle.cantidad, stockDisponible)
+                            
+                            if (cantidadSugerida > 0) {
+                                nuevasCantidades[productoMatch.id] = cantidadSugerida
+                                Log.d("VentaDebug", "   ✅ MATCH: ${productoMatch.nombre} | Sugerido (Topado): $cantidadSugerida")
+                            } else {
+                                Log.w("VentaDebug", "   ⚠️ MATCH SIN STOCK: ${productoMatch.nombre} (No se añade)")
+                            }
+                        } else {
+                            Log.w("VentaDebug", "   ❓ NO ENCONTRADO: ${detalle.nombre}")
+                        }
+                    }
+                
+                if (nuevasCantidades.isNotEmpty()) {
+                    _uiState.update { it.copy(cantidades = nuevasCantidades) }
+                    Log.d("VentaDebug", "🎉 PRECARGA COMPLETADA: ${nuevasCantidades.size} productos añadidos al carrito.")
+                } else {
+                    Log.w("VentaDebug", "⚠️ FIN: No hubo coincidencias válidas entre el historial y el stock actual.")
+                }
+            } catch (e: Exception) {
+                Log.e("VentaDebug", "🔥 ERROR CRÍTICO EN PRECARGA", e)
+            }
+        }
     }
 
     private fun observarEstadoJornada() {
@@ -144,34 +242,37 @@ class VentaViewModel(
     }
 
     private fun escucharVentasNube() {
-        viewModelScope.launch {
-            val usuario = repositoryUsuario.obtenerUsuarioActual() ?: return@launch
-            val uid = usuario.uid
-            val puesto = usuario.puestoTrabajo?.trim() ?: ""
-            val esVendedor = puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta"
-            val idParaSync = if (esVendedor) uid else ""
+        repositoryUsuario.getUsuarioActual()
+            .onEach { usuario ->
+                if (usuario == null) return@onEach
+                
+                val uid = usuario.uid
+                val puesto = usuario.puestoTrabajo?.trim() ?: ""
+                val esVendedor = puesto.contains("Vendedor", ignoreCase = true) || puesto.contains("Suplente", ignoreCase = true)
+                val idParaSync = if (esVendedor) uid else ""
 
-            val cal = Calendar.getInstance()
-            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
-            val inicio = cal.time
+                val cal = Calendar.getInstance()
+                cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+                val inicio = cal.time
 
-            salesListener?.remove()
-            
-            var query: com.google.firebase.firestore.Query = db.collection("ventas")
-                .whereGreaterThanOrEqualTo("fecha", inicio)
-            
-            if (esVendedor) {
-                query = query.whereEqualTo("vendedorId", uid)
-            }
+                salesListener?.remove()
+                
+                var query: com.google.firebase.firestore.Query = db.collection("ventas")
+                    .whereGreaterThanOrEqualTo("fecha", inicio)
+                
+                if (esVendedor) {
+                    query = query.whereEqualTo("vendedorId", uid)
+                }
 
-            salesListener = query.addSnapshotListener { snapshot, _ ->
-                if (snapshot != null) {
-                    viewModelScope.launch {
-                        ventaRepository.descargarVentasDia(idParaSync)
+                salesListener = query.addSnapshotListener { snapshot, _ ->
+                    if (snapshot != null) {
+                        viewModelScope.launch {
+                            ventaRepository.descargarVentasDia(idParaSync)
+                        }
                     }
                 }
             }
-        }
+            .launchIn(viewModelScope)
     }
 
     override fun onCleared() {
@@ -183,10 +284,22 @@ class VentaViewModel(
         combine(
             repositoryInventario.obtenerProductosLocal(),
             _uiState.map { it.searchQuery }.distinctUntilChanged(),
-            _uiState.map { it.cantidades }.distinctUntilChanged()
-        ) { entidades, query, mapaCantidades ->
-            // 1. Catálogo completo (Contiene todos los productos para persistir cantidades fuera de búsqueda)
-            val catalogo = entidades.map { e ->
+            _uiState.map { it.cantidades }.distinctUntilChanged(),
+            _uiState.map { it.estadoRuta }.distinctUntilChanged() // 🔥 Nuevo: Observar ruta actual
+        ) { entidades, query, mapaCantidades, estadoRuta ->
+            
+            // 🔍 Obtener el nombre del almacén que el vendedor tiene activo hoy
+            val nombreAlmacenActual = (estadoRuta as? EstadoRuta.ConRuta)?.nombreAlmacen ?: ""
+
+            // 1. Catálogo Filtrado: Solo productos del almacén actual
+            // Esto evita que productos de rutas viejas se mezclen en el total o la lista
+            val entidadesFiltradas = if (nombreAlmacenActual.isNotEmpty()) {
+                entidades.filter { it.id.endsWith("_$nombreAlmacenActual") }
+            } else {
+                entidades.filter { !it.id.contains("_") } // Catálogo base si no hay ruta
+            }
+
+            val catalogo = entidadesFiltradas.map { e ->
                 Plantilla_Producto(
                     id = e.id,
                     nombre = e.nombre,
@@ -197,27 +310,15 @@ class VentaViewModel(
                 )
             }
 
-            // 2. Productos visibles (Filtrados por búsqueda y con stock)
-            val productosMapeados = entidades.asSequence()
-                .filter { it.cantidadDisponible > 0 }
+            // 2. Productos visibles (Filtrados por búsqueda y con stock/selección)
+            val productosMapeados = catalogo.asSequence()
+                .filter { it.cantidadDisponible > 0 || it.cantidad > 0 }
                 .filter { query.isBlank() || it.nombre.contains(query, ignoreCase = true) }
-                .map { entidad ->
-                    Plantilla_Producto(
-                        id = entidad.id,
-                        nombre = entidad.nombre,
-                        precio = entidad.precio,
-                        cantidad = mapaCantidades[entidad.id] ?: 0,
-                        cantidadDisponible = entidad.cantidadDisponible,
-                        imagenUrl = entidad.imagenUrl ?: ""
-                    )
-                }
                 .sortedWith(
                     if (query.isBlank()) {
-                        // Lista General: Seleccionados primero (A-Z), luego resto (A-Z)
                         compareByDescending<Plantilla_Producto> { it.cantidad > 0 }
                             .thenBy { it.nombre }
                     } else {
-                        // En Búsqueda: Siempre alfabético para evitar que el producto se mueva mientras escribes/agregas
                         compareBy { it.nombre }
                     }
                 )
@@ -226,9 +327,7 @@ class VentaViewModel(
             Pair(catalogo, productosMapeados)
         }.onEach { (catalogo, productos) ->
             _uiState.update { state ->
-                // Recalcular total sumando todos los productos que tienen cantidad > 0 en el catálogo
                 val total = catalogo.sumOf { it.precio * it.cantidad }
-                
                 state.copy(
                     productosEnCarrito = productos,
                     catalogoCompleto = catalogo,
@@ -243,11 +342,24 @@ class VentaViewModel(
         _uiState.update { it.copy(searchQuery = query) }
     }
 
+    fun setMostrarDialogoSinVenta(mostrar: Boolean) {
+        _uiState.update { it.copy(mostrarDialogoSinVenta = mostrar) }
+    }
+
+    fun seleccionarMotivoSinVenta(motivo: String) {
+        _uiState.update { it.copy(motivoSinVenta = motivo) }
+    }
+
+    fun limpiarCarrito() {
+        _uiState.update { it.copy(cantidades = emptyMap()) }
+        Log.d("VentaViewModel", "🛒 Carrito vaciado por el usuario.")
+    }
+
     fun actualizarCantidad(productoId: String, nuevaCantidad: Int) {
         _uiState.update { state ->
-            // Buscamos en el catálogo completo para obtener la disponibilidad
             val producto = state.catalogoCompleto.find { it.id == productoId }
             if (producto != null) {
+                // 🔥 RESTAURADO: Bloqueo estricto al stock disponible
                 val valorFinal = nuevaCantidad.coerceIn(0, producto.cantidadDisponible)
                 val nuevasCantidades = state.cantidades.toMutableMap()
                 
@@ -354,6 +466,7 @@ class VentaViewModel(
         clienteFotoUrl: String?,
         metodoPago: String,
         fotoEvidenciaUrl: String? = null,
+        motivoVisita: String? = null,
         onResultado: (Boolean, String, String) -> Unit
     ) {
         if (_uiState.value.estaProcesando) return
@@ -388,7 +501,8 @@ class VentaViewModel(
                     latitud = miUbicacion?.latitude ?: 0.0,
                     longitud = miUbicacion?.longitude ?: 0.0,
                     fueraDeRango = !_uiState.value.estaEnRango,
-                    fotoEvidencia = fotoEvidenciaUrl
+                    fotoEvidencia = fotoEvidenciaUrl,
+                    motivoVisita = motivoVisita
                 )
 
                 withContext(Dispatchers.Main) {

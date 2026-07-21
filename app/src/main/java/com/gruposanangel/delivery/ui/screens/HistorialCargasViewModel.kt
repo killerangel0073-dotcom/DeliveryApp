@@ -1,9 +1,12 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.util.Log
+import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.gruposanangel.delivery.model.Plantilla_Producto
@@ -39,7 +42,9 @@ data class HistorialCargasUiState(
     val error: String? = null
 )
 
-class HistorialCargasViewModel : ViewModel() {
+class HistorialCargasViewModel(
+    private val usuarioRepo: com.gruposanangel.delivery.RepositoryUsuario
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HistorialCargasUiState())
     val uiState: StateFlow<HistorialCargasUiState> = _uiState.asStateFlow()
@@ -47,8 +52,20 @@ class HistorialCargasViewModel : ViewModel() {
     private val db = FirebaseFirestore.getInstance()
     private var snapshotListener: com.google.firebase.firestore.ListenerRegistration? = null
     private val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("es", "MX"))
+    
+    // 🔥 NUEVO: Para control de permisos en la UI
+    var userRole by mutableStateOf("")
+    private var userUid = ""
+    private var userName = ""
 
     init {
+        // Cargar datos del usuario
+        viewModelScope.launch {
+            val user = usuarioRepo.obtenerUsuarioActual()
+            userRole = user?.puestoTrabajo ?: ""
+            userUid = user?.uid ?: ""
+            userName = user?.nombre ?: "Admin"
+        }
         // Establecer rango de la semana actual (Lunes a Domingo) por defecto
         val cal = Calendar.getInstance(Locale("es", "MX"))
         cal.firstDayOfWeek = Calendar.MONDAY
@@ -229,8 +246,45 @@ class HistorialCargasViewModel : ViewModel() {
         activarListenerCargas()
     }
 
+    /**
+     * 🔥 CANCELAR CARGA (Solo CEO/Gerente y si está PENDIENTE)
+     */
+    fun cancelarCarga(ordenId: String, motivo: String, onComplete: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isLoading = true) }
+                
+                db.collection("ordenesTransferencia").document(ordenId).update(
+                    mapOf(
+                        "estado" to "CANCELADA",
+                        "motivoCancelacion" to motivo,
+                        "canceladoPorUid" to userUid,
+                        "canceladoPorNombre" to userName,
+                        "fechaCancelacion" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+                
+                _uiState.update { it.copy(isLoading = false) }
+                onComplete(true, "Carga cancelada exitosamente")
+                
+            } catch (e: Exception) {
+                Log.e("HistorialCargasVM", "Error cancelando carga: ${e.message}")
+                _uiState.update { it.copy(isLoading = false) }
+                onComplete(false, e.message ?: "Error desconocido")
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         snapshotListener?.remove()
     }
+}
+
+class HistorialCargasViewModelFactory(
+    private val usuarioRepo: com.gruposanangel.delivery.RepositoryUsuario
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = 
+        HistorialCargasViewModel(usuarioRepo) as T
 }

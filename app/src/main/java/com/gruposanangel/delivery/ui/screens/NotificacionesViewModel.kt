@@ -180,15 +180,33 @@ class NotificacionesViewModel(
                     return@addSnapshotListener
                 }
                 val ords = snapshot?.documents?.mapNotNull { doc ->
-                    val ts = doc.getTimestamp("timestamp")
+                    val data = doc.data ?: return@mapNotNull null
+                    val ts = data["timestamp"] as? com.google.firebase.Timestamp
+                    val estado = data["estado"] as? String ?: "PENDIENTE"
+                    val motivo = data["motivoCancelacion"] as? String
+                    
+                    // 🔥 Calcular el monto total de la carga
+                    val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
+                    val totalMonto = productosRaw.sumOf { p ->
+                        val cant = (p["cantidad"] as? Number)?.toDouble() ?: 0.0
+                        val prec = (p["precio"] as? Number)?.toDouble() ?: 0.0
+                        cant * prec
+                    }
+                    
                     Notificacion(
                         id = doc.id,
-                        titulo = "Carga de Almacén",
-                        mensaje = "Transferencia desde " + (doc.getString("origen") ?: "Almacén"),
+                        titulo = if (estado == "CANCELADA") "CARGA ANULADA" else "Carga de Almacén",
+                        mensaje = if (estado == "CANCELADA") 
+                            "Esta transferencia fue cancelada"
+                        else 
+                            "Transferencia desde " + (doc.getString("origen") ?: "Almacén"),
                         fecha = ts?.toDate()?.let { formatoFecha.format(it) } ?: "Pendiente",
                         timestamp = ts?.seconds?.let { it * 1000 } ?: 0L,
                         esCarga = true,
-                        aceptada = doc.getString("estado") == "COMPLETADA" || doc.getString("estado") == "ACEPTADA"
+                        aceptada = estado == "COMPLETADA" || estado == "ACEPTADA",
+                        estado = estado,
+                        monto = totalMonto,
+                        motivo = motivo
                     )
                 } ?: emptyList()
                 _notificacionesNubeCargas.value = ords

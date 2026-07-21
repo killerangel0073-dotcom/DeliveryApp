@@ -2,7 +2,11 @@ package com.gruposanangel.delivery.data
 
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -12,6 +16,17 @@ import kotlinx.coroutines.tasks.await
 class FirebaseDataSource {
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
+
+    /**
+     * Devuelve un Flow que emite el usuario actual cada vez que cambia el estado de autenticación.
+     */
+    fun authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
+        val listener = FirebaseAuth.AuthStateListener { auth ->
+            trySend(auth.currentUser)
+        }
+        auth.addAuthStateListener(listener)
+        awaitClose { auth.removeAuthStateListener(listener) }
+    }
 
     suspend fun login(email: String, password: String): String {
         val result = auth.signInWithEmailAndPassword(email.trim(), password.trim()).await()
@@ -77,6 +92,30 @@ class FirebaseDataSource {
             productoRef?.id?.let { stockMap[it] = cantidad }
         }
         return stockMap
+    }
+
+    fun obtenerStockAlmacenFlow(almacenNombre: String): Flow<Map<String, Int>> = callbackFlow {
+        val listener = firestore.collection("inventarioStock")
+            .whereEqualTo("almacenNombre", almacenNombre)
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                val stockMap = mutableMapOf<String, Int>()
+                snap?.documents?.forEach { doc ->
+                    val productoRef = doc.getDocumentReference("productoRef")
+                    val productoId = productoRef?.id 
+                        ?: doc.getString("productoId")
+                        ?: doc.id.split("_")[0]
+                    val cantidad = doc.getLong("cantidad")?.toInt() ?: 0
+                    if (productoId.isNotEmpty()) {
+                        stockMap[productoId] = cantidad
+                    }
+                }
+                trySend(stockMap)
+            }
+        awaitClose { listener.remove() }
     }
 
     suspend fun crearOrdenTransferencia(ordenData: Map<String, Any>): String {

@@ -11,6 +11,7 @@ import com.gruposanangel.delivery.data.RepositoryRuta
 import com.gruposanangel.delivery.data.RutaEntity
 import com.gruposanangel.delivery.data.VentaEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -68,13 +69,22 @@ class HistorialRutaViewModel(
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
     init {
-        cargarRutas()
+        // 🔥 Asegurar que tengamos las rutas más recientes de la nube
+        sincronizarYLeerRutas()
     }
 
-    private fun cargarRutas() {
+    private fun sincronizarYLeerRutas() {
         viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            
+            // 1. Primero intentar descargar de Firebase
+            repositoryRuta.descargarRutasDesdeFirebase()
+            
+            // 2. Observar el flujo local (Room)
             repositoryRuta.obtenerRutasLocal().collect { lista ->
-                _uiState.update { it.copy(rutas = lista) }
+                _uiState.update { it.copy(rutas = lista, isLoading = false) }
+                
+                // Seleccionar la primera por defecto si no hay nada seleccionado
                 if (lista.isNotEmpty() && _uiState.value.selectedRuta == null) {
                     seleccionarRuta(lista.first().nombre)
                 }
@@ -158,71 +168,154 @@ class HistorialRutaViewModel(
 
     private fun cargarHistorial() {
         val state = _uiState.value
-        val ruta = state.selectedRuta ?: return
+        val rutaNombre = state.selectedRuta ?: return
         val fechaStr = dateFormat.format(state.selectedDate)
-        val docId = "${ruta}_$fechaStr"
+        val docId = "${rutaNombre}_$fechaStr"
 
         _uiState.update { it.copy(isLoading = true, puntos = emptyList(), incidencias = emptyList(), ventas = emptyList(), error = null) }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // 1. Cargar Puntos de Recorrido
-                val doc = db.collection("historial_rutas").document(docId).get().await()
+                // 1. Carga paralela de rastro
+                val deferredDoc = async { db.collection("historial_rutas").document(docId).get().await() }
                 
-                // 2. Cargar Ventas de este día/ruta
-                val cal = Calendar.getInstance().apply { time = state.selectedDate; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0) }
+                // 2. Preparar fechas
+                val cal = Calendar.getInstance().apply { 
+                    time = state.selectedDate
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
                 val start = Timestamp(cal.time)
-                cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59)
+                cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59)
                 val end = Timestamp(cal.time)
 
-                // Buscamos quién tiene esta ruta asignada
-                val userQuery = db.collection("users").whereEqualTo("ultimoAlmacenNombre", ruta).get().await()
-                val sellerIds = userQuery.documents.map { it.id }
+                // 🚀 PASO CRÍTICO: Encontrar el ID de la ruta por su nombre
+                val rutasSnap = db.collection("rutas").whereEqualTo("nombre", rutaNombre).get().await()
+                val rutaDoc = rutasSnap.documents.firstOrNull()
+                
+                val sellerIds = mutableListOf<String>()
+                if (rutaDoc != null) {
+                    val rutaRef = rutaDoc.reference
+                    // Buscar usuarios que tengan esta referencia de ruta
+                    val usersSnap = db.collection("users").whereEqualTo("rutaAsignada", rutaRef).get().await()
+                    sellerIds.addAll(usersSnap.documents.map { it.id })
+                }
 
-                val ventasList = if (sellerIds.isNotEmpty()) {
+                // 🚀 BÚSQUEDA TRIPLE DE SEGURIDAD (ID, Referencia y Nombre)
+                val querySales = if (sellerIds.isNotEmpty()) {
                     db.collection("ventas")
                         .whereIn("vendedorId", sellerIds)
                         .whereGreaterThanOrEqualTo("fecha", start)
                         .whereLessThanOrEqualTo("fecha", end)
-                        .get().await().documents.mapNotNull { d ->
-                            val lat = d.getDouble("latitudVenta") ?: 0.0
-                            val lng = d.getDouble("longitudVenta") ?: 0.0
-                            if (lat != 0.0) {
-                                VentaMarker(
-                                    id = d.id,
-                                    clienteNombre = d.getString("clienteNombre") ?: "Cliente",
-                                    total = d.getDouble("total") ?: 0.0,
-                                    latLng = LatLng(lat, lng),
-                                    fotoUrl = d.getString("fotoEvidenciaVisita") ?: d.getString("clienteImagenUrl"),
-                                    fueraDeRango = d.getBoolean("fueraDeRango") ?: false
-                                )
-                            } else null
-                        }
+                        .get().await().documents
                 } else emptyList()
+
+                val mapaFotosCatalogo = mutableMapOf<String, String>()
+                val clienteIds = mutableSetOf<String>()
+                val clienteNombres = mutableSetOf<String>()
+
+                querySales.forEach { d ->
+                    val raw = d.get("clienteId") ?: d.get("clienteRef")
+                    val id = if (raw is com.google.firebase.firestore.DocumentReference) raw.id else raw?.toString()
+                    id?.let { clienteIds.add(it) }
+                    d.getString("clienteNombre")?.let { clienteNombres.add(it) }
+                }
+
+                if (clienteIds.isNotEmpty() || clienteNombres.isNotEmpty()) {
+                    // 1. Buscar por ID de documento
+                    if (clienteIds.isNotEmpty()) {
+                        clienteIds.chunked(10).forEach { ids ->
+                            try {
+                                val snap = db.collection("clientes")
+                                    .whereIn(com.google.firebase.firestore.FieldPath.documentId(), ids.toList())
+                                    .get().await()
+                                snap.documents.forEach { c ->
+                                    val foto = c.getString("FotografiaCliente") ?: c.getString("fotoUrl")
+                                    if (!foto.isNullOrBlank()) {
+                                        mapaFotosCatalogo[c.id] = foto
+                                        // También guardamos por nombre si lo tiene
+                                        c.getString("nombreNegocio")?.let { mapaFotosCatalogo[it] = foto }
+                                    }
+                                }
+                            } catch (e: Exception) { Log.e("HistorialVM", "Error ID: ${e.message}") }
+                        }
+                    }
+
+                    // 2. RESPALDO: Buscar por Nombre de Negocio
+                    if (clienteNombres.isNotEmpty()) {
+                        clienteNombres.chunked(10).forEach { nombres ->
+                            try {
+                                val snap = db.collection("clientes")
+                                    .whereIn("nombreNegocio", nombres.toList())
+                                    .get().await()
+                                snap.documents.forEach { c ->
+                                    val foto = c.getString("FotografiaCliente") ?: c.getString("fotoUrl")
+                                    if (!foto.isNullOrBlank()) {
+                                        c.getString("nombreNegocio")?.let { mapaFotosCatalogo[it] = foto }
+                                        mapaFotosCatalogo[c.id] = foto
+                                    }
+                                }
+                            } catch (e: Exception) { Log.e("HistorialVM", "Error Nombre: ${e.message}") }
+                        }
+                    }
+                }
+
+                val ventasList = querySales.mapNotNull { d ->
+                    val lat = d.getDouble("latitudVenta") ?: 0.0
+                    val lng = d.getDouble("longitudVenta") ?: 0.0
+                    if (lat != 0.0) {
+                        val rawCId = d.get("clienteId") ?: d.get("clienteRef")
+                        val cId = if (rawCId is com.google.firebase.firestore.DocumentReference) rawCId.id else rawCId?.toString() ?: ""
+                        val nombreNegocio = d.getString("clienteNombre") ?: ""
+                        
+                        // 🚀 CLAVE: Usamos la DB local (Room) igual que en Pantalla Ruta
+                        val clienteLocal = async(Dispatchers.IO) { repositoryRuta.obtenerClienteLocal(cId) }.await()
+                        
+                        // PRIORIDAD DE URL: Exactamente igual a lo que funciona en la otra pantalla
+                        val fotoFinal = clienteLocal?.fotografiaUrl 
+                            ?: d.getString("fotoEvidenciaVisita")
+                            ?: mapaFotosCatalogo[cId]
+                            ?: d.getString("clienteImagenUrl")
+
+                        VentaMarker(
+                            id = d.id,
+                            clienteNombre = nombreNegocio,
+                            total = (d.get("total") as? Number)?.toDouble() ?: 0.0,
+                            latLng = LatLng(lat, lng),
+                            fotoUrl = fotoFinal,
+                            fueraDeRango = d.getBoolean("fueraDeRango") ?: false
+                        )
+                    } else null
+                }
 
                 _uiState.update { it.copy(ventas = ventasList) }
 
+                // 4. Procesar rastro
+                val doc = deferredDoc.await()
                 if (doc.exists()) {
                     val rawList = doc.get("historialRecorrido") as? List<Map<String, Any>> ?: emptyList()
                     val puntos = rawList.map { map ->
                         PuntoHistorial(
-                            lat = map["lat"] as? Double ?: 0.0,
-                            lng = map["lng"] as? Double ?: 0.0,
+                            lat = (map["lat"] as? Number)?.toDouble() ?: 0.0,
+                            lng = (map["lng"] as? Number)?.toDouble() ?: 0.0,
                             vel = (map["vel"] as? Number)?.toDouble() ?: 0.0,
-                            bat = (map["bat"] as? Long)?.toInt() ?: 0,
+                            bat = (map["bat"] as? Number)?.toInt() ?: 0,
                             ts = map["ts"] as? Timestamp ?: Timestamp.now(),
                             acc = (map["acc"] as? Number)?.toFloat() ?: 0f,
                             st = map["st"] as? String ?: ""
                         )
-                    }.sortedBy { it.ts.seconds }
+                    }.filter { it.lat != 0.0 }.sortedBy { it.ts.seconds }
 
                     procesarDatos(puntos)
                 } else {
-                    _uiState.update { it.copy(isLoading = false, puntos = emptyList(), error = if (ventasList.isEmpty()) "No hay registros para este día." else null) }
+                    _uiState.update { it.copy(
+                        isLoading = false, 
+                        puntos = emptyList(), 
+                        error = if (ventasList.isEmpty()) "Sin rastro GPS para $rutaNombre hoy." else null
+                    ) }
                 }
             } catch (e: Exception) {
                 Log.e("HistorialVM", "Error cargando historial", e)
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _uiState.update { it.copy(isLoading = false, error = "Fallo de conexión.") }
             }
         }
     }
@@ -269,10 +362,14 @@ class HistorialRutaViewModel(
                 val prev = puntos[i-1]
                 val diffMin = (p.ts.seconds - prev.ts.seconds) / 60
                 if (diffMin > 10) {
+                    val h = diffMin / 60
+                    val m = diffMin % 60
+                    val desc = if (h > 0) "Parada de ${h}h ${m}m" else "Parada de $m min"
+                    
                     incidencias.add(Incidencia(
                         tipo = "PARADA_LARGA",
                         latLng = LatLng(p.lat, p.lng),
-                        descripcion = "Parada de $diffMin min",
+                        descripcion = desc,
                         timestamp = prev.ts.seconds * 1000
                     ))
                 }

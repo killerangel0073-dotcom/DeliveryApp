@@ -89,7 +89,8 @@ class SincronizarVentasWorker(
                         fueraDeRango = venta.fueraDeRango,
                         latitudVenta = venta.latitudVenta,
                         longitudVenta = venta.longitudVenta,
-                        fecha = venta.fecha // 🔥 Pasamos la hora original capturada
+                        fecha = venta.fecha, // 🔥 Pasamos la hora original capturada
+                        motivoVisita = venta.motivoVisita
                     )
                 } catch (e: Exception) {
                     Log.e("SyncWorker", "Error de red al sincronizar ticket ${venta.id}", e)

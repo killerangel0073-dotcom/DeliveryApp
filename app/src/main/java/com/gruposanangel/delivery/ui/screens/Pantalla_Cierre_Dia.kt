@@ -7,6 +7,7 @@ import android.os.Environment
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -14,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -70,10 +72,13 @@ fun PantallaCierreDia(
     val ventaRepo = VentaRepository(db.VentaDao(), db.productoDao())
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
     
-    val efectivoAEntregar = uiState.ventaDia 
+    val totalVenta = uiState.ventaDia
+    val totalGastos = uiState.totalGastosHoy
+    val efectivoNetoAEntregar = totalVenta - totalGastos
 
     // --- ESTADO DEL CONTADOR DE DINERO ---
     var showCashCounter by remember { mutableStateOf(false) }
+    var showExpensesDetail by remember { mutableStateOf(false) } // 🔥 Nuevo: Detalle de gastos
     val sheetState = rememberModalBottomSheetState()
     
     // Denominaciones México: Valor to Cantidad
@@ -82,7 +87,7 @@ fun PantallaCierreDia(
         10 to 0, 5 to 0, 2 to 0, 1 to 0 // Monedas principales
     )}
     val totalContado = cashState.entries.sumOf { it.key * it.value }.toDouble()
-    val diferencia = totalContado - efectivoAEntregar
+    val diferencia = totalContado - efectivoNetoAEntregar
 
     var showConfirmLiquidation by remember { mutableStateOf(false) }
 
@@ -114,8 +119,14 @@ fun PantallaCierreDia(
             ) {
                 Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("LIQUIDACIÓN TOTAL DEL DÍA", color = Color.White.copy(0.6f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                    Text(formatoMoneda.format(efectivoAEntregar), color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Black)
+                    Text(formatoMoneda.format(efectivoNetoAEntregar), color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Black)
                     
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Venta: ${formatoMoneda.format(totalVenta)}", color = Color.White.copy(0.6f), fontSize = 12.sp)
+                        Text(" | ", color = Color.White.copy(0.3f))
+                        Text("Gastos: -${formatoMoneda.format(totalGastos)}", color = Color(0xFFFF5252), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
                     if (totalContado > 0) {
                         Spacer(Modifier.height(12.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -143,6 +154,20 @@ fun PantallaCierreDia(
             Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CierreMiniCard("Atendidos", "${uiState.clientesDia}", Icons.Rounded.Groups, Color(0xFF2196F3), Modifier.weight(1f))
                 CierreMiniCard("Promedio", formatoMoneda.format(uiState.ticketPromedioDia), Icons.Rounded.Analytics, Color(0xFFFF9800), Modifier.weight(1f))
+            }
+            
+            Spacer(Modifier.height(12.dp))
+
+            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CierreMiniCard("Venta Bruta", formatoMoneda.format(uiState.ventaDia), Icons.Rounded.Payments, Color(0xFF4CAF50), Modifier.weight(1f))
+                CierreMiniCard(
+                    titulo = "Gastos Hoy", 
+                    valor = formatoMoneda.format(uiState.totalGastosHoy), 
+                    icono = Icons.AutoMirrored.Rounded.ReceiptLong,
+                    color = Color(0xFFE53935), 
+                    modifier = Modifier.weight(1f),
+                    onClick = { showExpensesDetail = true }
+                )
             }
 
             Spacer(Modifier.height(24.dp))
@@ -177,7 +202,7 @@ fun PantallaCierreDia(
                                         monto = v.total, 
                                         hora = cal.get(Calendar.HOUR_OF_DAY), 
                                         minutos = cal.get(Calendar.MINUTE),
-                                        estado = "VENTA"
+                                        estado = if (v.estado == "CANCELADA") "ANULADA" else "VENTA"
                                     )
                                 }.sortedWith(compareBy({ it.hora }, { it.minutos }))
                             }
@@ -210,52 +235,120 @@ fun PantallaCierreDia(
                 val esVendedor = uiState.puestoTrabajo?.trim() == "Vendedor de Ruta" || 
                                  uiState.puestoTrabajo?.trim() == "Suplente de Ruta"
 
-                if (!esVendedor) {
-                    OutlinedButton(
-                        onClick = {
-                            val nombresTiendas = listOf(
-                                "Abarrotes La Esperanza", "Miscelánea San Judas", "Mini Super La Bendición", 
-                                "Tienda El Paso", "Abarrotes Los Primos", "Cervecería El Puerto", 
-                                "Miscelánea Doña Mary", "Abarrotes El Güero", "Mini Super Sol", 
-                                "Tienda La Pasadita", "Miscelánea El Recreo", "Abarrotes Santa Fe", 
-                                "Mini Super Ámbar", "Tienda El Oasis", "Miscelánea Las Flores", 
-                                "Abarrotes El Triunfo", "Mini Super Galaxia", "Tienda La Unión", 
-                                "Miscelánea San José", "Abarrotes Mi Pueblito", "Abarrotes Don Pepe",
-                                "Mini Super El Amigo", "Miscelánea El Sol", "Tienda La Guadalupana",
-                                "Abarrotes El Milagro", "Mini Super La Esquina", "Cervecería La Terraza",
-                                "Miscelánea Los Angeles", "Tienda El Porvenir", "Abarrotes La Union",
-                                "Mini Super Express", "Miscelánea La Fe", "Tienda El Progreso",
-                                "Abarrotes El Ahorro", "Mini Super San Angel"
+                // 🔥 BOTÓN VISTA PREVIA (HABILITADO PARA TODOS TEMPORALMENTE)
+                OutlinedButton(
+                    onClick = {
+                        val nombresTiendas = listOf(
+                            "Abarrotes La Esperanza", "Miscelánea San Judas", "Mini Super La Bendición", 
+                            "Tienda El Paso", "Abarrotes Los Primos", "Cervecería El Puerto", 
+                            "Miscelánea Doña Mary", "Abarrotes El Güero", "Mini Super Sol", 
+                            "Tienda La Pasadita", "Miscelánea El Recreo", "Abarrotes Santa Fe", 
+                            "Mini Super Ámbar", "Tienda El Oasis", "Miscelánea Las Flores", 
+                            "Abarrotes El Triunfo", "Mini Super Galaxia", "Tienda La Unión", 
+                            "Miscelánea San José", "Abarrotes Mi Pueblito", "Abarrotes Don Pepe",
+                            "Mini Super El Amigo", "Miscelánea El Sol", "Tienda La Guadalupana",
+                            "Abarrotes El Milagro", "Mini Super La Esquina", "Cervecería La Terraza",
+                            "Miscelánea Los Angeles", "Tienda El Porvenir", "Abarrotes La Union",
+                            "Mini Super Express", "Miscelánea La Fe", "Tienda El Progreso",
+                            "Abarrotes El Ahorro", "Mini Super San Angel"
+                        )
+                        val estados = listOf("VENTA", "VENTA", "VENTA", "SIN VENTA", "CERRADO", "NO LOCALIZADO", "VENTA")
+                        
+                        val demoData = nombresTiendas.take(35).shuffled().map { nombre ->
+                            val estadoAleatorio = estados.random()
+                            val esVenta = estadoAleatorio == "VENTA"
+                            VentaReporteItem(
+                                cliente = nombre,
+                                piezas = if (esVenta) (15..60).random() else 0,
+                                monto = if (esVenta) (450..1800).random().toDouble() else 0.0,
+                                hora = (7..17).random(),
+                                minutos = (0..59).random(),
+                                estado = estadoAleatorio
                             )
-                            val estados = listOf("VENTA", "VENTA", "VENTA", "SIN VENTA", "CERRADO", "NO LOCALIZADO", "VENTA")
-                            
-                            val demoData = nombresTiendas.take(35).shuffled().map { nombre ->
-                                val estadoAleatorio = estados.random()
-                                val esVenta = estadoAleatorio == "VENTA"
-                                VentaReporteItem(
-                                    cliente = nombre,
-                                    piezas = if (esVenta) (15..60).random() else 0,
-                                    monto = if (esVenta) (450..1800).random().toDouble() else 0.0,
-                                    hora = (7..17).random(),
-                                    minutos = (0..59).random(),
-                                    estado = estadoAleatorio
-                                )
-                            }.sortedWith(compareBy({ it.hora }, { it.minutos }))
-                            
-                            val file = GenerarPDFCierreCarta(context, uiState, demoData, true)
-                            abrirPdfCierre(context, file)
-                        },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF1A1A1A))
-                    ) {
-                        Icon(Icons.Rounded.AutoMode, null, tint = Color(0xFF1A1A1A))
-                        Spacer(Modifier.width(12.dp))
-                        Text("VISTA PREVIA DESEMPEÑO", color = Color(0xFF1A1A1A), fontWeight = FontWeight.Bold)
-                    }
+                        }.sortedWith(compareBy({ it.hora }, { it.minutos }))
+                        
+                        val file = GenerarPDFCierreCarta(context, uiState, demoData, true)
+                        abrirPdfCierre(context, file)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF1A1A1A))
+                ) {
+                    Icon(Icons.Rounded.AutoMode, null, tint = Color(0xFF1A1A1A))
+                    Spacer(Modifier.width(12.dp))
+                    Text("VISTA PREVIA DESEMPEÑO", color = Color(0xFF1A1A1A), fontWeight = FontWeight.Bold)
                 }
             }
             Spacer(Modifier.height(40.dp))
+        }
+
+        // --- HOJA DESLIZABLE: DETALLE DE GASTOS ---
+        if (showExpensesDetail) {
+            ModalBottomSheet(
+                onDismissRequest = { showExpensesDetail = false },
+                containerColor = Color.White
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "DETALLE DE GASTOS", 
+                        fontWeight = FontWeight.Black, 
+                        fontSize = 20.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        "Registros realizados hoy", 
+                        color = Color.Gray, 
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    
+                    Spacer(Modifier.height(24.dp))
+                    
+                    if (uiState.gastosHoy.isEmpty()) {
+                        Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
+                            Text("No hay gastos registrados hoy.", color = Color.Gray)
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            uiState.gastosHoy.forEach { gasto ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0xFFF8F9FA), RoundedCornerShape(12.dp))
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(gasto.categoria, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Black)
+                                        if (gasto.descripcion.isNotEmpty()) {
+                                            Text(gasto.descripcion, fontSize = 11.sp, color = Color.Gray)
+                                        }
+                                    }
+                                    Text(formatoMoneda.format(gasto.monto), fontWeight = FontWeight.Black, color = Color(0xFFE53935))
+                                }
+                            }
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(32.dp))
+                    
+                    Button(
+                        onClick = { showExpensesDetail = false },
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
+                    ) {
+                        Text("LISTO, VOLVER AL CIERRE")
+                    }
+                }
+            }
         }
 
         // --- HOJA DESLIZABLE: CONTADOR DE CAJA ---
@@ -374,8 +467,8 @@ fun PantallaCierreDia(
                                 Text(formatoMoneda.format(totalContado), fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color(0xFF4CAF50))
                             }
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Venta del Día:", color = Color.Gray)
-                                Text(formatoMoneda.format(efectivoAEntregar), color = Color.Gray)
+                                Text("Efectivo a Entregar:", color = Color.Gray)
+                                Text(formatoMoneda.format(efectivoNetoAEntregar), color = Color.Gray)
                             }
                             HorizontalDivider(Modifier.padding(vertical = 8.dp))
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -411,6 +504,7 @@ fun PantallaCierreDia(
                             VentaRepository(dbV.VentaDao(), dbV.productoDao()), 
                             RepositoryUsuario(firebaseDataSource, dbV.usuarioDao()), 
                             RepositoryInventario(firebaseDataSource, dbV.productoDao(), dbV.VentaDao(), dbV.movimientoInventarioDao()),
+                            com.gruposanangel.delivery.data.RepositoryGasto(dbV.gastoDao()),
                             com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
                         ) as T
                 }
@@ -438,7 +532,7 @@ fun PantallaCierreDia(
                     Button(
                         onClick = {
                             viewModelDashboard.finalizarJornadaYLiquidar(
-                                ventaTotal = efectivoAEntregar,
+                                ventaTotal = efectivoNetoAEntregar,
                                 efectivoContado = totalContado,
                                 diferencia = diferencia,
                                 desgloseEfectivo = cashState.toMap()
@@ -462,9 +556,18 @@ fun PantallaCierreDia(
 }
 
 @Composable
-fun CierreMiniCard(titulo: String, valor: String, icono: androidx.compose.ui.graphics.vector.ImageVector, color: Color, modifier: Modifier) {
+fun CierreMiniCard(
+    titulo: String, 
+    valor: String, 
+    icono: androidx.compose.ui.graphics.vector.ImageVector, 
+    color: Color, 
+    modifier: Modifier,
+    onClick: (() -> Unit)? = null
+) {
     Card(
-        modifier = modifier,
+        modifier = modifier.then(
+            if (onClick != null) Modifier.clickable { onClick() } else Modifier
+        ),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(2.dp)
@@ -484,11 +587,15 @@ fun GenerarPDFCierreCarta(
     context: Context, 
     state: DashboardVendedorUiState, 
     ventas: List<VentaReporteItem>, 
-    esDemo: Boolean
+    esDemo: Boolean,
+    fechaManual: Long? = null // 🔥 Nuevo: Para reportes históricos
 ): File {
     val pdfDocument = PdfDocument()
     val pageWidth = 612; val pageHeight = 792 
     val nf = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
+    
+    // Fecha efectiva del reporte
+    val fechaReferencia = if (fechaManual != null) Date(fechaManual) else Date()
     
     // --- PINCELES ---
     val pHeaderBg = Paint().apply { color = android.graphics.Color.rgb(227, 6, 19); style = Paint.Style.FILL } // Rojo Delisa
@@ -503,7 +610,10 @@ fun GenerarPDFCierreCarta(
     val pLine = Paint().apply { strokeWidth = 0.5f; color = android.graphics.Color.LTGRAY; style = Paint.Style.STROKE; isAntiAlias = true }
 
     // --- CÁLCULO DE KPIs ---
-    val totalVentaNeta = if(esDemo) 11845.50 else state.ventaDia
+    val totalVentaBruta = if(esDemo) 12500.0 else state.ventaDia
+    val totalGastos = if(esDemo) 654.50 else state.totalGastosHoy
+    val totalVentaNeta = totalVentaBruta - totalGastos
+
     val clientesProgramados = ventas.size
     val clientesConVenta = ventas.count { it.estado == "VENTA" }
     
@@ -528,25 +638,23 @@ fun GenerarPDFCierreCarta(
 
     fun drawHeader(canv: Canvas, pNum: Int) {
         if (pNum == 1) {
-            // --- ENCABEZADO TESLA RED HUD (VIBRANTE Y MODERNO) ---
+            // --- ENCABEZADO TESLA RED HUD ---
             val headerH = 100f
             val headerGradient = LinearGradient(
                 0f, 0f, 0f, headerH,
-                android.graphics.Color.rgb(227, 6, 19), // Rojo Delisa Superior
-                android.graphics.Color.rgb(160, 0, 10),  // Rojo Profundo Inferior
+                android.graphics.Color.rgb(227, 6, 19), 
+                android.graphics.Color.rgb(160, 0, 10),  
                 Shader.TileMode.CLAMP
             )
             val pHeaderHUD = Paint().apply { shader = headerGradient; style = Paint.Style.FILL; isAntiAlias = true }
             canv.drawRect(0f, 0f, pageWidth.toFloat(), headerH, pHeaderHUD)
             
-            // Línea de definición inferior (Contraste técnico)
             val pAccentLine = Paint().apply { color = android.graphics.Color.rgb(26, 26, 26); strokeWidth = 1.2f; style = Paint.Style.STROKE }
             canv.drawLine(0f, headerH, pageWidth.toFloat(), headerH, pAccentLine)
 
             val logo = context.getDrawable(R.drawable.logo)
             logo?.let { it.setBounds(40, 15, 140, 75); it.draw(canv) }
             
-            // Título Principal (White Premium)
             val pMainTitle = Paint(pTitle).apply { 
                 textSize = 22f 
                 letterSpacing = 0.05f 
@@ -554,20 +662,20 @@ fun GenerarPDFCierreCarta(
             }
             canv.drawText("REPORTE DE DESEMPEÑO", 160f, 35f, pMainTitle)
             
-            // Metadatos en Blanco Bold (Alineación Técnica por niveles)
             pBold.color = android.graphics.Color.WHITE
             pBold.textSize = 9f
             
-            // Nivel 1: Vendedor e Hoja
             pBold.textAlign = Paint.Align.LEFT
             canv.drawText("VENDEDOR: ${state.nombreVendedor.uppercase()}", 160f, 65f, pBold)
             
             pBold.textAlign = Paint.Align.RIGHT
             canv.drawText("HOJA $pNum DE $totalPages", 572f, 35f, pBold)
             
-            // Nivel 2: Ruta y Fecha (Sincronizados horizontalmente)
-            val df = SimpleDateFormat("EEEE dd 'DE' MMMM 'DEL' yyyy", Locale("es", "MX"))
-            val fechaFormateada = df.format(Date()).uppercase()
+            // 🔥 CORRECCIÓN DE FECHA: Usar UTC si es histórico para evitar que se atrase un día
+            val df = SimpleDateFormat("EEEE dd 'DE' MMMM 'DEL' yyyy", Locale("es", "MX")).apply {
+                if (fechaManual != null) timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val fechaFormateada = df.format(fechaReferencia).uppercase()
             
             pBold.textAlign = Paint.Align.LEFT
             canv.drawText("RUTA: ${state.rutaNombre.uppercase()}", 160f, 85f, pBold)
@@ -575,11 +683,11 @@ fun GenerarPDFCierreCarta(
             pBold.textAlign = Paint.Align.RIGHT
             canv.drawText(fechaFormateada, 572f, 85f, pBold)
             
-            // Restaurar pinceles
             pBold.textAlign = Paint.Align.LEFT
             pBold.color = android.graphics.Color.BLACK
             pBold.textSize = 9f
-        } else {
+        }
+else {
             // Cabecera minimalista para hojas 2, 3...
             pSub.color = android.graphics.Color.DKGRAY; pSub.textAlign = Paint.Align.RIGHT
             canv.drawText("HOJA $pNum DE $totalPages", 572f, 30f, pSub); pSub.textAlign = Paint.Align.LEFT
@@ -594,20 +702,6 @@ fun GenerarPDFCierreCarta(
     canvas.drawText("RESUMEN OPERATIVO DE RUTA", pageWidth / 2f, y, pBold); y += 20f
     pBold.textAlign = Paint.Align.LEFT
     
-    val kpiW = 135f; val kpiH = 40f; val kpiGap = 8f
-    val totalKpiWidth = (kpiW * 4) + (kpiGap * 3)
-    val startX = (pageWidth - totalKpiWidth) / 2f
-
-    fun drawKpi(l: String, v: String, x: Float, c: Int = android.graphics.Color.rgb(245, 245, 245)) {
-        canvas.drawRoundRect(x, y, x + kpiW, y + kpiH, 6f, 6f, Paint().apply { color = c; style = Paint.Style.FILL })
-        val centerX = x + kpiW / 2f
-        pSub.textAlign = Paint.Align.CENTER; pSub.color = android.graphics.Color.GRAY
-        canvas.drawText(l, centerX, y + 15f, pSub)
-        pBold.textAlign = Paint.Align.CENTER; pBold.textSize = 11f
-        canvas.drawText(v, centerX, y + 32f, pBold)
-        pSub.textAlign = Paint.Align.LEFT; pBold.textAlign = Paint.Align.LEFT; pBold.textSize = 9f
-    }
-    
     // Determinamos el color de Efectividad basado en estándares industriales (Bimbo/Barcel)
     // Intensificados para mayor visibilidad en el reporte impreso
     val colorEfectividad = when {
@@ -616,16 +710,62 @@ fun GenerarPDFCierreCarta(
         else -> android.graphics.Color.rgb(255, 205, 210) // Rojo Alerta (Más presente)
     }
 
-    drawKpi("Programados", "$clientesProgramados", startX)
-    drawKpi("Con Venta", "$clientesConVenta", startX + kpiW + kpiGap)
-    drawKpi("Sin Venta", "$clientesSinVenta", startX + 2 * (kpiW + kpiGap))
-    drawKpi("Efectividad", "${"%.1f".format(efectividad)}%", startX + 3 * (kpiW + kpiGap), colorEfectividad)
-    y += 55f
-    drawKpi("Venta Neta", nf.format(totalVentaNeta), startX)
-    drawKpi("Ticket Prom.", nf.format(ticketPromedio), startX + kpiW + kpiGap)
-    drawKpi("Productividad", nf.format(productividad), startX + 2 * (kpiW + kpiGap))
-    drawKpi("Piezas", "$totalPiezas pzas", startX + 3 * (kpiW + kpiGap))
-    y += 65f
+    // --- KPI 1: SEGMENTO DE COBERTURA COMPACTO ---
+    val segW = 532f; val segH = 45f
+    val segX = (pageWidth - segW) / 2f
+    
+    // Fondo del segmento basado en efectividad
+    canvas.drawRoundRect(segX, y, segX + segW, y + segH, 8f, 8f, Paint().apply { color = colorEfectividad; style = Paint.Style.FILL })
+    // Bordes sutiles
+    canvas.drawRoundRect(segX, y, segX + segW, y + segH, 8f, 8f, Paint().apply { color = android.graphics.Color.argb(40, 0, 0, 0); style = Paint.Style.STROKE; strokeWidth = 1f })
+
+    val colW = segW / 4f
+    fun drawSubKpi(l: String, v: String, index: Int, isLast: Boolean = false) {
+        val cx = segX + (index * colW) + (colW / 2f)
+        pSub.textAlign = Paint.Align.CENTER; pSub.color = android.graphics.Color.rgb(60, 60, 60)
+        canvas.drawText(l.uppercase(), cx, y + 16f, pSub)
+        pBold.textAlign = Paint.Align.CENTER; pBold.textSize = 12f; pBold.color = android.graphics.Color.BLACK
+        canvas.drawText(v, cx, y + 34f, pBold)
+        
+        if (!isLast) {
+            val dividerX = segX + ((index + 1) * colW)
+            canvas.drawLine(dividerX, y + 10f, dividerX, y + segH - 10f, Paint().apply { color = android.graphics.Color.argb(30, 0, 0, 0); strokeWidth = 1f })
+        }
+    }
+
+    drawSubKpi("Programados", "$clientesProgramados", 0)
+    drawSubKpi("Con Venta", "$clientesConVenta", 1)
+    drawSubKpi("Sin Venta", "$clientesSinVenta", 2)
+    drawSubKpi("Efectividad", "${"%.1f".format(efectividad)}%", 3, true)
+    
+    y += segH + 15f
+
+    // --- KPI 2: BALANCE FINANCIERO ---
+    val finKpiW = 172f; val finKpiH = 40f; val finKpiGap = 8f
+    val startXFin = (pageWidth - (finKpiW * 3 + finKpiGap * 2)) / 2f
+
+    fun drawFinKpi(l: String, v: String, x: Float, bg: Int = android.graphics.Color.rgb(248, 248, 248), txtC: Int = android.graphics.Color.BLACK) {
+        canvas.drawRoundRect(x, y, x + finKpiW, y + finKpiH, 6f, 6f, Paint().apply { color = bg; style = Paint.Style.FILL })
+        val cx = x + finKpiW / 2f
+        pSub.textAlign = Paint.Align.CENTER; pSub.color = android.graphics.Color.GRAY
+        canvas.drawText(l, cx, y + 15f, pSub)
+        pBold.textAlign = Paint.Align.CENTER; pBold.textSize = 11f; pBold.color = txtC
+        canvas.drawText(v, cx, y + 32f, pBold)
+    }
+
+    drawFinKpi("Venta Bruta", nf.format(totalVentaBruta), startXFin)
+    drawFinKpi("Gastos Hoy", "-${nf.format(totalGastos)}", startXFin + finKpiW + finKpiGap, android.graphics.Color.rgb(255, 235, 238), android.graphics.Color.rgb(198, 40, 40))
+    drawFinKpi("Efectivo Neto", nf.format(totalVentaNeta), startXFin + 2 * (finKpiW + finKpiGap), android.graphics.Color.rgb(232, 245, 233), android.graphics.Color.rgb(46, 125, 50))
+    
+    y += finKpiH + 12f
+
+    // --- KPI 3: MÉTRICAS OPERATIVAS ---
+    val startXOp = (pageWidth - (finKpiW * 3 + finKpiGap * 2)) / 2f
+    drawFinKpi("Ticket Prom.", nf.format(ticketPromedio), startXOp)
+    drawFinKpi("Productividad", nf.format(productividad), startXOp + finKpiW + finKpiGap)
+    drawFinKpi("Piezas Totales", "$totalPiezas pzas", startXOp + 2 * (finKpiW + finKpiGap))
+    
+    y += finKpiH + 25f
 
     // --- GRÁFICA DE AUDITORÍA CRONOLÓGICA (ULTRA-WIDE EDGE-TO-EDGE) ---
     pBold.textAlign = Paint.Align.CENTER
@@ -782,53 +922,154 @@ fun GenerarPDFCierreCarta(
     }
     drawTableHeader(canvas, y); y += 22f
 
-    ventas.forEachIndexed { index, v ->
-        if (y > 730f) {
+        // 1. Dibujar Detalle de Ventas
+        ventas.forEachIndexed { index, v ->
+            if (y > 730f) {
+                pdfDocument.finishPage(page)
+                currentPageNumber++; pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create()
+                page = pdfDocument.startPage(pageInfo); canvas = page.canvas
+                drawHeader(canvas, currentPageNumber); y = 62f
+                drawTableHeader(canvas, y); y += 22f
+            }
+
+            val (bgC, txtC) = when(v.estado) {
+                "VENTA" -> android.graphics.Color.rgb(232, 245, 233) to android.graphics.Color.rgb(46, 125, 50)
+                "ANULADA" -> android.graphics.Color.rgb(245, 245, 245) to android.graphics.Color.GRAY
+                "SIN VENTA" -> android.graphics.Color.rgb(255, 235, 238) to android.graphics.Color.rgb(198, 40, 40)
+                else -> android.graphics.Color.rgb(255, 253, 231) to android.graphics.Color.rgb(245, 127, 23)
+            }
+
+            canvas.drawRect(40f, y, 572f, y + 20f, Paint().apply { color = bgC; style = Paint.Style.FILL })
+            val pStatusText = Paint(pText).apply { color = txtC }
+            val pStatusBold = Paint(pBold).apply { color = txtC; textSize = 10f }
+
+            canvas.drawText("${index + 1}", 45f, y + 15f, pStatusText)
+            canvas.drawText(String.format(Locale.US, "%02d:%02d", v.hora, v.minutos), 65f, y + 15f, pStatusText)
+            canvas.drawText(v.cliente.take(35), 115f, y + 15f, pStatusText)
+            canvas.drawText(v.estado, 335f, y + 15f, pStatusBold)
+            canvas.drawText("${v.piezas}", 455f, y + 15f, pStatusText)
+            canvas.drawText(nf.format(v.monto), 510f, y + 15f, if(v.monto > 0) pStatusBold else pStatusText)
+            y += 20f
+        }
+
+        // 2. Dibujar Detalle de Gastos (SI EXISTEN O NO)
+        val listaGastos = if (esDemo) {
+            listOf(
+                Gasto(categoria = "Gasolina", monto = 450.0, descripcion = "Carga de combustible", fecha = System.currentTimeMillis()),
+                Gasto(categoria = "Papelería", monto = 85.50, descripcion = "Rollos de papel ticket", fecha = System.currentTimeMillis())
+            )
+        } else {
+            state.gastosHoy
+        }
+
+        y += 25f
+        if (y > 650f) {
             pdfDocument.finishPage(page)
             currentPageNumber++; pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create()
             page = pdfDocument.startPage(pageInfo); canvas = page.canvas
             drawHeader(canvas, currentPageNumber); y = 62f
-            drawTableHeader(canvas, y); y += 22f
         }
 
-        // Colores por Estado (Nueva Lógica Solicitada)
-        val (bgC, txtC) = when(v.estado) {
-            "VENTA" -> android.graphics.Color.rgb(232, 245, 233) to android.graphics.Color.rgb(46, 125, 50) // Verde
-            "SIN VENTA" -> android.graphics.Color.rgb(255, 235, 238) to android.graphics.Color.rgb(198, 40, 40) // Rojo (No quiso comprar)
-            else -> android.graphics.Color.rgb(255, 253, 231) to android.graphics.Color.rgb(245, 127, 23) // Amarillo (Cerrado, No localizado, etc.)
+        // Título Sección Gastos (SIEMPRE VISIBLE)
+        canvas.drawRect(40f, y, 572f, y + 1.5f, pDelisaRed); y += 15f
+        val pRedBoldTitle = Paint().apply { 
+            color = android.graphics.Color.rgb(227, 6, 19)
+            textSize = 10f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            isAntiAlias = true 
         }
-
-        // Pintamos el fondo de la fila con el color del estado
-        canvas.drawRect(40f, y, 572f, y + 20f, Paint().apply { color = bgC; style = Paint.Style.FILL })
+        canvas.drawText("DETALLE DE GASTOS REGISTRADOS", 45f, y, pRedBoldTitle); y += 15f
         
-        // Aplicamos el color de texto del estado a todas las columnas para consistencia total
-        val pStatusText = Paint(pText).apply { color = txtC }
-        val pStatusBold = Paint(pBold).apply { color = txtC; textSize = 10f }
+        // Header Tabla Gastos
+        fun drawGastoHeaderLocal(canv: Canvas, curY: Float) {
+            val pHeaderBg = Paint().apply { color = android.graphics.Color.rgb(245, 245, 245); style = Paint.Style.FILL }
+            canv.drawRect(40f, curY, 572f, curY + 25f, pHeaderBg)
+            val textY = curY + 16f
+            val pHeaderRojo = Paint().apply { 
+                color = android.graphics.Color.rgb(227, 6, 19)
+                textSize = 8.5f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                isAntiAlias = true 
+            }
+            canv.drawText("HORA", 50f, textY, pHeaderRojo)
+            canv.drawText("CATEGORÍA", 165f, textY, pHeaderRojo)
+            canv.drawText("DESCRIPCIÓN / MOTIVO", 280f, textY, pHeaderRojo)
+            canv.drawText("MONTO", 510f, textY, pHeaderRojo)
+        }
 
-        canvas.drawText("${index + 1}", 45f, y + 15f, pStatusText)
-        canvas.drawText(String.format(Locale.US, "%02d:%02d", v.hora, v.minutos), 65f, y + 15f, pStatusText)
-        canvas.drawText(v.cliente.take(40), 115f, y + 15f, pStatusText)
-        canvas.drawText(v.estado, 335f, y + 15f, pStatusBold)
-        canvas.drawText("${v.piezas}", 455f, y + 15f, pStatusText)
-        canvas.drawText(nf.format(v.monto), 510f, y + 15f, if(v.monto > 0) pStatusBold else pStatusText)
-        y += 20f
-    }
+        drawGastoHeaderLocal(canvas, y); y += 30f
+
+        if (listaGastos.isEmpty()) {
+            canvas.drawText("SIN GASTOS REGISTRADOS EN ESTA JORNADA", pageWidth / 2f, y + 15f, pText.apply { textAlign = Paint.Align.CENTER; color = android.graphics.Color.GRAY })
+            y += 30f
+        } else {
+            val fmtGasto = SimpleDateFormat("HH:mm", Locale("es", "MX"))
+            val pFilaNegra = Paint().apply { color = android.graphics.Color.BLACK; textSize = 9.5f; typeface = Typeface.SANS_SERIF; isAntiAlias = true }
+            val pCatRed = Paint().apply { color = android.graphics.Color.rgb(227, 6, 19); textSize = 9.5f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD); isAntiAlias = true }
+            val pMontoRed = Paint().apply { color = android.graphics.Color.rgb(198, 40, 40); textSize = 10.5f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD); isAntiAlias = true }
+
+            listaGastos.forEachIndexed { index, g ->
+                if (y > 730f) {
+                    pdfDocument.finishPage(page)
+                    currentPageNumber++; pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create()
+                    page = pdfDocument.startPage(pageInfo); canvas = page.canvas
+                    drawHeader(canvas, currentPageNumber); y = 62f
+                    drawGastoHeaderLocal(canvas, y); y += 30f
+                }
+                
+                if (index % 2 != 0) {
+                    val pRowZebra = Paint().apply { color = android.graphics.Color.rgb(252, 252, 252); style = Paint.Style.FILL }
+                    canvas.drawRect(40f, y - 5f, 572f, y + 18f, pRowZebra)
+                }
+                
+                canvas.drawText(fmtGasto.format(Date(g.fecha)).uppercase(), 50f, y + 12f, pFilaNegra)
+                canvas.drawText(g.categoria.uppercase(), 165f, y + 12f, pCatRed)
+                val dC = if (g.descripcion.length > 30) g.descripcion.take(30) + ".." else g.descripcion
+                canvas.drawText(dC, 280f, y + 12f, pFilaNegra)
+                canvas.drawText("-${nf.format(g.monto)}", 510f, y + 12f, pMontoRed)
+                
+                y += 23f
+                canvas.drawLine(40f, y - 5f, 572f, y - 5f, Paint().apply { color = android.graphics.Color.rgb(240, 240, 240); strokeWidth = 0.5f })
+            }
+        }
 
     // --- PIE DE PÁGINA Y QR ---
-    if (y > 700f) { pdfDocument.finishPage(page); currentPageNumber++; pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create(); page = pdfDocument.startPage(pageInfo); canvas = page.canvas; y = 40f }
-    y = 710f
-    canvas.drawRect(40f, y, 572f, y + 1.2f, pDelisaRed); y += 15f
+    // 🔥 CORRECCIÓN: Si el contenido anterior llegó muy abajo, creamos página nueva
+    // Pero si no, usamos el espacio restante o movemos a una posición segura al final
+    if (y > 680f) { 
+        pdfDocument.finishPage(page)
+        currentPageNumber++
+        pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create()
+        page = pdfDocument.startPage(pageInfo)
+        canvas = page.canvas
+        y = 40f 
+    }
+    
+    // Posicionamos el pie de página siempre al fondo de la hoja actual
+    val footerY = 710f
+    canvas.drawRect(40f, footerY, 572f, footerY + 1.2f, pDelisaRed)
+    val contentY = footerY + 15f
+    
     try {
         val qrContent = "DELISA_AUDIT|${state.nombreVendedor}|EFECT:${totalVentaNeta}|EFEC:${efectividad}%"
         val bitMatrix = QRCodeWriter().encode(qrContent, BarcodeFormat.QR_CODE, 200, 200)
         val qrBitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.RGB_565)
         for (i in 0 until 200) for (j in 0 until 200) qrBitmap.setPixel(i, j, if (bitMatrix.get(i, j)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-        canvas.drawBitmap(qrBitmap, null, RectF(40f, y, 90f, y + 50f), null)
-    } catch (e: Exception) { canvas.drawRect(40f, y, 80f, y + 40f, pDelisaRed) }
+        canvas.drawBitmap(qrBitmap, null, RectF(40f, contentY, 90f, contentY + 50f), null)
+    } catch (e: Exception) { 
+        canvas.drawRect(40f, contentY, 80f, contentY + 40f, pDelisaRed) 
+    }
     canvas.drawText("REPORTE OPERATIVO DELISA / SEGURIDAD EN RUTA", 306f, 780f, pSub.apply { textAlign = Paint.Align.CENTER })
 
     pdfDocument.finishPage(page)
-    val name = "REPORTE_${state.rutaNombre.replace(" ", "_").uppercase()}_${SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())}.pdf"
+    
+    // 🔥 Nombre solicitado con corrección de Zona Horaria
+    val shortRoute = state.rutaNombre.replace("Ruta ", "R").replace(" Delisa", "").replace(" ", "")
+    val dfName = SimpleDateFormat("dd.MMM.yyyy", Locale("es", "MX")).apply {
+        if (fechaManual != null) timeZone = TimeZone.getTimeZone("UTC")
+    }
+    val name = "Reporte_Del.${shortRoute}_${dfName.format(fechaReferencia).lowercase()}.pdf"
+
     val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), name)
     pdfDocument.writeTo(FileOutputStream(file)); pdfDocument.close()
     return file

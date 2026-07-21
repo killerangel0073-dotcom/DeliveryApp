@@ -9,6 +9,8 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.VentaRepository
+import com.gruposanangel.delivery.data.GastoEntity
+import com.gruposanangel.delivery.data.RepositoryGasto
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -41,13 +43,28 @@ data class DashboardVendedorUiState(
     val rutaNombre: String = "Ruta General",
     val valorInventario: Double = 0.0,
     val ventasHoy: List<com.gruposanangel.delivery.data.VentaEntity> = emptyList(),
+    val gastosHoy: List<Gasto> = emptyList(),
+    val totalGastosHoy: Double = 0.0,
+    val sueldoBaseConfig: Double = 300.0,
+    val comisionPctConfig: Double = 3.0,
     val error: String? = null
+)
+
+data class Gasto(
+    val id: String = "",
+    val monto: Double = 0.0,
+    val categoria: String = "",
+    val descripcion: String = "",
+    val fecha: Long = 0L,
+    val vendedorId: String = "",
+    val rutaNombre: String = ""
 )
 
 class DashboardVendedorViewModel(
     private val ventaRepository: VentaRepository,
     private val usuarioRepository: RepositoryUsuario,
     private val inventarioRepository: RepositoryInventario,
+    private val gastoRepository: RepositoryGasto,
     private val userId: String
 ) : ViewModel() {
 
@@ -56,32 +73,54 @@ class DashboardVendedorViewModel(
 
     private val db = FirebaseFirestore.getInstance()
     private var salesListener: ListenerRegistration? = null
+    private var expensesListener: ListenerRegistration? = null
+    private var configPagosListener: ListenerRegistration? = null
 
     init {
         cargarEstadoJornada()
         iniciarContadorTiempo()
         observarVentasReactivo()
         escucharVentasNube()
+        observarGastosLocal() // 🔥 CAMBIO: Observamos Room, no Firestore directo
         cargarDatosPerfil()
         observarInventario()
+        escucharConfigPagos()
         
-        // 🔥 Sincronización proactiva de la semana completa
+        // 🔥 Sincronización proactiva del historial de ruta (90 días / 3 meses)
         viewModelScope.launch {
             try {
+                gastoRepository.sincronizarPendientes() // Sincronizar gastos al iniciar
+                
                 val cal = Calendar.getInstance()
-                cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-                cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+                val hoy = cal.timeInMillis
                 
-                // Si hoy es domingo o el calendario devolvió un lunes futuro, retrocedemos 7 días
-                if (cal.timeInMillis > System.currentTimeMillis()) {
-                    cal.add(Calendar.DAY_OF_MONTH, -7)
-                }
+                // Retrocedemos 90 días para asegurar historial de 3 meses de todos los clientes de la ruta
+                cal.add(Calendar.DAY_OF_YEAR, -90)
+                val inicioHistorial = cal.timeInMillis
                 
-                ventaRepository.sincronizarVentasPeriodo(userId, cal.timeInMillis, System.currentTimeMillis())
+                ventaRepository.sincronizarVentasPeriodo(userId, inicioHistorial, hoy)
+                gastoRepository.descargarGastosPeriodo(userId, inicioHistorial, hoy) // 🔥 Sincronizar también gastos
+                
+                Log.d("DashboardVM", "Historial de ruta (Ventas y Gastos) sincronizado (90 días / 3 meses)")
             } catch (e: Exception) {
-                Log.e("DashboardVM", "Error sync inicial semana", e)
+                Log.e("DashboardVM", "Error sync inicial historial", e)
             }
         }
+    }
+
+    private fun escucharConfigPagos() {
+        configPagosListener?.remove()
+        configPagosListener = db.collection("config").document("pagos")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    val sueldo = snapshot.getDouble("sueldo_base") ?: 300.0
+                    val comision = snapshot.getDouble("comision_porcentaje") ?: 3.0
+                    _uiState.update { it.copy(
+                        sueldoBaseConfig = sueldo,
+                        comisionPctConfig = comision
+                    ) }
+                }
+            }
     }
 
     private fun cargarDatosPerfil() {
@@ -92,7 +131,7 @@ class DashboardVendedorViewModel(
                         nombreVendedor = user.nombre,
                         photoUrl = user.photoUrl ?: "",
                         puestoTrabajo = user.puestoTrabajo,
-                        rutaNombre = user.ultimoAlmacenNombre ?: "Ruta General"
+                        rutaNombre = user.ultimaRutaNombre ?: user.ultimoAlmacenNombre ?: "Ruta General"
                     ) }
                 }
             }
@@ -275,107 +314,167 @@ class DashboardVendedorViewModel(
         _uiState.update { it.copy(isLoading = true) }
         
         viewModelScope.launch {
-            // 🔥 CLAVE: Usamos el userId directo del constructor para el filtro inicial
             val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
-            val cal = Calendar.getInstance()
-            cal.timeInMillis = ahoraReal
+            val cal = Calendar.getInstance().apply { timeInMillis = ahoraReal }
             
             // Definimos el inicio del bloque (4 semanas atrás)
-            cal.add(Calendar.WEEK_OF_YEAR, -4)
-            cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
-            val inicioBloque = cal.timeInMillis
+            val calBloque = Calendar.getInstance().apply { timeInMillis = ahoraReal }
+            calBloque.add(Calendar.WEEK_OF_YEAR, -4)
+            while (calBloque.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) {
+                calBloque.add(Calendar.DAY_OF_MONTH, -1)
+            }
+            calBloque.set(Calendar.HOUR_OF_DAY, 0); calBloque.set(Calendar.MINUTE, 0); calBloque.set(Calendar.SECOND, 0); calBloque.set(Calendar.MILLISECOND, 0)
+            val inicioBloque = calBloque.timeInMillis
 
-            // Escuchamos todas las ventas del vendedor desde hace 4 semanas hasta "mañana"
-            ventaRepository.obtenerVentasPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000)
-                .collect { todasLasVentas ->
-                    val calCalc = Calendar.getInstance()
-                    
-                    // Lógica de HOY exacta (Basada en Verdad Temporal)
-                    calCalc.timeInMillis = ahoraReal
-                    calCalc.set(Calendar.HOUR_OF_DAY, 0); calCalc.set(Calendar.MINUTE, 0); calCalc.set(Calendar.SECOND, 0); calCalc.set(Calendar.MILLISECOND, 0)
-                    val iniHoy = calCalc.timeInMillis
-                    
-                    // Lógica de SEMANA exacta (Basada en Verdad Temporal)
-                    val calSem = Calendar.getInstance()
-                    calSem.timeInMillis = ahoraReal
-                    calSem.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-                    calSem.set(Calendar.HOUR_OF_DAY, 0); calSem.set(Calendar.MINUTE, 0); calSem.set(Calendar.SECOND, 0)
-                    if (calSem.timeInMillis > ahoraReal) {
-                        calSem.add(Calendar.DAY_OF_MONTH, -7)
+            // Lógica de SEMANA exacta (Lunes a las 00:00)
+            val calSem = Calendar.getInstance().apply { timeInMillis = ahoraReal }
+            while (calSem.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) {
+                calSem.add(Calendar.DAY_OF_MONTH, -1)
+            }
+            calSem.set(Calendar.HOUR_OF_DAY, 0); calSem.set(Calendar.MINUTE, 0); calSem.set(Calendar.SECOND, 0); calSem.set(Calendar.MILLISECOND, 0)
+            val iniSemana = calSem.timeInMillis
+
+            // 🔥 OBSERVACIÓN COMBINADA: Ventas + Gastos de Room
+            combine(
+                ventaRepository.obtenerVentasPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000),
+                gastoRepository.obtenerGastosPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000)
+            ) { todasLasVentas, todosLosGastos ->
+                
+                val calCalc = Calendar.getInstance().apply { timeInMillis = ahoraReal }
+                calCalc.set(Calendar.HOUR_OF_DAY, 0); calCalc.set(Calendar.MINUTE, 0); calCalc.set(Calendar.SECOND, 0); calCalc.set(Calendar.MILLISECOND, 0)
+                val iniHoy = calCalc.timeInMillis
+
+                // Filtrado de Ventas
+                val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoy && it.estado != "CANCELADA" }
+                val ventasSemana = todasLasVentas.filter { it.fecha >= iniSemana && it.estado != "CANCELADA" }
+                val totalVentaBloque = todasLasVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total }
+
+                // Filtrado de Gastos
+                val gastosHoy = todosLosGastos.filter { it.fecha >= iniHoy }
+                val totalGastoHoy = gastosHoy.sumOf { it.monto }
+
+                // Gráfico (Lunes a Sábado)
+                val ventasPorDia = MutableList(6) { 0.0 }
+                val calDia = Calendar.getInstance()
+                ventasSemana.forEach { venta ->
+                    calDia.timeInMillis = venta.fecha
+                    val dayOfWeek = calDia.get(Calendar.DAY_OF_WEEK)
+                    val index = when (dayOfWeek) {
+                        Calendar.MONDAY -> 0; Calendar.TUESDAY -> 1; Calendar.WEDNESDAY -> 2
+                        Calendar.THURSDAY -> 3; Calendar.FRIDAY -> 4; Calendar.SATURDAY -> 5
+                        else -> -1
                     }
-                    val iniSemana = calSem.timeInMillis
-
-                    // Filtrado en memoria
-                    // 🔥 Solo considerar ventas que NO estén canceladas para los cálculos financieros
-                    val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoy && it.estado != "CANCELADA" }
-                    val ventasSemana = todasLasVentas.filter { it.fecha >= iniSemana && it.estado != "CANCELADA" }
-                    val ventasBloqueTotal = todasLasVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total }
-
-                    // Cálculo por día de la semana (Lunes a Sábado)
-                    val ventasPorDia = MutableList(6) { 0.0 }
-                    val calDia = Calendar.getInstance()
-                    ventasSemana.forEach { venta ->
-                        calDia.timeInMillis = venta.fecha
-                        val dayOfWeek = calDia.get(Calendar.DAY_OF_WEEK)
-                        val index = when (dayOfWeek) {
-                            Calendar.MONDAY -> 0
-                            Calendar.TUESDAY -> 1
-                            Calendar.WEDNESDAY -> 2
-                            Calendar.THURSDAY -> 3
-                            Calendar.FRIDAY -> 4
-                            Calendar.SATURDAY -> 5
-                            else -> -1
-                        }
-                        if (index != -1) {
-                            ventasPorDia[index] += venta.total
-                        }
-                    }
-
-                    val totalHoy = ventasHoy.sumOf { it.total }
-                    val clientesHoy = ventasHoy.map { it.clienteId }.distinct().size
-                    val ticketPromedio = if (ventasHoy.isNotEmpty()) totalHoy / ventasHoy.size else 0.0
-
-                    _uiState.update { it.copy(
-                        isLoading = false,
-                        ventaDia = totalHoy,
-                        clientesDia = clientesHoy,
-                        ticketPromedioDia = ticketPromedio,
-                        ventaSemana = ventasSemana.sumOf { v -> v.total },
-                        ventaBloque = ventasBloqueTotal,
-                        ventasPorDiaSemana = ventasPorDia,
-                        ventasHoy = ventasHoy
-                    ) }
+                    if (index != -1) ventasPorDia[index] += venta.total
                 }
+
+                val totalHoy = ventasHoy.sumOf { it.total }
+                val ticketPromedio = if (ventasHoy.isNotEmpty()) totalHoy / ventasHoy.size else 0.0
+
+                _uiState.update { it.copy(
+                    isLoading = false,
+                    ventaDia = totalHoy,
+                    clientesDia = ventasHoy.map { it.clienteId }.distinct().size,
+                    ticketPromedioDia = ticketPromedio,
+                    ventaSemana = ventasSemana.sumOf { it.total }, // ✅ Regresado a VENTA BRUTA
+                    ventaBloque = totalVentaBloque,              // ✅ Regresado a VENTA BRUTA
+                    ventasPorDiaSemana = ventasPorDia,
+                    ventasHoy = ventasHoy,
+                    gastosHoy = todosLosGastos.filter { it.fecha >= iniHoy }.map { 
+                        Gasto(it.id, it.monto, it.categoria, it.descripcion, it.fecha, it.vendedorId, it.rutaNombre)
+                    },
+                    totalGastosHoy = totalGastoHoy
+                ) }
+            }.collect()
         }
     }
 
     private fun escucharVentasNube() {
-        viewModelScope.launch {
-            val user = usuarioRepository.obtenerUsuarioActual()
-            val puesto = user?.puestoTrabajo?.trim() ?: ""
-            val esVendedor = puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta"
-            val idParaSync = if (esVendedor) userId else ""
+        usuarioRepository.getUsuarioActual()
+            .onEach { user ->
+                if (user == null) return@onEach
+                
+                val puesto = user.puestoTrabajo?.trim() ?: ""
+                val esVendedor = puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta"
+                val idParaSync = if (esVendedor) userId else ""
 
-            val cal = Calendar.getInstance()
-            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
-            val inicio = cal.time
+                val cal = Calendar.getInstance()
+                cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+                val inicio = cal.time
 
-            salesListener?.remove()
-            
-            var query: com.google.firebase.firestore.Query = db.collection("ventas")
-                .whereGreaterThanOrEqualTo("fecha", inicio)
-            
-            if (esVendedor) {
-                query = query.whereEqualTo("vendedorId", userId)
-            }
+                salesListener?.remove()
+                
+                var query: com.google.firebase.firestore.Query = db.collection("ventas")
+                    .whereGreaterThanOrEqualTo("fecha", inicio)
+                
+                if (esVendedor) {
+                    query = query.whereEqualTo("vendedorId", userId)
+                }
 
-            salesListener = query.addSnapshotListener { snapshot, _ ->
-                if (snapshot != null) {
-                    viewModelScope.launch {
-                        ventaRepository.descargarVentasDia(idParaSync)
+                salesListener = query.addSnapshotListener { snapshot, _ ->
+                    if (snapshot != null) {
+                        viewModelScope.launch {
+                            ventaRepository.descargarVentasDia(idParaSync)
+                        }
                     }
                 }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun observarGastosLocal() {
+        gastoRepository.obtenerGastosHoy(userId)
+            .onEach { entidades ->
+                val lista = entidades.map { 
+                    Gasto(
+                        id = it.id,
+                        monto = it.monto,
+                        categoria = it.categoria,
+                        descripcion = it.descripcion,
+                        fecha = it.fecha,
+                        vendedorId = it.vendedorId,
+                        rutaNombre = it.rutaNombre
+                    )
+                }
+                _uiState.update { it.copy(
+                    gastosHoy = lista,
+                    totalGastosHoy = lista.sumOf { g -> g.monto }
+                ) }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    fun registrarGasto(monto: Double, categoria: String, descripcion: String, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isLoading = true) }
+                val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
+                
+                val gastoEntity = GastoEntity(
+                    id = UUID.randomUUID().toString(),
+                    monto = monto,
+                    categoria = categoria,
+                    descripcion = descripcion,
+                    fecha = ahoraReal,
+                    vendedorId = userId,
+                    vendedorNombre = _uiState.value.nombreVendedor,
+                    rutaNombre = _uiState.value.rutaNombre,
+                    sincronizado = false
+                )
+
+                // 1. Guardar localmente de inmediato (UI se actualizará por el Flow)
+                gastoRepository.guardarGastoLocal(gastoEntity)
+                
+                _uiState.update { it.copy(isLoading = false) }
+                onSuccess()
+
+                // 2. Intentar sincronizar en segundo plano
+                viewModelScope.launch(Dispatchers.IO) {
+                    gastoRepository.sincronizarPendientes()
+                }
+
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error registrando gasto", e)
+                _uiState.update { it.copy(isLoading = false, error = "Error al guardar gasto: ${e.message}") }
             }
         }
     }
@@ -383,5 +482,7 @@ class DashboardVendedorViewModel(
     override fun onCleared() {
         super.onCleared()
         salesListener?.remove()
+        expensesListener?.remove()
+        configPagosListener?.remove()
     }
 }

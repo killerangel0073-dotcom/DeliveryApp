@@ -36,7 +36,8 @@ data class VentaEntity(
     val estado: String = "pagada", // "pagada", "CANCELADA"
     val motivoCancelacion: String? = null,
     val canceladoPorNombre: String? = null,
-    val fechaCancelacion: Long? = null
+    val fechaCancelacion: Long? = null,
+    val motivoVisita: String? = null // 🔥 Nuevo: Motivo de visita sin venta (Tienda cerrada, etc.)
 )
 
 @Entity(

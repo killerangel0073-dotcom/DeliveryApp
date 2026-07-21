@@ -256,7 +256,7 @@ class MapaViewModel(
                             nombreNegocio = ent.nombreNegocio,
                             ubicacionLat = ent.ubicacionLat,
                             ubicacionLng = ent.ubicacionLon,
-                            valor = ent.medio,
+                            valor = ent.valorCliente,
                             nombreDueno = ent.nombreDueno,
                             telefono = ent.telefono,
                             fotoUrl = ent.fotografiaUrl

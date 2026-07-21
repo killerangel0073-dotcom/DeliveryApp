@@ -1,11 +1,17 @@
 package com.gruposanangel.delivery.ui.screens
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -128,16 +134,32 @@ fun PaginaVentaContent(ticketsHoy: List<TicketVenta>, isLoading: Boolean = false
 @Composable
 fun CardTicketRuta(ticket: TicketVenta, fmtFecha: SimpleDateFormat, fmtMoneda: NumberFormat, onClick: (TicketVenta) -> Unit) {
     val esCancelada = ticket.estado == "CANCELADA"
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f, 
+        animationSpec = spring(dampingRatio = 0.5f),
+        label = "cardScale"
+    )
     
     Card(
         Modifier
             .fillMaxWidth()
-            .clickable { onClick(ticket) }, 
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = rememberRipple(bounded = true, color = Color.Red.copy(alpha = 0.12f)),
+                onClick = { onClick(ticket) }
+            ), 
         shape = RoundedCornerShape(24.dp), 
         colors = CardDefaults.cardColors(
             containerColor = if (esCancelada) Color(0xFFEEEEEE) else Color(0xFFF8F9FA)
         ), 
-        elevation = CardDefaults.cardElevation(1.dp)
+        elevation = CardDefaults.cardElevation(if (isPressed) 1.dp else 2.dp)
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(

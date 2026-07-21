@@ -54,6 +54,9 @@ import java.util.Date
 import java.util.Calendar
 import java.util.Locale
 import java.text.SimpleDateFormat
+import java.text.NumberFormat
+
+private val RojoDelisa = Color(0xFFE53935)
 
 // 🔹 Modelo de notificación/carga
 data class Notificacion(
@@ -63,7 +66,10 @@ data class Notificacion(
     val fecha: String,
     val timestamp: Long = 0L, // Para ordenamiento correcto
     val esCarga: Boolean = false,
-    val aceptada: Boolean = false
+    val aceptada: Boolean = false,
+    val estado: String = "PENDIENTE",
+    val monto: Double = 0.0, // 🔥 NUEVO: Para ver el valor de la carga
+    val motivo: String? = null // 🔥 NUEVO: Para el motivo de cancelación
 )
 
 /**
@@ -110,7 +116,8 @@ fun PantallaNotificaciones(navController: NavController) {
                 id = noti.id,
                 nombreCarga = noti.titulo,
                 plantillaProductos = emptyList(),
-                aceptada = noti.aceptada
+                aceptada = noti.aceptada,
+                estado = noti.estado
             )
             navController.currentBackStackEntry?.savedStateHandle?.set("carga", carga)
 
@@ -286,16 +293,17 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
     val isPressed by interactionSource.collectIsPressedAsState()
     
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        targetValue = if (isPressed) 0.98f else 1f,
         label = "scale"
     )
 
-    val esEmergencia = noti.titulo.contains("EMERGENCIA") || noti.titulo.contains("MANUAL")
-    val borderColor = when {
-        esEmergencia -> Color.Red.copy(alpha = 0.5f)
-        !noti.aceptada && noti.esCarga -> Color.Red.copy(alpha = 0.3f)
-        else -> Color.Transparent
+    val esCancelada = noti.estado == "CANCELADA"
+    val esAceptada = noti.aceptada && !esCancelada
+    
+    val statusColor = when {
+        esCancelada -> Color(0xFFFBC02D) // Amarillo para cancelado como pidió el usuario
+        esAceptada -> Color(0xFF2E7D32)
+        else -> RojoDelisa
     }
 
     Card(
@@ -304,101 +312,110 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
             .graphicsLayer { 
                 scaleX = scale
                 scaleY = scale 
+                alpha = if (esCancelada) 0.8f else 1f
             }
             .border(
-                width = if (esEmergencia || (!noti.aceptada && noti.esCarga)) 1.5.dp else 0.dp,
-                color = borderColor,
-                shape = RoundedCornerShape(24.dp)
+                width = if (esAceptada) 0.dp else 2.dp,
+                color = if (esAceptada) Color.Transparent else statusColor,
+                shape = RoundedCornerShape(20.dp)
             )
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = Color.Red.copy(0.1f)),
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = statusColor),
                 onClick = onClick
             ),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (esEmergencia) Color(0xFFFFF5F5) else Color.White
-        ),
-        elevation = CardDefaults.cardElevation(if (isPressed) 1.dp else if (noti.aceptada && !esEmergencia) 1.dp else 4.dp)
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(if (isPressed) 1.dp else 2.dp)
     ) {
-        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            // Barra de acento lateral (Sutil)
             Box(
                 modifier = Modifier
-                    .size(54.dp)
-                    .clip(CircleShape)
-                    .background(
-                        when {
-                            esEmergencia -> Color.Red
-                            noti.esCarga && noti.aceptada -> Color(0xFFE8F5E9)
-                            noti.esCarga -> Color.Red.copy(alpha = 0.08f)
-                            else -> Color(0xFFF1F2F6)
-                        }
-                    ),
-                contentAlignment = Alignment.Center
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .width(4.dp)
+                    .background(statusColor)
+            )
+
+            Row(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .padding(start = 8.dp) // Espacio para la barra lateral
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                val icon = when {
-                    esEmergencia -> Icons.Default.FlashOn
-                    noti.esCarga && noti.aceptada -> Icons.Default.CheckCircle
-                    noti.esCarga -> Icons.Default.Inventory
-                    noti.titulo.contains("Pedido") -> Icons.Default.LocalShipping
-                    else -> Icons.Default.Notifications
-                }
-                val tint = when {
-                    esEmergencia -> Color.White
-                    noti.esCarga && noti.aceptada -> Color(0xFF2E7D32)
-                    noti.esCarga -> Color.Red
-                    else -> Color.Gray
-                }
-                Icon(icon, null, tint = tint, modifier = Modifier.size(26.dp))
-            }
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                    Text(
-                        text = noti.titulo.uppercase(),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Black,
-                        color = if (esEmergencia || (noti.esCarga && !noti.aceptada)) Color.Red else Color.Gray,
-                        letterSpacing = 0.5.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = noti.fecha,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontSize = 9.sp,
-                        color = Color.Gray,
-                        textAlign = TextAlign.End
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = noti.mensaje,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (esEmergencia) FontWeight.ExtraBold else FontWeight.Bold,
-                    color = Color.Black,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-                
-                if (esEmergencia) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(color = Color.Red, shape = RoundedCornerShape(6.dp)) {
-                            Text(
-                                text = "AUTORIZADO OFFLINE",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Icon(Icons.Default.SyncDisabled, null, tint = Color.Gray, modifier = Modifier.size(14.dp))
+                // Icono Circular Minimalista
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(statusColor.copy(alpha = 0.08f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val icon = when {
+                        esCancelada -> Icons.Default.Cancel
+                        esAceptada -> Icons.Default.CheckCircle
+                        else -> Icons.Default.Inventory
                     }
-                } else if (noti.esCarga && !noti.aceptada) {
-                    Spacer(Modifier.height(8.dp))
-                    Surface(color = Color.Red, shape = RoundedCornerShape(8.dp)) {
-                        Text(text = "PENDIENTE DE ACEPTAR", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 9.sp, fontWeight = FontWeight.Black, color = Color.White)
+                    Icon(icon, null, tint = statusColor, modifier = Modifier.size(24.dp))
+                }
+
+                Spacer(Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = noti.titulo.uppercase(),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, letterSpacing = 1.sp),
+                            color = if (esCancelada) Color.DarkGray else Color.DarkGray,
+                            modifier = Modifier.weight(1f)
+                        )
+                        // Etiqueta de estado pequeña y limpia
+                        Text(
+                            text = when {
+                                esCancelada -> "ANULADA"
+                                esAceptada -> "RECIBIDA"
+                                else -> "PENDIENTE"
+                            },
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            color = statusColor
+                        )
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+
+                    Text(
+                        text = noti.mensaje,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = if (!esAceptada && !esCancelada) FontWeight.Bold else FontWeight.Normal,
+                            textDecoration = if (esCancelada) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
+                        ),
+                        color = if (esCancelada) Color.Gray else Color.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    if (esCancelada && !noti.motivo.isNullOrBlank()) {
+                        Text(
+                            text = "MOTIVO: ${noti.motivo}",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = Color.Red.copy(alpha = 0.7f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    if (noti.monto > 0) {
+                        val formatoMoneda = remember { NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX")) }
+                        Text(
+                            text = formatoMoneda.format(noti.monto),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (esCancelada) Color.Gray else RojoDelisa,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                 }
             }

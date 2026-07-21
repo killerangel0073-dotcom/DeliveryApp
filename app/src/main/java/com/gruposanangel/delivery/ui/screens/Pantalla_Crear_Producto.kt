@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.text.style.TextAlign
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.gruposanangel.delivery.R
@@ -65,14 +66,27 @@ fun CrearProductoScreen(navController: NavController) {
         isLoading = isLoading, errorMessage = errorMessage, imageBitmap = imageBitmap,
         onBack = { navController.popBackStack() },
         onImageSourceSelected = { isCamera -> if (isCamera) launcherCamera.launch(null) else launcherGallery.launch("image/*") },
-        onGuardar = { n, m, c, s, d, p ->
+        onGuardar = { n, m, c, s, d, p, cu, ud, gv, pc ->
             if (imageFile == null) { errorMessage = "Imagen requerida"; scope.launch { delay(1500); errorMessage = null }; return@CrearProductoContent }
             if (!isPreview) {
                 scope.launch {
                     isLoading = true; try {
                         val ref = FirebaseStorage.getInstance().reference.child("productos/${UUID.randomUUID()}.jpg")
                         ref.putFile(Uri.fromFile(imageFile!!)).await(); val url = ref.downloadUrl.await().toString()
-                        FirebaseFirestore.getInstance().collection("producto").add(mapOf("nombre" to n, "marca" to m, "categoria" to c, "subcategoria" to s, "descripcion" to d, "precio" to p, "imagenUrl" to url, "activo" to true)).await()
+                        FirebaseFirestore.getInstance().collection("producto").add(mapOf(
+                            "nombre" to n, 
+                            "marca" to m, 
+                            "categoria" to c, 
+                            "subcategoria" to s, 
+                            "descripcion" to d, 
+                            "precio" to p, 
+                            "imagenUrl" to url, 
+                            "activo" to true,
+                            "cantidadUnitario" to (cu.toLongOrNull() ?: 0L),
+                            "unidadesPorDisplay" to (ud.toLongOrNull() ?: 0L),
+                            "gramosVenta" to (gv.toLongOrNull() ?: 0L),
+                            "precioCompra" to pc
+                        )).await()
                         navController.popBackStack()
                     } catch (e: Exception) { errorMessage = "Error al guardar" } finally { isLoading = false }
                 }
@@ -83,8 +97,12 @@ fun CrearProductoScreen(navController: NavController) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CrearProductoContent(isLoading: Boolean, errorMessage: String?, imageBitmap: Bitmap?, onBack: () -> Unit, onImageSourceSelected: (Boolean) -> Unit, onGuardar: (String, String, String, String, String, Double) -> Unit) {
+fun CrearProductoContent(isLoading: Boolean, errorMessage: String?, imageBitmap: Bitmap?, onBack: () -> Unit, onImageSourceSelected: (Boolean) -> Unit, onGuardar: (String, String, String, String, String, Double, String, String, String, Double) -> Unit) {
     var nombre by remember { mutableStateOf(TextFieldValue("")) }; var descripcion by remember { mutableStateOf(TextFieldValue("")) }; var precio by remember { mutableStateOf(TextFieldValue("")) }
+    var cantidadUnitario by remember { mutableStateOf(TextFieldValue("")) }
+    var unidadesPorDisplay by remember { mutableStateOf(TextFieldValue("")) }
+    var gramosVenta by remember { mutableStateOf(TextFieldValue("")) }
+    var precioCompra by remember { mutableStateOf(TextFieldValue("")) }
     var marca by rememberSaveable { mutableStateOf("") }; var categoria by rememberSaveable { mutableStateOf("") }; var subcategoria by rememberSaveable { mutableStateOf("") }; var showDialog by remember { mutableStateOf(false) }
     Scaffold(containerColor = Color(0xFFF8F9FA)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -108,12 +126,48 @@ fun CrearProductoContent(isLoading: Boolean, errorMessage: String?, imageBitmap:
                     DropdownField("Categoría", categoria, categoriasPorMarca[marca].orEmpty(), Icons.Outlined.Category, enabled = marca.isNotEmpty()) { categoria = it; subcategoria = "" }
                     DropdownField("Subcategoría", subcategoria, subcategoriasPorCategoria[categoria].orEmpty(), Icons.Outlined.Layers, enabled = categoria.isNotEmpty()) { subcategoria = it }
                     ModernField("Descripción", descripcion, Icons.Outlined.Description, maxLines = 3) { descripcion = it }
-                    ModernField("Precio", precio, Icons.Outlined.AttachMoney, keyboardType = KeyboardType.Number) { if (it.text.all { c -> c.isDigit() || c == '.' }) precio = it }
+                    
+                    Text(
+                        "CONFIGURACIÓN DE COMPRA",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Black,
+                        color = Color.Red,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        textAlign = TextAlign.Center
+                    )
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            ModernField("Gramos Bolsa", cantidadUnitario, Icons.Outlined.Scale, keyboardType = KeyboardType.Number) {
+                                if (it.text.all { c -> c.isDigit() }) cantidadUnitario = it
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            ModernField("Display", unidadesPorDisplay, Icons.Outlined.Inventory2, keyboardType = KeyboardType.Number) { 
+                                if (it.text.all { c -> c.isDigit() }) unidadesPorDisplay = it 
+                            }
+                        }
+                    }
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            ModernField("Precio Compra", precioCompra, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number, prefix = "$") {
+                                if (it.text.all { c -> c.isDigit() || c == '.' }) precioCompra = it
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            ModernField("Gramos Bolsita", gramosVenta, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number) {
+                                if (it.text.all { c -> c.isDigit() }) gramosVenta = it
+                            }
+                        }
+                    }
+
+                    ModernField("Precio", precio, Icons.Outlined.AttachMoney, keyboardType = KeyboardType.Number, prefix = "$") { if (it.text.all { c -> c.isDigit() || c == '.' }) precio = it }
                 }
             }
             if (errorMessage != null) { Text(errorMessage, color = Color.Red, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp)) }
             Spacer(Modifier.height(24.dp)); if (isLoading) { CircularProgressIndicator(color = Color.Red) }
-            else { Button(onClick = { onGuardar(nombre.text, marca, categoria, subcategoria, descripcion.text, precio.text.toDoubleOrNull() ?: 0.0) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("CREAR PRODUCTO", fontWeight = FontWeight.ExtraBold) } }
+            else { Button(onClick = { onGuardar(nombre.text, marca, categoria, subcategoria, descripcion.text, precio.text.toDoubleOrNull() ?: 0.0, cantidadUnitario.text, unidadesPorDisplay.text, gramosVenta.text, precioCompra.text.toDoubleOrNull() ?: 0.0) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("CREAR PRODUCTO", fontWeight = FontWeight.ExtraBold) } }
         }
     }
     if (showDialog) { AlertDialog(onDismissRequest = { showDialog = false }, containerColor = Color.White, title = { Text("Imagen") }, confirmButton = { Row { TextButton(onClick = { onImageSourceSelected(true); showDialog = false }) { Text("CÁMARA", color = Color.Red) }; TextButton(onClick = { onImageSourceSelected(false); showDialog = false }) { Text("GALERÍA", color = Color.Red) } } }) }
@@ -130,8 +184,20 @@ fun DropdownField(label: String, value: String, options: List<String>, icon: Ima
 }
 
 @Composable
-fun ModernField(label: String, value: TextFieldValue, icon: ImageVector, maxLines: Int = 1, keyboardType: KeyboardType = KeyboardType.Text, onChange: (TextFieldValue) -> Unit) {
-    OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) }, leadingIcon = { Icon(icon, null, tint = Color.Red) }, maxLines = maxLines, keyboardOptions = KeyboardOptions(keyboardType = keyboardType), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red))
+fun ModernField(label: String, value: TextFieldValue, icon: ImageVector, maxLines: Int = 1, prefix: String? = null, keyboardType: KeyboardType = KeyboardType.Text, onChange: (TextFieldValue) -> Unit) {
+    OutlinedTextField(
+        value = value, 
+        onValueChange = onChange, 
+        label = { Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }, 
+        leadingIcon = { Icon(icon, null, tint = Color.Red) }, 
+        prefix = if (prefix != null) { { Text(prefix) } } else null,
+        maxLines = maxLines,
+        singleLine = maxLines == 1,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType), 
+        modifier = Modifier.fillMaxWidth(), 
+        shape = RoundedCornerShape(16.dp), 
+        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+    )
 }
 
 fun createImageFile2(context: android.content.Context): File { val dir = File(context.filesDir, "productos"); if (!dir.exists()) dir.mkdirs(); return File(dir, "cp_${System.currentTimeMillis()}.jpg") }
@@ -139,5 +205,5 @@ fun createImageFile2(context: android.content.Context): File { val dir = File(co
 @Preview(showBackground = true, showSystemUi = true, name = "Crear Producto - Formulario")
 @Composable
 fun CrearProductoPreview() {
-    DeliveryTheme { CrearProductoContent(false, null, null, {}, {}, {_,_,_,_,_,_ ->}) }
+    DeliveryTheme { CrearProductoContent(false, null, null, {}, {}, {_,_,_,_,_,_,_,_,_,_ ->}) }
 }

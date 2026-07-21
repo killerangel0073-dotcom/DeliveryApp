@@ -77,21 +77,26 @@ fun MapaScreen(
         if (mapIsReady) bitmapDescriptorFromPng(context, R.drawable.marcador_vendedor, 120, 150) else null
     }
 
-    // ✅ CORRECCIÓN TAMAÑO ICONOS CLIENTES (100x160)
-    // Usamos una función local especial para no romper tus otras pantallas
+    // ✅ CORRECCIÓN LÓGICA DE COLORES Y TAMAÑOS
     val iconAlto = remember(mapIsReady) {
         if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorverde, 100, 160) else null
     }
     val iconMedio = remember(mapIsReady) {
-        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorrojo, 100, 160) else null
-    }
-    val iconBajo = remember(mapIsReady) {
         if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadoramarillo, 100, 160) else null
     }
+    val iconBajo = remember(mapIsReady) {
+        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorrojo, 100, 160) else null
+    }
 
-    // 🟢 ICONO PARA CLIENTE SELECCIONADO (Usando el verde personalizado)
-    val iconSeleccionado = remember(mapIsReady) {
-        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorverde, 100, 160) else null
+    // 🔍 ICONOS PARA ESTADO SELECCIONADO (Más grandes: 130x208)
+    val iconAltoSel = remember(mapIsReady) {
+        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorverde, 130, 208) else null
+    }
+    val iconMedioSel = remember(mapIsReady) {
+        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadoramarillo, 130, 208) else null
+    }
+    val iconBajoSel = remember(mapIsReady) {
+        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorrojo, 130, 208) else null
     }
 
     val mostrarTarjetaInferior = uiState.selectedCliente != null || uiState.vendedorSeleccionadoRuta != null
@@ -205,10 +210,10 @@ fun MapaScreen(
                 uiState.clientes.forEach { cliente ->
                     val isSelected = uiState.selectedCliente?.id == cliente.id
 
-                    val icon = if (isSelected) iconSeleccionado else when (cliente.valor.lowercase()) {
-                        "alto" -> iconAlto
-                        "medio" -> iconMedio
-                        "bajo" -> iconBajo
+                    val icon = when (cliente.valor.lowercase()) {
+                        "alto" -> if (isSelected) iconAltoSel else iconAlto
+                        "medio" -> if (isSelected) iconMedioSel else iconMedio
+                        "bajo" -> if (isSelected) iconBajoSel else iconBajo
                         else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
                     }
                     val mState = remember(cliente.id) { MarkerState(LatLng(cliente.ubicacionLat, cliente.ubicacionLng)) }

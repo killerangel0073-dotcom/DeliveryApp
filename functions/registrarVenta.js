@@ -23,11 +23,20 @@ const registrarVenta = functions.https.onRequest(async (req, res) => {
         fueraDeRango,
         latitudVenta,
         longitudVenta,
-        fecha // 🔥 Recibimos la fecha original del dispositivo
+        fecha, // 🔥 Recibimos la fecha original del dispositivo
+        motivoVisita // 🔥 Nuevo: Motivo de visita sin venta
       } = req.body;
 
-      if (!ventaLocalId || !clienteId || !clienteNombre || !Array.isArray(productos) || productos.length === 0 || !metodoPago || !vendedorId || !almacenVendedorId) {
-        return res.status(400).send({ error: 'Datos de venta incompletos' });
+      // 🛡️ Validación Flexibilizada: Permitir productos vacíos SOLO SI hay un motivo de visita
+      const tieneProductos = Array.isArray(productos) && productos.length > 0;
+      const tieneMotivo = typeof motivoVisita === 'string' && motivoVisita.length > 0;
+
+      if (!ventaLocalId || !clienteId || !clienteNombre || !metodoPago || !vendedorId || !almacenVendedorId) {
+        return res.status(400).send({ error: 'Datos básicos incompletos' });
+      }
+
+      if (!tieneProductos && !tieneMotivo) {
+        return res.status(400).send({ error: 'Debe incluir productos o un motivo de visita' });
       }
 
       const almacenIdLimpio = almacenVendedorId.trim();
@@ -110,7 +119,8 @@ const registrarVenta = functions.https.onRequest(async (req, res) => {
         latitudVenta: latitudVenta || 0,
         longitudVenta: longitudVenta || 0,
         alertaPrecio: alertaPrecioGlobal, // 🔥 Flag de Auditoría
-        precioMaestro: alertaPrecioGlobal ? precioMaestroAudit : null // 🔥 Referencia de precios maestros
+        precioMaestro: alertaPrecioGlobal ? precioMaestroAudit : null, // 🔥 Referencia de precios maestros
+        motivoVisita: motivoVisita || null // 🔥 Guardado en Firestore
       });
 
       // 🔹 Agregar productos y actualizar stock

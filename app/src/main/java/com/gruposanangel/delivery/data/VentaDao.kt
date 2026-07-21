@@ -47,6 +47,9 @@ interface VentaDao {
     @Query("SELECT * FROM ventas WHERE vendedorId = :vendedorId AND fecha BETWEEN :inicio AND :fin ORDER BY fecha DESC")
     fun obtenerVentasPorPeriodoFlow(vendedorId: String, inicio: Long, fin: Long): Flow<List<VentaEntity>>
 
+    @Query("SELECT * FROM ventas WHERE almacenId = :almacenId AND fecha BETWEEN :inicio AND :fin ORDER BY fecha DESC")
+    fun obtenerVentasPorAlmacenPeriodoFlow(almacenId: String, inicio: Long, fin: Long): Flow<List<VentaEntity>>
+
     @Query("SELECT * FROM ventas WHERE fecha BETWEEN :inicio AND :fin ORDER BY fecha DESC")
     fun obtenerTodasVentasPorPeriodoFlow(inicio: Long, fin: Long): Flow<List<VentaEntity>>
 
@@ -82,4 +85,10 @@ interface VentaDao {
         eliminarDetallesPorVenta(venta.id)
         detalles.forEach { insertarDetalle(it) }
     }
+
+    @Query("SELECT * FROM ventas WHERE clienteId = :clienteId AND total > 0 AND UPPER(estado) NOT IN ('CANCELADA', 'ANULADA') ORDER BY fecha DESC LIMIT 1")
+    suspend fun obtenerUltimaVentaConProductosPorCliente(clienteId: String): VentaEntity?
+
+    @Query("SELECT MAX(fecha) FROM ventas WHERE almacenId = :almacenId")
+    suspend fun obtenerFechaUltimaVentaLocal(almacenId: String): Long?
 }

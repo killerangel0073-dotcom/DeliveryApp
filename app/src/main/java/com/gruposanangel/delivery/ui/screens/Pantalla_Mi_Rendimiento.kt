@@ -1,201 +1,602 @@
 package com.gruposanangel.delivery.ui.screens
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.gruposanangel.delivery.RepositoryUsuario
+import com.gruposanangel.delivery.VentaRepository
+import com.gruposanangel.delivery.data.VentaEntity
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
 import java.util.*
+
+private val RojoDelisa = Color(0xFFE53935)
+private val NegroPremium = Color(0xFF1E1E24)
+private val GrisFondoPremium = Color(0xFFF6F8FA)
+private val VerdeExito = Color(0xFF2E7D32)
+
+data class RendimientoUiState(
+    val isLoading: Boolean = false,
+    val nombreVendedor: String = "",
+    val totalVentaSemana: Double = 0.0,
+    val diasTrabajados: Int = 0,
+    val sueldoBaseAcumulado: Double = 0.0,
+    val comisionAcumulada: Double = 0.0,
+    val totalGaneSemana: Double = 0.0,
+    val fechaInicioSemana: Long = 0L,
+    val desgloseDias: List<DiaGane> = emptyList(),
+    val sueldoBaseConfig: Double = 300.0,
+    val comisionConfig: Double = 3.0
+)
+
+data class DiaGane(
+    val nombre: String,
+    val fecha: Long,
+    val venta: Double,
+    val comision: Double,
+    val trabajado: Boolean
+)
+
+class RendimientoViewModel(
+    private val ventaRepository: VentaRepository,
+    private val usuarioRepository: RepositoryUsuario,
+    private val userId: String
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(RendimientoUiState())
+    val uiState: StateFlow<RendimientoUiState> = _uiState.asStateFlow()
+
+    private val _fechaFiltro = MutableStateFlow<Long?>(null)
+    private val _configPagos = MutableStateFlow(Pair(300.0, 3.0))
+
+    init {
+        // Escuchar configuración global de pagos
+        val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+        db.collection("config").document("pagos")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    val sueldo = snapshot.getDouble("sueldo_base") ?: 300.0
+                    val comision = snapshot.getDouble("comision_porcentaje") ?: 3.0
+                    _configPagos.value = Pair(sueldo, comision)
+                }
+            }
+
+        combine(_fechaFiltro.filterNotNull(), _configPagos) { fechaLunes, config ->
+            val (sueldoBase, comisionPct) = config
+            val finMs = fechaLunes + (7L * 24 * 60 * 60 * 1000) - 1
+            
+            _uiState.update { it.copy(
+                isLoading = true, 
+                fechaInicioSemana = fechaLunes,
+                sueldoBaseConfig = sueldoBase,
+                comisionConfig = comisionPct
+            ) }
+
+            // Cargar datos del perfil si no están
+            viewModelScope.launch {
+                val user = usuarioRepository.obtenerUsuarioLocal(userId)
+                _uiState.update { it.copy(nombreVendedor = user?.nombre ?: "Vendedor") }
+                ventaRepository.sincronizarVentasPeriodo(userId, fechaLunes, finMs)
+            }
+
+            ventaRepository.obtenerVentasPorPeriodoFlow(userId, fechaLunes, finMs)
+                .map { ventas -> procesarRendimiento(fechaLunes, ventas, sueldoBase, comisionPct) }
+        }.flatMapLatest { it }
+        .onEach { nuevoEstado ->
+            _uiState.update { nuevoEstado }
+        }.launchIn(viewModelScope)
+
+        // Inicializar con la semana actual
+        cambiarSemana(System.currentTimeMillis())
+    }
+
+    private fun procesarRendimiento(
+        fechaLunes: Long, 
+        ventas: List<VentaEntity>,
+        sueldoBaseDia: Double,
+        comisionPct: Double
+    ): RendimientoUiState {
+        val nombresDias = listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+        val diasGane = mutableListOf<DiaGane>()
+        
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { 
+            timeInMillis = fechaLunes
+        }
+
+        var totalVenta = 0.0
+        var diasConActividad = 0
+
+        for (i in 0..6) {
+            val inicioDia = cal.timeInMillis
+            val finDia = inicioDia + (24L * 60 * 60 * 1000) - 1
+            
+            val ventasDia = ventas.filter { it.fecha in inicioDia..finDia && it.estado != "CANCELADA" }
+            val ventaMonto = ventasDia.sumOf { it.total }
+            
+            val trabajado = ventasDia.isNotEmpty()
+            if (trabajado) diasConActividad++
+
+            diasGane.add(DiaGane(
+                nombre = nombresDias[i],
+                fecha = inicioDia,
+                venta = ventaMonto,
+                comision = ventaMonto * (comisionPct / 100.0),
+                trabajado = trabajado
+            ))
+            
+            totalVenta += ventaMonto
+            cal.add(Calendar.DAY_OF_MONTH, 1)
+        }
+
+        val sueldoBaseTotal = diasConActividad * sueldoBaseDia
+        val comisionTotal = totalVenta * (comisionPct / 100.0)
+
+        return _uiState.value.copy(
+            isLoading = false,
+            totalVentaSemana = totalVenta,
+            diasTrabajados = diasConActividad,
+            sueldoBaseAcumulado = sueldoBaseTotal,
+            comisionAcumulada = comisionTotal,
+            totalGaneSemana = sueldoBaseTotal + comisionTotal,
+            desgloseDias = diasGane,
+            sueldoBaseConfig = sueldoBaseDia,
+            comisionConfig = comisionPct
+        )
+    }
+
+    fun cambiarSemana(nuevaFecha: Long) {
+        viewModelScope.launch {
+            val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { 
+                timeInMillis = nuevaFecha 
+            }
+            while (cal.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) {
+                cal.add(Calendar.DAY_OF_MONTH, -1)
+            }
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            _fechaFiltro.value = cal.timeInMillis
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Pantalla_Mi_Rendimiento(
     navController: NavController,
-    nombreVendedor: String,
-    ventaDia: Double,
-    clientesDia: Int
+    ventaRepository: VentaRepository,
+    usuarioRepository: RepositoryUsuario,
+    userId: String
 ) {
+    val context = LocalContext.current
+    val viewModel: RendimientoViewModel = viewModel(
+        factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = 
+                RendimientoViewModel(ventaRepository, usuarioRepository, userId) as T
+        }
+    )
+    val uiState by viewModel.uiState.collectAsState()
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
-    val comision = ventaDia * 0.03
-    val efectivoCaja = ventaDia - comision
+    
+    var showDatePicker by remember { mutableStateOf(false) }
+    
+    val dfRange = remember { SimpleDateFormat("dd MMM", Locale("es", "MX")).apply { timeZone = TimeZone.getTimeZone("UTC") } }
+    val rangoFechas = remember(uiState.fechaInicioSemana) {
+        val calEnd = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { 
+            timeInMillis = uiState.fechaInicioSemana
+            add(Calendar.DAY_OF_YEAR, 6)
+        }
+        "${dfRange.format(Date(uiState.fechaInicioSemana))} - ${dfRange.format(calEnd.time)}".uppercase()
+    }
+
+    if (showDatePicker) {
+        val dateRangePickerState = rememberDateRangePickerState(
+            initialSelectedStartDateMillis = uiState.fechaInicioSemana,
+            initialSelectedEndDateMillis = uiState.fechaInicioSemana + (6L * 24 * 60 * 60 * 1000)
+        )
+
+        LaunchedEffect(dateRangePickerState.selectedStartDateMillis, dateRangePickerState.selectedEndDateMillis) {
+            val selection = dateRangePickerState.selectedEndDateMillis ?: dateRangePickerState.selectedStartDateMillis
+            selection?.let { millis ->
+                val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = millis }
+                while (cal.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) { cal.add(Calendar.DAY_OF_MONTH, -1) }
+                val lunesMs = cal.timeInMillis
+                cal.add(Calendar.DAY_OF_MONTH, 6)
+                val domingoMs = cal.timeInMillis
+                if (dateRangePickerState.selectedStartDateMillis != lunesMs || dateRangePickerState.selectedEndDateMillis != domingoMs) {
+                    dateRangePickerState.setSelection(lunesMs, domingoMs)
+                }
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showDatePicker = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+            modifier = Modifier.fillMaxWidth(0.95f),
+            confirmButton = {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { showDatePicker = false }) {
+                        Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Button(
+                        onClick = {
+                            dateRangePickerState.selectedStartDateMillis?.let { viewModel.cambiarSemana(it) }
+                            showDatePicker = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("ACEPTAR", fontWeight = FontWeight.Black)
+                    }
+                }
+            },
+            containerColor = Color.White,
+            text = {
+                Box(modifier = Modifier.fillMaxWidth().height(450.dp)) {
+                    DateRangePicker(
+                        state = dateRangePickerState,
+                        title = { Text("Selecciona la semana", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold) },
+                        showModeToggle = false,
+                        headline = {
+                            val start = dateRangePickerState.selectedStartDateMillis
+                            val end = dateRangePickerState.selectedEndDateMillis
+                            if (start != null && end != null) {
+                                Text(
+                                    text = "${dfRange.format(Date(start))} - ${dfRange.format(Date(end))}".uppercase(),
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    fontWeight = FontWeight.Black,
+                                    color = RojoDelisa
+                                )
+                            }
+                        },
+                        colors = DatePickerDefaults.colors(
+                            selectedDayContainerColor = RojoDelisa,
+                            dayInSelectionRangeContainerColor = RojoDelisa.copy(alpha = 0.1f),
+                            selectedDayContentColor = Color.White,
+                            todayContentColor = RojoDelisa,
+                            todayDateBorderColor = RojoDelisa
+                        )
+                    )
+                }
+            }
+        )
+    }
 
     Scaffold(
+        containerColor = GrisFondoPremium,
         topBar = {
             TopAppBar(
-                title = { Text("Mi Rendimiento", fontWeight = FontWeight.Black) },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Atrás")
+                title = { 
+                    Column {
+                        Text("MI BOLSO", fontWeight = FontWeight.Black, fontSize = 18.sp, color = NegroPremium)
+                        Text(rangoFechas, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 1.sp)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.Rounded.ArrowBackIosNew, null, tint = RojoDelisa)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Rounded.CalendarMonth, null, tint = RojoDelisa)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .background(Color(0xFFF8F9FA))
-                .verticalScroll(rememberScrollState())
+        LazyColumn(
+            modifier = Modifier.padding(padding).fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 32.dp)
         ) {
-            // Header con Degradado
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0xFFE53935), Color(0xFFB71C1C))
-                        ),
-                        RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
+            item {
+                ResumenGaneCard(
+                    totalGane = uiState.totalGaneSemana,
+                    formato = formatoMoneda,
+                    nombre = uiState.nombreVendedor
+                )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    MiniKPI(
+                        titulo = "Sueldo Base",
+                        valor = formatoMoneda.format(uiState.sueldoBaseAcumulado),
+                        subtitulo = "Base: $${uiState.sueldoBaseConfig.toInt()}/día\n${uiState.diasTrabajados} días lab.",
+                        color = NegroPremium,
+                        icon = Icons.Rounded.WorkHistory,
+                        modifier = Modifier.weight(1f)
                     )
-                    .padding(24.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Column {
-                    Text(
-                        text = "VENDEDOR",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = nombreVendedor,
-                        color = Color.White,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Black
+                    MiniKPI(
+                        titulo = "Comisión",
+                        valor = formatoMoneda.format(uiState.comisionAcumulada),
+                        subtitulo = "Pct: ${uiState.comisionConfig}%\nS/ Venta: ${formatoMoneda.format(uiState.totalVentaSemana)}",
+                        color = RojoDelisa,
+                        icon = Icons.Rounded.Percent,
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            item {
+                Text(
+                    text = "DESGLOSE DIARIO",
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                    color = Color.Gray,
+                    letterSpacing = 1.5.sp
+                )
+            }
 
-            // Grid de 4 Bloques (2x2)
-            Column(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    RendimientoCard(
-                        titulo = "Sueldo Base Hoy",
-                        valor = "$300.00",
-                        icono = Icons.Rounded.WorkOutline,
-                        color = Color(0xFF607D8B),
-                        modifier = Modifier.weight(1f)
-                    )
-                    RendimientoCard(
-                        titulo = "Comisión hoy",
-                        valor = formatoMoneda.format(comision),
-                        icono = Icons.Rounded.Payments,
-                        color = Color(0xFF4CAF50),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    RendimientoCard(
-                        titulo = "Venta del día",
-                        valor = formatoMoneda.format(ventaDia),
-                        icono = Icons.Rounded.TrendingUp,
-                        color = Color(0xFFE53935),
-                        modifier = Modifier.weight(1f)
-                    )
-                    RendimientoCard(
-                        titulo = "Ingreso Total Hoy",
-                        valor = formatoMoneda.format(300.0 + comision),
-                        icono = Icons.Rounded.Savings,
-                        color = Color(0xFFFF9800),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+            items(uiState.desgloseDias.size) { index ->
+                val dia = uiState.desgloseDias[index]
+                DiaGaneItem(dia, formatoMoneda, uiState.sueldoBaseConfig)
             }
-            
-            // Sección Adicional: Resumen de Clientes
-            Spacer(Modifier.height(24.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(2.dp)
-            ) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Storefront, null, tint = Color.Blue)
-                    Spacer(Modifier.width(12.dp))
-                    Text("Clientes atendidos hoy:", fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.weight(1f))
-                    Text("$clientesDia", fontWeight = FontWeight.Black, fontSize = 20.sp)
-                }
+        }
+
+        if (uiState.isLoading) {
+            Box(Modifier.fillMaxSize().background(Color.White.copy(0.4f)), Alignment.Center) {
+                CircularProgressIndicator(color = RojoDelisa)
             }
-            
-            Spacer(Modifier.height(40.dp))
         }
     }
 }
 
 @Composable
-fun RendimientoCard(
-    titulo: String,
-    valor: String,
-    icono: ImageVector,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
+fun ResumenGaneCard(totalGane: Double, formato: NumberFormat, nombre: String) {
     Card(
-        modifier = modifier.height(130.dp),
-        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(20.dp)
+            .shadow(20.dp, RoundedCornerShape(32.dp), ambientColor = RojoDelisa.copy(0.4f)),
+        shape = RoundedCornerShape(32.dp),
+        colors = CardDefaults.cardColors(containerColor = NegroPremium)
+    ) {
+        Column(
+            Modifier
+                .background(
+                    Brush.verticalGradient(
+                        listOf(NegroPremium, Color(0xFF2C2C34))
+                    )
+                )
+                .padding(28.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "GANANCIA TOTAL ESTIMADA",
+                        color = Color.White.copy(0.6f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.2.sp
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        formato.format(totalGane),
+                        color = Color.White,
+                        fontSize = 44.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = (-1).sp
+                    )
+                }
+                
+                Surface(
+                    color = RojoDelisa,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Savings, 
+                        null, 
+                        tint = Color.White, 
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
+            
+            Spacer(Modifier.height(24.dp))
+            
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Box(
+                    Modifier
+                        .size(28.dp)
+                        .background(RojoDelisa, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Rounded.Person, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    nombre.uppercase(), 
+                    color = Color.White, 
+                    fontSize = 12.sp, 
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun MiniKPI(titulo: String, valor: String, subtitulo: String, color: Color, icon: ImageVector, modifier: Modifier) {
+    Card(
+        modifier = modifier.height(140.dp),
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(4.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            Modifier
+                .padding(16.dp)
+                .fillMaxSize(), 
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Surface(
-                shape = CircleShape,
-                color = color.copy(alpha = 0.1f),
-                modifier = Modifier.size(36.dp)
+            Row(
+                Modifier.fillMaxWidth(), 
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = icono,
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.padding(8.dp)
-                )
+                Surface(
+                    color = color.copy(alpha = 0.1f),
+                    shape = CircleShape,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        icon, 
+                        null, 
+                        tint = color, 
+                        modifier = Modifier.padding(8.dp)
+                    )
+                }
             }
+            
             Column {
                 Text(
-                    text = titulo,
-                    color = Color.Gray,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    titulo.uppercase(), 
+                    color = Color.Gray, 
+                    fontSize = 9.sp, 
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
                 )
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    text = valor,
-                    color = Color.Black,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Black
+                    valor, 
+                    color = color, 
+                    fontSize = 22.sp, 
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1
                 )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    subtitulo, 
+                    color = Color.DarkGray, 
+                    fontSize = 12.sp, 
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 14.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DiaGaneItem(dia: DiaGane, formato: NumberFormat, sueldoBase: Double) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(2.dp)
+    ) {
+        Row(
+            Modifier
+                .padding(16.dp)
+                .fillMaxWidth(), 
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = if (dia.trabajado) VerdeExito.copy(0.1f) else Color(0xFFF5F5F5)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (dia.trabajado) Icons.Rounded.EventAvailable else Icons.Rounded.EventBusy,
+                        null,
+                        tint = if (dia.trabajado) VerdeExito else Color.Gray,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+            
+            Spacer(Modifier.width(16.dp))
+            
+            Column(Modifier.weight(1f)) {
+                Text(
+                    dia.nombre.uppercase(), 
+                    fontWeight = FontWeight.Black, 
+                    fontSize = 15.sp, 
+                    color = NegroPremium,
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    if (dia.trabajado) "VENTA: ${formato.format(dia.venta)}" else "SIN ACTIVIDAD",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (dia.trabajado) Color.DarkGray else RojoDelisa.copy(0.6f)
+                )
+            }
+            
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    formato.format(if (dia.trabajado) sueldoBase + dia.comision else 0.0),
+                    fontWeight = FontWeight.Black,
+                    fontSize = 20.sp,
+                    color = if (dia.trabajado) NegroPremium else Color.LightGray
+                )
+                if (dia.trabajado) {
+                    Surface(
+                        color = VerdeExito.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            "GANANCIA DÍA", 
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            fontSize = 8.sp, 
+                            color = VerdeExito, 
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
             }
         }
     }

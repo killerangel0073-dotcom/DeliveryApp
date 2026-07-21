@@ -23,7 +23,8 @@ data class SellerSummary(
     val clientesConVenta: Int,
     val ticketPromedio: Double,
     val ventas: List<VentaEntity> = emptyList(),
-    val totalTicketsActivos: Int = 0 // 🔥 Nuevo
+    val totalTicketsActivos: Int = 0,
+    val estaEnRuta: Boolean = false // 🔥 Nuevo: Estado de jornada
 )
 
 data class DashboardUiState(
@@ -38,6 +39,9 @@ data class DashboardUiState(
     val photoUrlAdmin: String = "",
     val puestoAdmin: String = "",
     val error: String? = null,
+    val rankingAlto: Double = 0.0,
+    val rankingMedio: Double = 0.0,
+    val rankingBajo: Double = 0.0
 )
 
 class DashboardAdminViewModel(
@@ -49,14 +53,78 @@ class DashboardAdminViewModel(
 
     private val db = FirebaseFirestore.getInstance()
     private var ventasListener: ListenerRegistration? = null
-    private var usersCache: Map<String, Triple<String, String, String>> = emptyMap()
-    private var allVendedoresUids: Set<String> = emptySet()
+    private var jornadasListener: ListenerRegistration? = null
+    private var usersListener: ListenerRegistration? = null
+    private var rankingListener: ListenerRegistration? = null
+
+    private val _ventasFlow = MutableStateFlow<List<VentaEntity>>(emptyList())
+    private val _usersFlow = MutableStateFlow<Map<String, Triple<String, String, String>>>(emptyMap())
+    private val _allVendedoresFlow = MutableStateFlow<Set<String>>(emptySet())
+    private val _jornadasFlow = MutableStateFlow<Map<String, Boolean>>(emptyMap())
 
     init {
-        // Precargar info de usuarios una vez al inicio
-        precargarUsuarios()
+        escucharUsuarios()
+        escucharJornadas()
+        escucharRankingConfig()
         cargarDatosAdmin()
+        
+        // 🔥 MOTOR DE REACTIVIDAD: Combinar los 3 flujos en tiempo real
+        combine(_ventasFlow, _usersFlow, _allVendedoresFlow, _jornadasFlow) { ventas, users, vendedores, jornadas ->
+            procesarDatos(ventas, users, vendedores, jornadas)
+        }.onEach { nuevoEstado ->
+            _uiState.update { nuevoEstado }
+        }.launchIn(viewModelScope)
+
         cargarDatosDashboard(Date())
+    }
+
+    private fun escucharUsuarios() {
+        usersListener?.remove()
+        usersListener = db.collection("users").addSnapshotListener { snapshot, error ->
+            if (error != null || snapshot == null) return@addSnapshotListener
+            
+            val usersMap = snapshot.documents.associate { doc ->
+                val nombre = doc.getString("nombre") ?: "Sin Nombre"
+                val foto = doc.getString("photo_url") ?: ""
+                val rutaRef = doc.getDocumentReference("rutaAsignada")
+                val rutaNombre = rutaRef?.id ?: "Sin Ruta"
+                doc.id to Triple(nombre, rutaNombre, foto)
+            }
+            
+            val vendedoresSet = snapshot.documents.mapNotNull { doc ->
+                val puesto = doc.getString("puestoTrabajo")?.lowercase(Locale.getDefault()) ?: ""
+                if (puesto.contains("vendedor") || puesto.contains("ruta")) doc.id else null
+            }.toSet()
+
+            _usersFlow.value = usersMap
+            _allVendedoresFlow.value = vendedoresSet
+        }
+    }
+
+    private fun escucharJornadas() {
+        jornadasListener?.remove()
+        jornadasListener = db.collection("jornadas")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null) {
+                    _jornadasFlow.value = snapshot.documents.associate { 
+                        it.id to (it.getBoolean("activo") ?: false)
+                    }
+                }
+            }
+    }
+
+    private fun escucharRankingConfig() {
+        rankingListener?.remove()
+        rankingListener = db.collection("config").document("valor_clientes")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    _uiState.update { it.copy(
+                        rankingAlto = snapshot.getDouble("alto") ?: 500.0,
+                        rankingMedio = snapshot.getDouble("medio") ?: 300.0,
+                        rankingBajo = snapshot.getDouble("bajo") ?: 150.0
+                    ) }
+                }
+            }
     }
 
     private fun cargarDatosAdmin() {
@@ -75,72 +143,34 @@ class DashboardAdminViewModel(
         }
     }
 
-    private fun precargarUsuarios() {
-        viewModelScope.launch {
-            try {
-                val usersSnap = db.collection("users").get().await()
-                usersCache = usersSnap.documents.asSequence().associate { doc ->
-                    val nombre = doc.getString("nombre") ?: "Sin Nombre"
-                    val foto = doc.getString("photo_url") ?: ""
-                    val rutaRef = doc.getDocumentReference("rutaAsignada")
-                    val rutaNombre = rutaRef?.id ?: "Sin Ruta"
-                    doc.id to Triple(nombre, rutaNombre, foto)
-                }
-                
-                allVendedoresUids = usersSnap.documents.asSequence().mapNotNull { doc ->
-                    val puesto = doc.getString("puestoTrabajo")?.lowercase(Locale.getDefault()) ?: ""
-                    if (puesto.contains("vendedor") || puesto.contains("ruta")) {
-                        doc.id
-                    } else null
-                }.toSet()
-            } catch (e: Exception) {
-                Log.e("DashboardVM", "Error precargando usuarios", e)
-            }
-        }
-    }
-
     fun cargarDatosDashboard(fecha: Date) {
         cargarDatosDashboardRango(fecha, fecha)
     }
 
     fun cargarDatosDashboardRango(fechaInicio: Date, fechaFin: Date) {
-        // Cancelar listener previo si existe
         ventasListener?.remove()
-        
         _uiState.update { it.copy(isLoading = true) }
 
-        // Rango de fecha
         val cal = Calendar.getInstance()
-        
-        // Inicio del periodo
         cal.time = fechaInicio
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
         val inicioTs = Timestamp(cal.time)
         
-        // Fin del periodo
         cal.time = fechaFin
-        cal.set(Calendar.HOUR_OF_DAY, 23)
-        cal.set(Calendar.MINUTE, 59)
-        cal.set(Calendar.SECOND, 59)
-        cal.set(Calendar.MILLISECOND, 999)
+        cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59); cal.set(Calendar.MILLISECOND, 999)
         val finTs = Timestamp(cal.time)
 
-        // Escuchar cambios en tiempo real
         ventasListener = db.collection("ventas")
             .whereGreaterThanOrEqualTo("fecha", inicioTs)
             .whereLessThanOrEqualTo("fecha", finTs)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("DashboardVM", "Error en listener", error)
                     _uiState.update { it.copy(isLoading = false, error = error.message) }
                     return@addSnapshotListener
                 }
 
                 snapshot?.let { snap ->
-                    procesarSnapshotVentas(snap.documents.map { doc ->
+                    val ventasList = snap.documents.map { doc ->
                         VentaEntity(
                             id = doc.id,
                             clienteId = doc.getString("clienteId") ?: "",
@@ -166,150 +196,70 @@ class DashboardAdminViewModel(
                             canceladoPorNombre = doc.getString("canceladoPorNombre"),
                             fechaCancelacion = doc.getTimestamp("fechaCancelacion")?.toDate()?.time
                         )
-                    })
+                    }
+                    _ventasFlow.value = ventasList
                 }
             }
     }
 
-    private fun procesarSnapshotVentas(todasLasVentasRaw: List<VentaEntity>) {
-        viewModelScope.launch {
-            // 🔥 RECARGA DE CACHE SIEMPRE: Para detectar cambios en rutas o nuevos usuarios al instante
-            try {
-                val usersSnap = db.collection("users").get().await()
-                usersCache = usersSnap.documents.asSequence().associate { doc ->
-                    val nombre = doc.getString("nombre") ?: "Sin Nombre"
-                    val foto = doc.getString("photo_url") ?: ""
-                    val rutaRef = doc.getDocumentReference("rutaAsignada")
-                    val rutaNombre = rutaRef?.id ?: "Sin Ruta"
-                    doc.id to Triple(nombre, rutaNombre, foto)
-                }
-                allVendedoresUids = usersSnap.documents.asSequence().mapNotNull { doc ->
-                    val puesto = doc.getString("puestoTrabajo")?.lowercase(Locale.getDefault()) ?: ""
-                    if (puesto.contains("vendedor") || puesto.contains("ruta")) {
-                        doc.id
-                    } else null
-                }.toSet()
-            } catch (e: Exception) {
-                Log.e("DashboardVM", "Error recargando cache de usuarios", e)
-            }
-
-            // 🛡️ FILTRO DE CONSISTENCIA: Solo contar ventas de personal con ruta asignada
-            val todasLasVentas = todasLasVentasRaw.filter { 
-                usersCache[it.vendedorId]?.second != "Sin Ruta"
-            }
-
-            val resumen = allVendedoresUids.mapNotNull { uid ->
-                val info = usersCache[uid] ?: return@mapNotNull null
-                
-                // 🚫 REQUISITO: No mostrar vendedores sin ruta asignada
-                if (info.second == "Sin Ruta") return@mapNotNull null
-
-                val ventasVendedor = todasLasVentas.filter { it.vendedorId == uid }
-                // 🔥 Solo sumar ventas activas (no canceladas) para el total vendido
-                val totalVendido = ventasVendedor.filter { it.estado != "CANCELADA" }.sumOf { it.total }
-                val clientesConVentaReal = ventasVendedor.filter { it.estado != "CANCELADA" }.map { it.clienteId }.distinct().size
-                val promedio = if (ventasVendedor.any { it.estado != "CANCELADA" }) {
-                    totalVendido / ventasVendedor.count { it.estado != "CANCELADA" }
-                } else 0.0
-
-                SellerSummary(
-                    uid = uid,
-                    nombre = info.first,
-                    rutaNombre = info.second,
-                    photoUrl = info.third,
-                    totalVendido = totalVendido,
-                    clientesConVenta = clientesConVentaReal,
-                    ticketPromedio = promedio,
-                    ventas = ventasVendedor,
-                    totalTicketsActivos = ventasVendedor.count { it.estado != "CANCELADA" } // 🔥
-                )
-            }.sortedByDescending { it.totalVendido } // Los que más venden arriba
-
-            val totalVentas = todasLasVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total }
-            val totalTickets = todasLasVentas.count { it.estado != "CANCELADA" }
-            val totalClientes = todasLasVentas.filter { it.estado != "CANCELADA" }.map { it.clienteId }.distinct().size
-            val promedioGlobal = if (totalTickets > 0) totalVentas / totalTickets else 0.0
-
-            _uiState.update { state ->
-                state.copy(
-                    isLoading = false,
-                    totalVentasDia = totalVentas,
-                    totalTicketsDia = totalTickets,
-                    totalClientesDia = totalClientes,
-                    ticketPromedioGlobal = promedioGlobal,
-                    resumenVendedores = resumen,
-                    todasLasVentasHoy = todasLasVentas
-                )
-            }
+    private fun procesarDatos(
+        todasLasVentasRaw: List<VentaEntity>,
+        users: Map<String, Triple<String, String, String>>,
+        vendedoresUids: Set<String>,
+        jornadas: Map<String, Boolean>
+    ): DashboardUiState {
+        // 🛡️ Filtro rápido usando la caché reactiva
+        val todasLasVentas = todasLasVentasRaw.filter { 
+            users[it.vendedorId]?.second != "Sin Ruta"
         }
-    }
 
-    fun migrarClientesARuta1(onComplete: (Int) -> Unit) {
-        viewModelScope.launch {
-            try {
-                _uiState.update { it.copy(isLoading = true) }
-                val clientesSnap = db.collection("clientes").get().await()
-                var actualizados = 0
-                
-                val batch = db.batch()
-                clientesSnap.documents.forEach { doc ->
-                    if (!doc.contains("rutaId")) {
-                        batch.update(doc.reference, "rutaId", "Ruta 1 Delisa")
-                        actualizados++
-                    }
-                }
-                
-                if (actualizados > 0) {
-                    batch.commit().await()
-                }
-                
-                _uiState.update { it.copy(isLoading = false) }
-                onComplete(actualizados)
-            } catch (e: Exception) {
-                Log.e("DashboardVM", "Error migrando clientes", e)
-                _uiState.update { it.copy(isLoading = false, error = "Error migración: ${e.message}") }
-            }
-        }
-    }
+        val resumen = vendedoresUids.mapNotNull { uid ->
+            val info = users[uid] ?: return@mapNotNull null
+            if (info.second == "Sin Ruta") return@mapNotNull null
 
-    fun migrarRutasClientes(onComplete: (Int) -> Unit) {
-        viewModelScope.launch {
-            try {
-                _uiState.update { it.copy(isLoading = true) }
-                val clientesSnap = db.collection("clientes").get().await()
-                var actualizados = 0
-                
-                val batch = db.batch()
-                clientesSnap.documents.forEach { doc ->
-                    val rutaActual = doc.getString("rutaId")
-                    val nuevaRuta = when (rutaActual) {
-                        "Vendedor Delisa R1" -> "Ruta 1 Delisa"
-                        "Vendedor Delisa R2" -> "Ruta 2 Delisa"
-                        else -> null
-                    }
-                    
-                    if (nuevaRuta != null) {
-                        batch.update(doc.reference, "rutaId", nuevaRuta)
-                        actualizados++
-                    }
-                }
-                
-                if (actualizados > 0) {
-                    batch.commit().await()
-                }
-                
-                _uiState.update { it.copy(isLoading = false) }
-                onComplete(actualizados)
-            } catch (e: Exception) {
-                Log.e("DashboardVM", "Error migrando clientes", e)
-                _uiState.update { it.copy(isLoading = false, error = "Error migración: ${e.message}") }
-            }
-        }
+            val ventasVendedor = todasLasVentas.filter { it.vendedorId == uid }
+            val ventasActivas = ventasVendedor.filter { it.estado != "CANCELADA" }
+            val totalVendido = ventasActivas.sumOf { it.total }
+            val clientesConVentaReal = ventasActivas.map { it.clienteId }.distinct().size
+            val promedio = if (ventasActivas.isNotEmpty()) totalVendido / ventasActivas.size else 0.0
+
+            SellerSummary(
+                uid = uid,
+                nombre = info.first,
+                rutaNombre = info.second,
+                photoUrl = info.third,
+                totalVendido = totalVendido,
+                clientesConVenta = clientesConVentaReal,
+                ticketPromedio = promedio,
+                ventas = ventasVendedor,
+                totalTicketsActivos = ventasActivas.size,
+                estaEnRuta = jornadas[uid] ?: false
+            )
+        }.sortedByDescending { it.totalVendido }
+
+        val ventasActivasGlobal = todasLasVentas.filter { it.estado != "CANCELADA" }
+        val totalVentas = ventasActivasGlobal.sumOf { it.total }
+        val totalTickets = ventasActivasGlobal.size
+        val totalClientes = ventasActivasGlobal.map { it.clienteId }.distinct().size
+        val promedioGlobal = if (totalTickets > 0) totalVentas / totalTickets else 0.0
+
+        return _uiState.value.copy(
+            isLoading = false,
+            totalVentasDia = totalVentas,
+            totalTicketsDia = totalTickets,
+            totalClientesDia = totalClientes,
+            ticketPromedioGlobal = promedioGlobal,
+            resumenVendedores = resumen,
+            todasLasVentasHoy = todasLasVentas
+        )
     }
 
     override fun onCleared() {
         super.onCleared()
         ventasListener?.remove()
+        jornadasListener?.remove()
+        usersListener?.remove()
+        rankingListener?.remove()
     }
 }
 

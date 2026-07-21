@@ -66,6 +66,7 @@ import com.gruposanangel.delivery.SegundoPlano.BatteryState
 import com.gruposanangel.delivery.SegundoPlano.LocationState
 import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.RepositoryInventario
+import com.gruposanangel.delivery.data.RepositoryGasto
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.ui.theme.DeliveryTheme
@@ -101,13 +102,14 @@ fun PantallaDashboardVendedor(
     val repositoryUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
     val userId = if (!isPreview) FirebaseAuth.getInstance().currentUser?.uid ?: "" else "preview_user"
     val inventarioRepo = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
+    val gastoRepo = RepositoryGasto(db.gastoDao())
 
     val viewModel: DashboardVendedorViewModel = viewModel(
         key = "Dashboard_$userId",
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = 
-                DashboardVendedorViewModel(ventaRepository, repositoryUsuario, inventarioRepo, userId) as T
+                DashboardVendedorViewModel(ventaRepository, repositoryUsuario, inventarioRepo, gastoRepo, userId) as T
         }
     )
 
@@ -141,6 +143,7 @@ fun PantallaDashboardVendedor(
             onToggleRuta = { viewModel.toggleRuta(it) },
             onArqueoClick = { navController.navigate("PANTALLA_ARQUEO") },
             onNavigate = { navController.navigate(it) },
+            onGastoRegistrado = { m, c, d, cb -> viewModel.registrarGasto(m, c, d, cb) },
             onConfigurarImpresora = {
                 val hasPermission = bluetoothPermissions.all {
                     ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -185,10 +188,12 @@ fun DashboardVendedorView(
     onToggleRuta: (Boolean) -> Unit,
     onArqueoClick: () -> Unit,
     onNavigate: (String) -> Unit,
+    onGastoRegistrado: (Double, String, String, () -> Unit) -> Unit,
     onConfigurarImpresora: () -> Unit
 ) {
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     var showConfirmDialog by remember { mutableStateOf(false) }
+    var showGastoSheet by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(GrisFondoPremium).verticalScroll(rememberScrollState())) {
         // 🔝 FILA DE ESTADO SUPERIOR ESTABILIZADA
@@ -313,8 +318,8 @@ fun DashboardVendedorView(
                 flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(lazyListState = listState)
             ) {
                 item {
-                    val comisionDia = uiState.ventaDia * 0.03
-                    val sueldoTotalHoy = 300.0 + comisionDia
+                    val comisionDia = uiState.ventaDia * (uiState.comisionPctConfig / 100.0)
+                    val sueldoTotalHoy = uiState.sueldoBaseConfig + comisionDia
                     
                     BloqueBolso(
                         titulo = "MI BOLSO",
@@ -376,7 +381,8 @@ fun DashboardVendedorView(
             clientes = uiState.clientesDia, 
             ticketPromedio = uiState.ticketPromedioDia, 
             formato = formatoMoneda,
-            onCierreClick = { onNavigate("CIERRE_DIA") }
+            onCierreClick = { onNavigate("CIERRE_DIA") },
+            onGastoClick = { showGastoSheet = true }
         )
         Spacer(Modifier.height(16.dp))
         WeeklyMiniChart(uiState.ventasPorDiaSemana, uiState.metaDia, formatoMoneda)
@@ -403,50 +409,213 @@ fun DashboardVendedorView(
     if (showConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showConfirmDialog = false },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(28.dp),
+            icon = {
+                Icon(
+                    imageVector = if (uiState.enRuta) Icons.Rounded.Flag else Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = RojoDelisa,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
             title = {
                 Text(
-                    text = if (uiState.enRuta) "¿Terminar Jornada?" else "¿Empezar Ruta?",
+                    text = if (uiState.enRuta) "Finalizar Jornada" else "Iniciar Jornada",
                     fontWeight = FontWeight.Black,
-                    color = RojoDelisa,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
                 )
             },
             text = {
                 Text(
-                    text = if (uiState.enRuta)
-                        "Estás por terminar tu ruta, ¿estás seguro?"
-                    else
-                        "Estás por empezar tu ruta, ¿estás seguro?",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
+                    text = if (uiState.enRuta) 
+                        "¿Estás seguro que deseas terminar tu ruta de hoy?" 
+                        else "¿Confirmas que vas a iniciar tu ruta de distribución ahora?",
+                    fontSize = 15.sp,
+                    color = Color.DarkGray,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+                Button(
+                    onClick = { 
+                        onToggleRuta(!uiState.enRuta)
+                        showConfirmDialog = false 
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
                 ) {
-                    TextButton(onClick = { showConfirmDialog = false }) {
-                        Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(16.dp))
-                    Button(
-                        onClick = { onToggleRuta(!uiState.enRuta); showConfirmDialog = false },
-                        colors = ButtonDefaults.buttonColors(RojoDelisa),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("CONFIRMAR", fontWeight = FontWeight.Black)
-                    }
+                    Text("CONFIRMAR JORNADA", fontWeight = FontWeight.ExtraBold)
                 }
             },
-            dismissButton = null,
-            containerColor = Color.White,
-            shape = RoundedCornerShape(24.dp)
+            dismissButton = {
+                TextButton(
+                    onClick = { showConfirmDialog = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
+                }
+            }
         )
+    }
+
+    if (showGastoSheet) {
+        ModalGastoSheet(
+            gastosHoy = uiState.gastosHoy,
+            onDismiss = { showGastoSheet = false },
+            onGuardar = { monto, cat, desc ->
+                onGastoRegistrado(monto, cat, desc) {
+                    showGastoSheet = false
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModalGastoSheet(
+    gastosHoy: List<Gasto>,
+    onDismiss: () -> Unit,
+    onGuardar: (Double, String, String) -> Unit
+) {
+    var monto by remember { mutableStateOf("") }
+    var categoria by remember { mutableStateOf("Gasolina") }
+    var descripcion by remember { mutableStateOf("") }
+    val categorias = listOf("Gasolina", "Estacionamiento", "Papelería", "Mantenimiento", "Otros")
+    var expanded by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color.White,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = Color.LightGray) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            Text(
+                text = "REGISTRAR GASTO",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                color = NegroPremium
+            )
+            
+            Spacer(Modifier.height(24.dp))
+
+            // Campo de Monto
+            OutlinedTextField(
+                value = monto,
+                onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) monto = it },
+                label = { Text("Monto ($)") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                shape = RoundedCornerShape(12.dp),
+                prefix = { Text("$ ") },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = RojoDelisa, focusedLabelColor = RojoDelisa)
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Selector de Categoría
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = !expanded }
+            ) {
+                OutlinedTextField(
+                    value = categoria,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Categoría") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = RojoDelisa, focusedLabelColor = RojoDelisa)
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    categorias.forEach { selectionOption ->
+                        DropdownMenuItem(
+                            text = { Text(selectionOption) },
+                            onClick = {
+                                categoria = selectionOption
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Campo de Descripción
+            OutlinedTextField(
+                value = descripcion,
+                onValueChange = { descripcion = it },
+                label = { Text("Descripción (Opcional)") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = RojoDelisa, focusedLabelColor = RojoDelisa)
+            )
+
+            Spacer(Modifier.height(24.dp))
+
+            Button(
+                onClick = {
+                    val m = monto.toDoubleOrNull() ?: 0.0
+                    if (m > 0) {
+                        onGuardar(m, categoria, descripcion)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa)
+            ) {
+                Text("GUARDAR GASTO", fontWeight = FontWeight.ExtraBold)
+            }
+
+            if (gastosHoy.isNotEmpty()) {
+                Spacer(Modifier.height(32.dp))
+                Text(
+                    text = "GASTOS DE HOY",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                    color = Color.Gray
+                )
+                Spacer(Modifier.height(12.dp))
+                
+                val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
+                
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    gastosHoy.forEach { gasto ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(GrisFondoPremium, RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(gasto.categoria, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = NegroPremium)
+                                if (gasto.descripcion.isNotEmpty()) {
+                                    Text(gasto.descripcion, fontSize = 12.sp, color = Color.Gray)
+                                }
+                            }
+                            Text(formatoMoneda.format(gasto.monto), fontWeight = FontWeight.Black, color = RojoDelisa)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -533,36 +702,84 @@ fun BloqueBolso(
 
     Card(
         modifier = modifier
-            .height(110.dp)
+            .height(115.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(24.dp))
             .clickable(
                 interactionSource = interactionSource,
                 indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = Color(0xFF4CAF50).copy(0.1f)),
                 onClick = onClick
             ),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(2.dp)
+        elevation = CardDefaults.cardElevation(4.dp)
     ) {
-        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                Text(text = titulo, color = GrisTextoSecundario, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                Icon(Icons.Rounded.Savings, null, tint = Color(0xFF4CAF50).copy(0.4f), modifier = Modifier.size(16.dp))
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(14.dp), 
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(), 
+                horizontalArrangement = Arrangement.SpaceBetween, 
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = titulo, 
+                    color = GrisTextoSecundario, 
+                    fontSize = 10.sp, 
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
+                )
+                Icon(
+                    Icons.Rounded.Savings, 
+                    null, 
+                    tint = Color(0xFF4CAF50).copy(0.6f), 
+                    modifier = Modifier.size(14.dp)
+                )
             }
             
             Column {
-                Text(text = "Sueldo Hoy:", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                Text(text = formato.format(montoTotalHoy), color = Color(0xFF4CAF50), fontSize = 17.sp, fontWeight = FontWeight.Black)
+                Text(
+                    text = "GANANCIA HOY:", 
+                    color = Color.Gray, 
+                    fontSize = 8.sp, 
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    text = formato.format(montoTotalHoy), 
+                    color = Color(0xFF2E7D32), 
+                    fontSize = 19.sp, 
+                    fontWeight = FontWeight.Black
+                )
             }
             
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "Comisión:", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(4.dp))
-                Text(text = formato.format(comisionHoy), color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
+            Surface(
+                color = Color(0xFF4CAF50).copy(alpha = 0.08f),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "COMISIÓN:", 
+                        color = Color.Gray, 
+                        fontSize = 8.sp, 
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = formato.format(comisionHoy), 
+                        color = NegroPremium, 
+                        fontSize = 11.sp, 
+                        fontWeight = FontWeight.Black
+                    )
+                }
             }
         }
     }
@@ -627,7 +844,8 @@ fun VentaPrincipalCard(
     clientes: Int, 
     ticketPromedio: Double, 
     formato: NumberFormat,
-    onCierreClick: () -> Unit
+    onCierreClick: () -> Unit,
+    onGastoClick: () -> Unit
 ) {
     val progreso = (monto / meta).coerceIn(0.0, 1.0).toFloat()
     Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp).shadow(8.dp, RoundedCornerShape(24.dp)), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
@@ -635,20 +853,41 @@ fun VentaPrincipalCard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("VENTA TOTAL HOY", fontSize = 11.sp, fontWeight = FontWeight.Black, color = RojoDelisa)
                 
-                // 🔥 BOTÓN CERRAR DÍA
-                Surface(
-                    onClick = onCierreClick,
-                    color = RojoDelisa,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(28.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 🔥 BOTÓN GASTOS
+                    Surface(
+                        onClick = onGastoClick,
+                        color = NegroPremium.copy(alpha = 0.05f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(28.dp)
                     ) {
-                        Icon(Icons.Rounded.Lock, null, tint = Color.White, modifier = Modifier.size(12.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("CERRAR RUTA", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.LocalGasStation, null, tint = NegroPremium, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("GASTOS", color = NegroPremium, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+
+                    Spacer(Modifier.width(8.dp))
+
+                    // 🔥 BOTÓN CERRAR DÍA
+                    Surface(
+                        onClick = onCierreClick,
+                        color = RojoDelisa,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.Lock, null, tint = Color.White, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("CERRAR RUTA", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                        }
                     }
                 }
             }
@@ -732,135 +971,126 @@ fun VentaSecundariaCard(
 @Composable
 fun SwipeToActionPremium(isActive: Boolean, resetTrigger: Boolean, onActionTriggered: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var ancho by remember { mutableFloatStateOf(0f) }
-    val densidad = LocalContext.current.resources.displayMetrics.density
-    val botonPx = 60f * densidad
-    val rangoPx = (ancho - botonPx - (8f * densidad)).coerceAtLeast(0f)
+    val densidad = androidx.compose.ui.platform.LocalDensity.current
     
-    // 💡 Offset inicial persistente para evitar saltos al cargar
-    val offsetX = remember { Animatable(0f) }
+    val botonTamano = 54.dp
+    val barraAltura = 64.dp
+    var anchoFila by remember { mutableStateOf(0f) }
+    val rangoMaximo = (anchoFila - with(densidad) { (botonTamano + 12.dp).toPx() }).coerceAtLeast(0f)
+    
+    val posicionX = remember { Animatable(0f) }
+    val factorProgreso = if (rangoMaximo > 0) (posicionX.value / rangoMaximo) else 0f
 
-    // 🌬️ Animación de Respiración sutil
-    val infiniteTransition = rememberInfiniteTransition(label = "respiracion")
-    val alphaAnim by infiniteTransition.animateFloat(
-        initialValue = 0.75f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "alpha"
-    )
-    val scaleAnim by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.015f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scale"
+    // 🌬️ Animación de "Respiración" para el modo activo
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f, targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "glow"
     )
 
-    // 🎯 Sincronización inteligente de posición
-    LaunchedEffect(isActive, rangoPx, resetTrigger) {
-        if (rangoPx > 0f && !resetTrigger) {
-            val target = if (isActive) rangoPx else 0f
-            // Solo animamos si la diferencia es significativa (evita micro-saltos)
-            if (kotlin.math.abs(offsetX.value - target) > 1f) {
-                offsetX.animateTo(
-                    targetValue = target,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
-                        stiffness = Spring.StiffnessLow
-                    )
-                )
-            }
+    LaunchedEffect(isActive, anchoFila, resetTrigger) {
+        if (anchoFila > 0 && !resetTrigger) {
+            posicionX.animateTo(
+                targetValue = if (isActive) rangoMaximo else 0f,
+                animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow)
+            )
         }
     }
 
     Box(
-        Modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
-            .graphicsLayer {
-                scaleX = scaleAnim
-                scaleY = scaleAnim
-            }
-            .background(
-                brush = Brush.horizontalGradient(
-                    if (isActive) listOf(RojoDelisa, Color(0xFFC62828)) 
-                    else listOf(Color(0xFFEAECEF), Color(0xFFD1D5DB))
-                ),
-                shape = RoundedCornerShape(20.dp)
-            )
-            .border(1.dp, if (isActive) Color.White.copy(0.2f) else Color.Transparent, RoundedCornerShape(20.dp))
-            .padding(5.dp)
-            .onGloballyPositioned { 
-                val newAncho = it.size.width.toFloat()
-                if (ancho == 0f && newAncho > 0f) {
-                    // Posicionamiento inicial sin animación
-                    scope.launch { 
-                        val initialRango = (newAncho - botonPx - (8f * densidad)).coerceAtLeast(0f)
-                        offsetX.snapTo(if (isActive) initialRango else 0f)
-                    }
-                }
-                ancho = newAncho
-            }
+            .height(barraAltura)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFFF3F4F6)) // 🔥 Color de fondo gris claro moderno
+            .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
+            .onGloballyPositioned { anchoFila = it.size.width.toFloat() }
     ) {
+        // 🌊 CAPA 1: Relleno Dinámico (Efecto de Luz Difuminada)
+        val stopInicio = 0f
+        val stopMedio = (factorProgreso * 0.85f).coerceIn(0f, 1f)
+        val stopFinal = (factorProgreso + 0.35f).coerceIn(0f, 1f)
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            stopInicio to RojoDelisa.copy(alpha = 0.8f),
+                            stopMedio to RojoDelisa,
+                            stopFinal to Color.Transparent // 🔥 Se funde con el gris del fondo
+                        )
+                    )
+                )
+        )
+
+        // 📝 CAPA 2: Texto
+        val textColor = if (factorProgreso > 0.45f) Color.White else Color.DarkGray.copy(alpha = 0.7f)
         Text(
-            text = if (isActive) "← DESLIZA PARA TERMINAR" else "DESLIZA PARA INICIAR →",
-            color = (if (isActive) Color.White else NegroPremium.copy(0.6f)).copy(alpha = alphaAnim),
+            text = if (isActive) "TERMINAR JORNADA" else "DESLIZA PARA INICIAR",
+            color = textColor,
             modifier = Modifier.fillMaxWidth().align(Alignment.Center),
             textAlign = TextAlign.Center,
             fontSize = 12.sp,
             fontWeight = FontWeight.Black,
-            letterSpacing = 0.5.sp
+            letterSpacing = 1.2.sp
         )
-        
+
+        // ⚪ CAPA 3: EL BOTÓN (Acabado de Cerámica 3D)
+        val interactionSource = remember { MutableInteractionSource() }
+        val isPressed by interactionSource.collectIsPressedAsState()
+        val scale by animateFloatAsState(
+            targetValue = if (isPressed) 0.92f else 1f,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
+            label = "btnScale"
+        )
+
         Box(
-            Modifier
-                .width(60.dp)
-                .fillMaxHeight()
-                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+            modifier = Modifier
+                .padding(horizontal = 6.dp)
+                .offset { IntOffset(posicionX.value.roundToInt(), 0) }
+                .size(botonTamano)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .shadow(
+                    elevation = if (isActive) 12.dp else 4.dp,
+                    shape = CircleShape,
+                    spotColor = if (isActive) RojoDelisa else Color.Black
+                )
+                .background(Color.White, CircleShape)
+                // Biselado sutil para efecto 3D
+                .border(1.dp, Color.LightGray.copy(alpha = 0.3f), CircleShape) 
                 .draggable(
                     orientation = Orientation.Horizontal,
+                    interactionSource = interactionSource,
                     state = rememberDraggableState { delta ->
-                        scope.launch {
-                            offsetX.snapTo((offsetX.value + delta).coerceIn(0f, rangoPx))
-                        }
+                        val nuevaPos = (posicionX.value + delta).coerceIn(0f, rangoMaximo)
+                        scope.launch { posicionX.snapTo(nuevaPos) }
                     },
                     onDragStopped = {
                         scope.launch {
-                            val medio = rangoPx / 2f
-                            if (offsetX.value > medio) {
-                                // Intento de activar (Hacia la derecha)
-                                if (!isActive) {
-                                    onActionTriggered() // Abre diálogo, nos quedamos en el % actual
-                                } else {
-                                    // Ya estaba activa, regresamos al final
-                                    offsetX.animateTo(rangoPx, spring(Spring.DampingRatioMediumBouncy))
-                                }
+                            val puntoGatillo = rangoMaximo * 0.5f
+                            if (isActive) {
+                                if (posicionX.value < puntoGatillo) onActionTriggered() 
+                                else posicionX.animateTo(rangoMaximo, spring(0.75f))
                             } else {
-                                // Intento de desactivar (Hacia la izquierda)
-                                if (isActive) {
-                                    onActionTriggered() // Abre diálogo, nos quedamos en el % actual
-                                } else {
-                                    // Ya estaba desactivada, regresamos al inicio
-                                    offsetX.animateTo(0f, spring(Spring.DampingRatioMediumBouncy))
-                                }
+                                if (posicionX.value > puntoGatillo) onActionTriggered()
+                                else posicionX.animateTo(0f, spring(0.75f))
                             }
                         }
                     }
-                )
-                .shadow(8.dp, RoundedCornerShape(16.dp))
-                .background(Color.White, RoundedCornerShape(16.dp)),
-            Alignment.Center
+                ),
+            contentAlignment = Alignment.Center
         ) {
+            // Icono con efecto de profundidad
             Icon(
                 imageVector = if (isActive) Icons.Default.KeyboardDoubleArrowLeft else Icons.Default.KeyboardDoubleArrowRight,
                 contentDescription = null,
-                tint = if (isActive) RojoDelisa else NegroPremium,
-                modifier = Modifier.size(32.dp)
+                tint = if (isActive) RojoDelisa else Color(0xFF616161),
+                modifier = Modifier.size(26.dp)
             )
         }
     }
@@ -1018,12 +1248,12 @@ fun DashboardVendedorActivePreview() {
         ventaBloque = 60000.0,
         ventasPorDiaSemana = sampleVentas
     )
-    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}, {}, {}) }
+    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}, {}, {_,_,_,_ -> }, {}) }
 }
 
 @Preview(showBackground = true, showSystemUi = true, name = "Vendedor Dashboard - Detenido")
 @Composable
 fun DashboardVendedorStoppedPreview() {
     val state = DashboardVendedorUiState(enRuta = false, tiempoTranscurrido = "00:00:00", ventaDia = 0.0, metaDia = 5000.0)
-    DeliveryTheme { DashboardVendedorView(state, 0f, 100, false, null, {}, {}, {}, {}) }
+    DeliveryTheme { DashboardVendedorView(state, 0f, 100, false, null, {}, {}, {}, {_,_,_,_ -> }, {}) }
 }

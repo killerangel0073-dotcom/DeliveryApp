@@ -9,5 +9,6 @@ data class Plantila_carga(
     val plantillaProductos: List<Plantilla_Producto> = emptyList(),
     val nombreCarga: String = "Detalle de transferencia",
     val aceptada: Boolean = false, // <-- nueva propiedad
-    var fecha: java.util.Date? = null  // <-- mutable
+    var fecha: java.util.Date? = null,  // <-- mutable
+    val estado: String = "PENDIENTE" // 🔥 NUEVO: Para control total
 ) : Parcelable
