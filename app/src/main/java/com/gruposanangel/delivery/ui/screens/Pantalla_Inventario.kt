@@ -126,7 +126,8 @@ fun PantallaInventarioContent(
                 Button(
                     onClick = {
                         val origen = uiState.almacenSeleccionado
-                        navController.navigate("LISTA PRODUCTOS?origen=$origen&destino=Almacen Huasteca&isLiquidation=true")
+                        val destino = uiState.rutaAsignada ?: "Almacen Huasteca"
+                        navController.navigate("LIQUIDACION_DIRECTA?origen=$origen&destino=$destino")
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), // Negro Elegante
@@ -138,14 +139,15 @@ fun PantallaInventarioContent(
                 }
             }
 
-            // 🔹 BOTÓN DE AJUSTE DE ALMACÉN (Solo para CEO/Gerente en Almacen Huasteca)
+            // 🔹 BOTÓN DE AJUSTE DE ALMACÉN (Solo para CEO/Gerente en un Almacén)
             val puestoAdmin = uiState.puestoTrabajo?.trim() ?: ""
             val esDirectivo = puestoAdmin == "CEO" || puestoAdmin == "Gerente General"
-            if (esDirectivo && uiState.almacenSeleccionado == "Almacen Huasteca" && !uiState.esVistaGlobal) {
+            if (esDirectivo && uiState.almacenSeleccionado?.startsWith("Almacen") == true && !uiState.esVistaGlobal) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
                     onClick = {
-                        navController.navigate("LISTA PRODUCTOS?origen=Almacen Huasteca&destino=Almacen Huasteca&isLiquidation=true")
+                        val almacen = uiState.almacenSeleccionado
+                        navController.navigate("LIQUIDACION_DIRECTA?origen=$almacen&destino=$almacen")
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), // Negro Elegante
@@ -161,8 +163,10 @@ fun PantallaInventarioContent(
 
             // 🔹 SELECTOR DE TIPO (Bueno vs Dañado)
             if (!uiState.esVistaGlobal) {
+                val labelInventario = if (uiState.almacenSeleccionado == "Almacen Huasteca") "EN ALMACÉN" else "EN CAMIONETA"
                 TabSelectorInventario(
                     seleccionado = verDanado,
+                    label = labelInventario,
                     onToggle = { verDanado = it }
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -333,7 +337,7 @@ fun AdminInventoryHeader(
 }
 
 @Composable
-fun TabSelectorInventario(seleccionado: Boolean, onToggle: (Boolean) -> Unit) {
+fun TabSelectorInventario(seleccionado: Boolean, label: String, onToggle: (Boolean) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -358,7 +362,7 @@ fun TabSelectorInventario(seleccionado: Boolean, onToggle: (Boolean) -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Text(
-                "EN CAMIONETA", 
+                label,
                 fontSize = 12.sp, 
                 fontWeight = if (!seleccionado) FontWeight.ExtraBold else FontWeight.Bold, 
                 color = if (!seleccionado) Color.Red else Color.Gray

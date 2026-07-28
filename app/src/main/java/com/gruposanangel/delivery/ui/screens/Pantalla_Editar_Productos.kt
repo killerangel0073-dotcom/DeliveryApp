@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.outlined.*
@@ -79,7 +81,17 @@ data class ProductoEditarModelo(
     val cantidadUnitario: String = "",
     val unidadesPorDisplay: String = "",
     val gramosVenta: Long? = null,
-    val precioCompra: Double = 0.0
+    val precioCompra: Double = 0.0,
+    val esCompuesto: Boolean = false,
+    val ingredientes: List<IngredienteBusqueda> = emptyList()
+)
+
+data class IngredienteBusqueda(
+    val id: String,
+    val nombre: String,
+    val gramos: Double,
+    val precioCompraBase: Double = 0.0, // precioCompra del producto base
+    val cantidadUnitarioBase: Double = 1.0 // cantidadUnitario del producto base
 )
 
 @Composable
@@ -194,6 +206,12 @@ fun EditarProductoScreen(
     var gramosVenta by remember { mutableStateOf(TextFieldValue(previewProducto?.gramosVenta?.toString() ?: "")) }
     var precioCompra by remember { mutableStateOf(TextFieldValue(previewProducto?.precioCompra?.toString() ?: "")) }
 
+    // --- NUEVOS CAMPOS PARA PRODUCTOS COMPUESTOS (MIXES) ---
+    var esCompuesto by remember { mutableStateOf(previewProducto?.esCompuesto ?: false) }
+    val ingredientes = remember { mutableStateListOf<IngredienteBusqueda>().apply { addAll(previewProducto?.ingredientes ?: emptyList()) } }
+    var todosLosProductos by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
+    var showAddIngredientDialog by remember { mutableStateOf(false) }
+
     // Imagen vinculada
     var imageBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var imageFile by remember { mutableStateOf<File?>(null) }
@@ -244,6 +262,17 @@ fun EditarProductoScreen(
                     gramosVenta = TextFieldValue(doc.get("gramosVenta")?.toString() ?: "")
                     precioCompra = TextFieldValue(doc.get("precioCompra")?.toString() ?: "")
 
+                    esCompuesto = doc.getBoolean("esCompuesto") ?: false
+                    val ingList = doc.get("ingredientes") as? List<Map<String, Any>>
+                    ingredientes.clear()
+                    ingList?.forEach { i ->
+                        ingredientes.add(IngredienteBusqueda(
+                            id = i["id"]?.toString() ?: "",
+                            nombre = i["nombre"]?.toString() ?: "",
+                            gramos = (i["gramos"] as? Number)?.toDouble() ?: 0.0
+                        ))
+                    }
+
                     val imageUrl = doc.getString("imagenUrl")
                     if (!imageUrl.isNullOrEmpty()) {
                         try {
@@ -265,6 +294,15 @@ fun EditarProductoScreen(
         } else {
             isLoading = false
         }
+    }
+
+    // Carga de catálogo para ingredientes
+    LaunchedEffect(Unit) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val snap = db.collection("producto").whereEqualTo("activo", true).get().await()
+            todosLosProductos = snap.documents.mapNotNull { it.data?.plus("id" to it.id) }
+        } catch (e: Exception) { }
     }
 
     Scaffold(
@@ -429,38 +467,145 @@ fun EditarProductoScreen(
 
                     ModernFieldEditar("Descripción", descripcion, Icons.Outlined.Description, maxLines = 3) { descripcion = it }
 
-                    Text(
-                        "CONFIGURACIÓN DE COMPRA",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Black,
-                        color = Color.Red,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        textAlign = TextAlign.Center
-                    )
+                    // --- SECCIÓN DE PRODUCTO COMPUESTO (MIX) ---
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().background(Color.Red.copy(alpha = 0.05f), RoundedCornerShape(12.dp)).padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Producto Compuesto (Mix)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("Activa si este producto se arma con otros (Ej. Mix Bandera)", fontSize = 11.sp, color = Color.Gray)
+                        }
+                        Switch(
+                            checked = esCompuesto,
+                            onCheckedChange = { esCompuesto = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.Red, checkedTrackColor = Color.Red.copy(alpha = 0.5f))
+                        )
+                    }
 
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Box(Modifier.weight(1f)) {
-                            ModernFieldEditar("Gramos Bolsa", cantidadUnitario, Icons.Outlined.Scale, keyboardType = KeyboardType.Number) {
-                                if (it.text.all { c -> c.isDigit() }) cantidadUnitario = it
+                    if (esCompuesto) {
+                        Text(
+                            "INGREDIENTES DEL MIX",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                            color = Color.Red,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            textAlign = TextAlign.Center
+                        )
+
+                        ingredientes.forEachIndexed { index, ing ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F2F6))
+                            ) {
+                                Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(ing.nombre, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("Base: ${ing.id.takeLast(6)}", fontSize = 10.sp, color = Color.Gray)
+                                    }
+                                    OutlinedTextField(
+                                        value = if(ing.gramos == 0.0) "" else ing.gramos.toString(),
+                                        onValueChange = { 
+                                            val newVal = it.toDoubleOrNull() ?: 0.0
+                                            ingredientes[index] = ing.copy(gramos = newVal)
+                                        },
+                                        label = { Text("Gramos", fontSize = 10.sp) },
+                                        suffix = { Text("g") },
+                                        modifier = Modifier.width(90.dp),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        singleLine = true
+                                    )
+                                    IconButton(onClick = { ingredientes.removeAt(index) }) {
+                                        Icon(Icons.Outlined.Delete, null, tint = Color.Red)
+                                    }
+                                }
                             }
                         }
-                        Box(Modifier.weight(1f)) {
-                            ModernFieldEditar("Display", unidadesPorDisplay, Icons.Outlined.Inventory2, keyboardType = KeyboardType.Number) {
-                                if (it.text.all { c -> c.isDigit() }) unidadesPorDisplay = it 
+
+                        Button(
+                            onClick = { showAddIngredientDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Outlined.Add, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("AÑADIR INGREDIENTE", fontSize = 12.sp)
+                        }
+
+                        // Cálculo de Costo Sugerido (Suma de ingredientes)
+                        val costoSugerido = ingredientes.sumOf { ing ->
+                            val prodBase = todosLosProductos.find { it["id"] == ing.id }
+                            val pCompra = (prodBase?.get("precioCompra") as? Number)?.toDouble() ?: 0.0
+                            val cUnit = (prodBase?.get("cantidadUnitario") as? Number)?.toDouble() ?: 1.0
+                            (pCompra / cUnit) * ing.gramos
+                        }
+
+                        if (costoSugerido > 0) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Outlined.Analytics, null, tint = Color(0xFF2E7D32))
+                                    Spacer(Modifier.width(12.dp))
+                                    Column {
+                                        Text("Costo de Producción Sugerido", fontSize = 11.sp, color = Color.Gray)
+                                        Text("$ ${String.format(Locale.US, "%.2f", costoSugerido)}", fontWeight = FontWeight.Black, color = Color(0xFF2E7D32))
+                                        Text("* Basado en el costo de los ingredientes base.", fontSize = 9.sp, color = Color.Gray)
+                                    }
+                                }
                             }
                         }
                     }
 
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Box(Modifier.weight(1f)) {
-                            ModernFieldEditar("Precio Compra", precioCompra, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number, prefix = "$") {
-                                if (it.text.all { c -> c.isDigit() || c == '.' }) precioCompra = it
+                    if (!esCompuesto) {
+                        Text(
+                            "CONFIGURACIÓN DE COMPRA",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Black,
+                            color = Color.Red,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(Modifier.weight(1f)) {
+                                ModernFieldEditar("Gramos Bolsa", cantidadUnitario, Icons.Outlined.Scale, keyboardType = KeyboardType.Number) {
+                                    if (it.text.all { c -> c.isDigit() }) cantidadUnitario = it
+                                }
+                            }
+                            Box(Modifier.weight(1f)) {
+                                ModernFieldEditar("Display", unidadesPorDisplay, Icons.Outlined.Inventory2, keyboardType = KeyboardType.Number) {
+                                    if (it.text.all { c -> c.isDigit() }) unidadesPorDisplay = it 
+                                }
                             }
                         }
-                        Box(Modifier.weight(1f)) {
-                            ModernFieldEditar("Gramos Bolsita", gramosVenta, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number) {
-                                if (it.text.all { c -> c.isDigit() }) gramosVenta = it
+
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(Modifier.weight(1f)) {
+                                ModernFieldEditar("Precio Compra", precioCompra, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number, prefix = "$") {
+                                    if (it.text.all { c -> c.isDigit() || c == '.' }) precioCompra = it
+                                }
                             }
+                            Box(Modifier.weight(1f)) {
+                                ModernFieldEditar("Gramos Bolsita", gramosVenta, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number) {
+                                    if (it.text.all { c -> c.isDigit() }) gramosVenta = it
+                                }
+                            }
+                        }
+                    } else {
+                        // Si es compuesto, forzamos Gramos Bolsita a la suma de ingredientes
+                        val sumaGramos = ingredientes.sumOf { it.gramos }
+                        LaunchedEffect(sumaGramos) {
+                            gramosVenta = TextFieldValue(sumaGramos.toInt().toString())
+                        }
+                        ModernFieldEditar("Gramos Totales Mix", gramosVenta, Icons.Outlined.Scale, keyboardType = KeyboardType.Number) {
+                            gramosVenta = it
                         }
                     }
                     
@@ -524,7 +669,13 @@ fun EditarProductoScreen(
                                     "cantidadUnitario" to (cantidadUnitario.text.toLongOrNull() ?: 0L),
                                     "unidadesPorDisplay" to (unidadesPorDisplay.text.toLongOrNull() ?: 0L),
                                     "gramosVenta" to (gramosVenta.text.toLongOrNull() ?: 0L),
-                                    "precioCompra" to (precioCompra.text.toDoubleOrNull() ?: 0.0)
+                                    "precioCompra" to (precioCompra.text.toDoubleOrNull() ?: 0.0),
+                                    "esCompuesto" to esCompuesto,
+                                    "ingredientes" to ingredientes.map { mapOf(
+                                        "id" to it.id,
+                                        "nombre" to it.nombre,
+                                        "gramos" to it.gramos
+                                    ) }
                                 )
                                 imageUrl?.let { updateData["imagenUrl"] = it }
 
@@ -563,34 +714,60 @@ fun EditarProductoScreen(
 
     // Diálogo de Cámara / Galería
     if (showDialog) {
+        // ... (código existente)
+    }
+
+    // --- DIÁLOGO PARA SELECCIONAR INGREDIENTES ---
+    if (showAddIngredientDialog) {
+        var query by remember { mutableStateOf("") }
+        val filtrados = todosLosProductos.filter { 
+            (it["nombre"] as? String)?.contains(query, ignoreCase = true) == true
+        }
+
         AlertDialog(
-            onDismissRequest = { showDialog = false },
+            onDismissRequest = { showAddIngredientDialog = false },
             containerColor = Color.White,
-            title = { Text("Imagen del Producto", fontWeight = FontWeight.Black) },
-            text = { Text("Selecciona el origen para actualizar la foto del producto.") },
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = { launcherCamera.launch(null); showDialog = false }) {
-                        Icon(Icons.Outlined.PhotoCamera, null, tint = Color.Red)
-                        Spacer(Modifier.width(4.dp))
-                        Text("CÁMARA", color = Color.Red, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    TextButton(onClick = { launcherGallery.launch("image/*"); showDialog = false }) {
-                        Icon(Icons.Outlined.Collections, null, tint = Color.Red)
-                        Spacer(Modifier.width(4.dp))
-                        Text("GALERÍA", color = Color.Red, fontWeight = FontWeight.Bold)
+            title = { Text("Añadir Ingrediente", fontWeight = FontWeight.Black) },
+            text = {
+                Column(Modifier.height(400.dp)) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Buscar producto...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                        singleLine = true
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn(Modifier.weight(1f)) {
+                        items(filtrados) { prod ->
+                            val id = prod["id"]?.toString() ?: ""
+                            val nombreP = prod["nombre"]?.toString() ?: ""
+                            
+                            // Evitar duplicados
+                            if (ingredientes.none { it.id == id }) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { 
+                                            ingredientes.add(IngredienteBusqueda(id, nombreP, 0.0))
+                                            showAddIngredientDialog = false
+                                        }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Outlined.Inventory2, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(nombreP, fontSize = 14.sp)
+                                }
+                                HorizontalDivider(color = Color(0xFFF1F2F6))
+                            }
+                        }
                     }
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showDialog = false }) {
-                    Text("CANCELAR", color = Color.Gray)
-                }
+            confirmButton = {
+                TextButton(onClick = { showAddIngredientDialog = false }) { Text("CERRAR") }
             }
         )
     }

@@ -11,6 +11,7 @@ import com.gruposanangel.delivery.utilidades.enviarNotificacion
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 data class MovimientosUiState(
     val isLoading: Boolean = false,
@@ -21,7 +22,9 @@ data class MovimientosUiState(
     val origen: String = "Selecciona Origen",
     val destino: String = "Selecciona Destino",
     val cantidades: Map<String, Int> = emptyMap(),
-    val isAlmacenRole: Boolean = false
+    val isAlmacenRole: Boolean = false,
+    val isAdmin: Boolean = false,
+    val editOrderId: String? = null
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -36,10 +39,8 @@ class MovimientosViewModel(
 
     private val _almacenSeleccionado = MutableStateFlow<String?>(null)
 
-    // 🔥 OFFLINE-FIRST: Catálogo desde Room usando stateIn como se solicitó
     val catalogoProductos: StateFlow<List<Plantilla_Producto>> = inventarioRepo.obtenerProductosLocal()
         .map { entities ->
-            // 🛡️ FILTRO: Solo tomar productos base (ID simple) para evitar duplicados en el catálogo
             entities.filter { !it.id.contains("_") }
                 .map {
                     Plantilla_Producto(
@@ -58,7 +59,6 @@ class MovimientosViewModel(
         )
 
     init {
-        // 🔥 MOTOR REACTIVO PARA EL STOCK DE ORIGEN
         _almacenSeleccionado
             .filterNotNull()
             .filter { it != "Selecciona Origen" }
@@ -75,21 +75,23 @@ class MovimientosViewModel(
 
         recuperarEstado()
         
-        // 🔥 DETECTAR ROL DE ALMACÉN Y APLICAR RESTRICCIONES
         viewModelScope.launch {
             val user = usuarioRepo.obtenerUsuarioActual()
-            val puesto = user?.puestoTrabajo ?: ""
+            val puesto = user?.puestoTrabajo?.trim() ?: ""
             val esAlmacen = puesto.contains("Almacen", ignoreCase = true) || puesto.contains("Bodega", ignoreCase = true)
+            val esAdmin = puesto == "CEO" || puesto == "Gerente General"
             
-            _uiState.update { it.copy(isAlmacenRole = esAlmacen) }
+            _uiState.update { it.copy(
+                isAlmacenRole = esAlmacen,
+                isAdmin = esAdmin
+            ) }
             
-            if (esAlmacen) {
-                // Forzamos Almacen Huasteca como origen
+            // 🔥 Si es de almacén (y no admin), forzar Huasteca y no permitir cambiar
+            if (esAlmacen && !esAdmin) {
                 actualizarOrigen("Almacen Huasteca")
             }
         }
 
-        // Aseguramos que el catálogo esté actualizado al entrar
         viewModelScope.launch {
             inventarioRepo.descargarCatalogoProductos()
             cargarAlmacenes()
@@ -100,8 +102,6 @@ class MovimientosViewModel(
         val origen = prefs.getString("origen", "Selecciona Origen") ?: "Selecciona Origen"
         val destino = prefs.getString("destino", "Selecciona Destino") ?: "Selecciona Destino"
         val cantidadesJson = prefs.getString("cantidades", "{}") ?: "{}"
-        
-        // Simple manual parse of " {id:cant, id2:cant2} "
         val cantidades = mutableMapOf<String, Int>()
         try {
             val clean = cantidadesJson.removeSurrounding("{", "}")
@@ -113,7 +113,7 @@ class MovimientosViewModel(
                     }
                 }
             }
-        } catch (e: Exception) { Log.e("MOV_VM", "Error parsing quantities", e) }
+        } catch (e: Exception) { Log.e("MOV_VM", "Error", e) }
 
         _uiState.update { it.copy(origen = origen, destino = destino, cantidades = cantidades) }
         _almacenSeleccionado.value = origen
@@ -147,7 +147,6 @@ class MovimientosViewModel(
         val nuevasCantidades = _uiState.value.cantidades.toMutableMap()
         if (cantidad <= 0) nuevasCantidades.remove(productoId)
         else nuevasCantidades[productoId] = cantidad
-        
         _uiState.update { it.copy(cantidades = nuevasCantidades) }
         guardarEstado()
     }
@@ -155,21 +154,81 @@ class MovimientosViewModel(
     fun limpiarPantalla() {
         val currentState = _uiState.value
         val esAlmacen = currentState.isAlmacenRole
+        val isAdmin = currentState.isAdmin
         
+        // 🔥 Si es Admin, reseteamos a "Selecciona Origen"
+        // 🔥 Si es Almacenista (no admin), forzamos "Almacen Huasteca"
+        val nuevoOrigen = if (isAdmin) {
+            "Selecciona Origen"
+        } else if (esAlmacen) {
+            "Almacen Huasteca"
+        } else {
+            "Selecciona Origen"
+        }
+
         _uiState.update { 
             it.copy(
-                origen = if (esAlmacen) "Almacen Huasteca" else "Selecciona Origen",
+                origen = nuevoOrigen,
                 destino = "Selecciona Destino",
-                cantidades = emptyMap(),
-                stockOrigen = if (esAlmacen) currentState.stockOrigen else emptyMap()
+                cantidades = emptyMap()
             ) 
         }
         
-        if (!esAlmacen) {
-            _almacenSeleccionado.value = "Selecciona Origen"
-        }
+        // Actualizar el listener de stock
+        _almacenSeleccionado.value = nuevoOrigen
 
         guardarEstado()
+    }
+
+    fun limpiarCantidades() {
+        _uiState.update { it.copy(cantidades = emptyMap(), editOrderId = null) }
+        guardarEstado()
+    }
+
+    /**
+     * 🔥 CARGAR ORDEN EXISTENTE PARA EDICIÓN
+     */
+    fun cargarOrdenParaEditar(orderId: String) {
+        _uiState.update { it.copy(isLoading = true, editOrderId = orderId) }
+        viewModelScope.launch {
+            try {
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val doc = db.collection("ordenesTransferencia").document(orderId).get().await()
+                
+                if (doc.exists()) {
+                    val data = doc.data ?: return@launch
+                    val estado = data["estado"] as? String ?: "PENDIENTE"
+                    
+                    if (estado != "PENDIENTE") {
+                        _uiState.update { it.copy(isLoading = false, error = "Esta carga ya no se puede editar (Estado: $estado)") }
+                        return@launch
+                    }
+
+                    val origen = data["origen"] as? String ?: ""
+                    val destino = data["destino"] as? String ?: ""
+                    val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
+                    
+                    val nuevasCantidades = mutableMapOf<String, Int>()
+                    productosRaw.forEach { p ->
+                        val id = p["productoId"] as? String ?: ""
+                        val cant = (p["cantidad"] as? Number)?.toInt() ?: 0
+                        if (id.isNotEmpty()) nuevasCantidades[id] = cant
+                    }
+
+                    _uiState.update { it.copy(
+                        origen = origen,
+                        destino = destino,
+                        cantidades = nuevasCantidades,
+                        isLoading = false
+                    ) }
+                    
+                    _almacenSeleccionado.value = origen
+                    guardarEstado()
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
     }
 
     private fun cargarAlmacenes() {
@@ -179,153 +238,101 @@ class MovimientosViewModel(
         }
     }
 
-    fun cargarStockOrigen(almacen: String) {
-        actualizarOrigen(almacen)
-    }
-
-    fun crearOrden(
-        origen: String,
-        destino: String,
-        productosSeleccionados: List<Plantilla_Producto>,
-        cantidades: Map<String, Int>,
-        onSuccess: (String) -> Unit
-    ) {
+    fun crearOrden(origen: String, destino: String, productosSeleccionados: List<Plantilla_Producto>, cantidades: Map<String, Int>, onSuccess: (String) -> Unit) {
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
-                val uid = usuarioRepo.obtenerUsuarioActual()?.uid ?: com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
-                val listaProductos = productosSeleccionados.map { p ->
-                    mapOf(
-                        "productoId" to p.id,
-                        "nombre" to p.nombre,
-                        "precio" to p.precio,
-                        "imagenUrl" to p.imagenUrl,
-                        "cantidad" to (cantidades[p.id] ?: 0)
-                    )
+                val state = _uiState.value
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                
+                // 🛡️ VALIDACIÓN DE SEGURIDAD: Si estamos editando, verificar que siga PENDIENTE
+                if (state.editOrderId != null) {
+                    val doc = db.collection("ordenesTransferencia").document(state.editOrderId).get().await()
+                    val estadoActual = doc.getString("estado") ?: "PENDIENTE"
+                    if (estadoActual != "PENDIENTE") {
+                        _uiState.update { it.copy(isLoading = false, error = "No se puede guardar: El vendedor ya aceptó esta carga.") }
+                        return@launch
+                    }
                 }
 
+                val uid = usuarioRepo.obtenerUsuarioActual()?.uid ?: ""
+                val listaProductos = productosSeleccionados.map { p ->
+                    mapOf("productoId" to p.id, "nombre" to p.nombre, "precio" to p.precio, "imagenUrl" to p.imagenUrl, "cantidad" to (cantidades[p.id] ?: 0))
+                }
+                
                 val tipoOrden = when {
                     origen == "Compra Producto" -> "COMPRA_PRODUCTO"
                     destino.startsWith("Vendedor") -> "TRANSFERENCIA_VENDEDOR"
                     else -> "TRANSFERENCIA_INTERNA"
                 }
 
-                val ordenData = mapOf(
+                val ordenData = mutableMapOf(
                     "tipo" to tipoOrden,
                     "origen" to origen,
                     "destino" to destino,
                     "productos" to listaProductos,
                     "vendedorId" to uid,
-                    "estado" to "PENDIENTE",
-                    "timestamp" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    "estado" to "PENDIENTE"
                 )
 
-                val docId = inventarioRepo.crearOrdenTransferencia(ordenData)
-                
-                // 🔔 NOTIFICAR AL DESTINO (VENDEDOR O ALMACÉN)
-                if (tipoOrden == "TRANSFERENCIA_VENDEDOR" || tipoOrden == "TRANSFERENCIA_INTERNA") {
-                    val tokens = usuarioRepo.obtenerTokensPorDestino(destino)
-                    tokens.forEach { token ->
-                        enviarNotificacion(
-                            token = token,
-                            titulo = "Nueva Carga Asignada",
-                            mensaje = "Tienes una nueva carga desde $origen. Toca para aceptar.",
-                            tipo = "CARGA_NUEVA",
-                            idExtra = docId
-                        )
-                    }
+                val finalOrderId: String
+                if (state.editOrderId != null) {
+                    // Mantenemos el timestamp original o añadimos uno de edición
+                    ordenData["ultimaModificacion"] = com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    db.collection("ordenesTransferencia").document(state.editOrderId).update(ordenData as Map<String, Any>).await()
+                    finalOrderId = state.editOrderId
+                } else {
+                    ordenData["timestamp"] = com.google.firebase.firestore.FieldValue.serverTimestamp()
+                    finalOrderId = inventarioRepo.crearOrdenTransferencia(ordenData as Map<String, Any>)
                 }
 
-                limpiarPantalla() // Limpiar tras éxito
-                _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true) }
-                onSuccess(docId)
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                if (tipoOrden != "COMPRA_PRODUCTO") {
+                    val tokens = usuarioRepo.obtenerTokensPorDestino(destino)
+                    tokens.forEach { enviarNotificacion(it, "Carga Modificada", "Se ha actualizado tu carga desde $origen.", "CARGA_NUEVA", finalOrderId) }
+                }
+
+                limpiarCantidades()
+                _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true, editOrderId = null) }
+                onSuccess(finalOrderId)
+            } catch (e: Exception) { 
+                _uiState.update { it.copy(isLoading = false, error = e.message) } 
             }
         }
     }
 
-    fun confirmarCargaDirecta(
-        origen: String,
-        destino: String,
-        productosSeleccionados: List<Plantilla_Producto>,
-        cantidadesContadas: Map<String, Int>, // Cambiamos nombre para claridad: conteo físico
-        isLiquidation: Boolean = false,      // Nuevo flag
-        stockTeorico: Map<String, Int> = emptyMap(), // Lo que el sistema cree que hay
-        onSuccess: () -> Unit
-    ) {
+    fun confirmarCargaDirecta(origen: String, destino: String, productosSeleccionados: List<Plantilla_Producto>, cantidades: Map<String, Int>, onSuccess: () -> Unit) {
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
-                val usuarioRoom = usuarioRepo.obtenerUsuarioActual()
-                val uidActual = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
-                val uid = if (usuarioRoom?.uid?.isNotEmpty() == true) usuarioRoom.uid else uidActual
-                
-                val nombreAlmacen = if (isLiquidation) origen else (usuarioRoom?.ultimoAlmacenNombre ?: destino)
-                val folioOperacion = if (isLiquidation) "AUDIT_${System.currentTimeMillis()}" else "DIRECT_LOAD_${System.currentTimeMillis()}"
-
+                val user = usuarioRepo.obtenerUsuarioActual()
+                val uid = user?.uid ?: ""
+                val folio = "DIRECT_LOAD_${System.currentTimeMillis()}"
                 productosSeleccionados.forEach { p ->
-                    val cantidadFisica = cantidadesContadas[p.id] ?: 0
-                    
-                    // --- LÓGICA DE DIFERENCIAL (PARA ARQUEO) ---
-                    var cantidadAMover = cantidadFisica
-                    var tipoAjuste = "CARGA_INVENTARIO"
-                    
-                    if (isLiquidation) {
-                        val teorico = stockTeorico[p.id] ?: 0
-                        // El diferencial es lo que falta o sobra para llegar al físico
-                        cantidadAMover = cantidadFisica - teorico
-                        
-                        tipoAjuste = when {
-                            cantidadAMover > 0 -> "AJUSTE_ARQUEO_SOBRANTE"
-                            cantidadAMover < 0 -> "AJUSTE_ARQUEO_FALTANTE"
-                            else -> "AJUSTE_ARQUEO_OK"
-                        }
-                    }
-
-                    val baseId = if (p.id.contains("_")) p.id.split("_")[0] else p.id
+                    val cant = cantidades[p.id] ?: 0
                     val movimiento = com.gruposanangel.delivery.data.MovimientoInventarioEntity(
                         id = java.util.UUID.randomUUID().toString(),
-                        productoId = baseId,
+                        productoId = p.id,
                         nombreProducto = p.nombre,
-                        cantidad = Math.abs(cantidadAMover), // Diferencia absoluta
-                        tipo = if (isLiquidation) tipoAjuste else "CARGA_INVENTARIO",
+                        cantidad = cant,
+                        tipo = "CARGA_INVENTARIO",
                         vendedorId = uid,
-                        almacenNombre = nombreAlmacen,
+                        almacenNombre = destino,
                         clienteId = null,
-                        referenciaId = folioOperacion,
                         timestamp = System.currentTimeMillis(),
-                        sincronizado = false,
-                        cantidadFisica = if (isLiquidation) cantidadFisica else null,
-                        cantidadTeorica = if (isLiquidation) (stockTeorico[p.id] ?: 0) else null
+                        referenciaId = folio,
+                        sincronizado = false
                     )
-                    
-                    // Solo aplicar ajuste de stock si realmente hubo diferencia
-                    val cantidadLocal = if (tipoAjuste == "AJUSTE_ARQUEO_FALTANTE") -Math.abs(cantidadAMover) else Math.abs(cantidadAMover)
-                    inventarioRepo.registrarMovimientoCarga(movimiento, p.copy(cantidad = cantidadLocal))
+                    inventarioRepo.registrarMovimientoCarga(movimiento, p.copy(cantidad = cant))
                 }
-
-                limpiarPantalla() // Limpiar tras éxito
+                limpiarCantidades()
                 _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true) }
                 onSuccess()
-            } catch (e: Exception) {
-                Log.e("MOV_VM", "Error en confirmarCargaDirecta", e)
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
-            }
+            } catch (e: Exception) { _uiState.update { it.copy(isLoading = false, error = e.message) } }
         }
-    }
-
-    fun resetEstado() {
-        _uiState.update { it.copy(ordenCreadaExito = false, error = null) }
     }
 }
 
-@OptIn(ExperimentalCoroutinesApi::class)
-class MovimientosViewModelFactory(
-    private val inventarioRepo: RepositoryInventario,
-    private val usuarioRepo: RepositoryUsuario,
-    context: android.content.Context
-) : ViewModelProvider.Factory {
+class MovimientosViewModelFactory(private val inventarioRepo: RepositoryInventario, private val usuarioRepo: RepositoryUsuario, context: android.content.Context) : ViewModelProvider.Factory {
     private val appContext = context.applicationContext
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         val prefs = appContext.getSharedPreferences("movimientos_prefs", android.content.Context.MODE_PRIVATE)

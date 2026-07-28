@@ -85,14 +85,22 @@ class RepositoryInventario(
     private suspend fun obtenerImpactoInventarioPendiente(cloudTimestamps: Map<String, Long>): Map<String, Int> {
         val mapaImpacto = mutableMapOf<String, Int>()
         
-        // 1. Impacto de Ventas Pendientes (Siempre restan)
-        // 🔥 Solo consideramos ventas pagadas (No canceladas)
+        // 1. Impacto de Ventas Pendientes (BLINDAJE CONTRA DOBLE DESCUENTO)
         val ventasPendientes = ventaDao.obtenerVentasPendientes().filter { it.estado != "CANCELADA" }
         for (v in ventasPendientes) {
             ventaDao.obtenerDetallesPorVenta(v.id).forEach { d ->
                 // Usamos el ID completo (producto_almacen) si está disponible, sino el base
                 val idPK = d.stockId ?: d.productoId
-                mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) - d.cantidad
+                
+                // 🔥 FILTRO DE TIEMPO QUIRÚRGICO PARA VENTAS:
+                // Si la venta local ocurrió ANTES o AL MISMO TIEMPO que la última actualización de la nube,
+                // asumimos que la nube ya descontó estas piezas y lo ignoramos localmente.
+                val ultimaActNube = cloudTimestamps[idPK] ?: 0L
+                if (v.fecha > ultimaActNube) {
+                    mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) - d.cantidad
+                } else {
+                    Log.d(TAG, "Ignorando venta pendiente en $idPK del ticket ${v.id}: La nube ya está más actualizada (${v.fecha} <= $ultimaActNube)")
+                }
             }
         }
 

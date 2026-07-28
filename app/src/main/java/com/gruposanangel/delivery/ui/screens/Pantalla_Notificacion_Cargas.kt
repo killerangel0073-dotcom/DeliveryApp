@@ -106,9 +106,13 @@ fun PantallaNotificaciones(navController: NavController) {
     PantallaNotificacionesContent(
         uiState = uiState,
         onBack = {
-            navController.navigate("delivery?screen=Inventario") {
-                launchSingleTop = true
-                popUpTo(0) { inclusive = true }
+            // 🔥 CORRECCIÓN: Usar popBackStack para regresar a la pantalla anterior real (Inicio o Inventario)
+            // Esto evita forzar la pantalla de Inventario a todos los usuarios.
+            if (!navController.popBackStack()) {
+                // Fallback si no hay historial (ej: abierto desde notificación push)
+                navController.navigate("delivery?screen=Inicio") {
+                    popUpTo(0) { inclusive = true }
+                }
             }
         },
         onItemClick = { noti ->

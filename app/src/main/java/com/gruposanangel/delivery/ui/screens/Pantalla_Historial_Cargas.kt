@@ -59,7 +59,10 @@ fun PantallaHistorialCargas(
     // --- ESTADOS PARA CANCELACIÓN ---
     var cargaSeleccionadaParaCancelar by remember { mutableStateOf<CargaResumen?>(null) }
     var motivoCancelacion by remember { mutableStateOf("") }
-    val esAdminAutorizado = vm.userRole in listOf("CEO", "Gerente General")
+    val userRole = vm.userRole.trim()
+    val esAdminAutorizado = userRole in listOf("CEO", "Gerente General")
+    val esEncargadoAlmacen = userRole in listOf("Encargado Almacen", "Auxiliar de almacen")
+    val puedeEditar = esAdminAutorizado || esEncargadoAlmacen
 
     Column(
         modifier = Modifier
@@ -244,7 +247,11 @@ fun PantallaHistorialCargas(
                         carga = item, 
                         formato = formatoMoneda, 
                         esAdmin = esAdminAutorizado,
+                        puedeEditar = puedeEditar,
                         onCancel = { cargaSeleccionadaParaCancelar = item },
+                        onEdit = {
+                            navController.navigate("LISTA PRODUCTOS?editOrderId=${item.id}")
+                        },
                         onClick = {
                             val objCarga = Plantila_carga(id = item.id, nombreCarga = if (tabIndex == 0) "Carga a ${item.destino}" else "Arqueo de ${item.destino}", aceptada = true, plantillaProductos = item.productos)
                             navController.currentBackStackEntry?.savedStateHandle?.set("carga", objCarga)
@@ -370,7 +377,9 @@ fun ItemHistorialCarga(
     carga: CargaResumen, 
     formato: NumberFormat, 
     esAdmin: Boolean,
+    puedeEditar: Boolean = false,
     onCancel: () -> Unit,
+    onEdit: () -> Unit,
     onClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -378,6 +387,7 @@ fun ItemHistorialCarga(
     val scale by animateFloatAsState(targetValue = if (isPressed) 0.96f else 1f, animationSpec = spring(0.6f, 300f), label = "")
     
     val esCancelada = carga.estado == "CANCELADA"
+    val esPendiente = carga.estado == "PENDIENTE"
     
     val statusColor = when (carga.estado) { 
         "ACEPTADA", "ARQUEADO", "COMPLETADA" -> Color(0xFF2E7D32)
@@ -447,10 +457,19 @@ fun ItemHistorialCarga(
                     )
                 }
             }
-            
-            if (esAdmin && carga.estado == "PENDIENTE") {
-                IconButton(onClick = onCancel) {
-                    Icon(Icons.Default.DeleteForever, null, tint = Color.Red)
+
+            if (esPendiente) {
+                Row {
+                    if (puedeEditar) {
+                        IconButton(onClick = onEdit) {
+                            Icon(Icons.Default.Edit, "Editar", tint = Color(0xFF00AAFF))
+                        }
+                    }
+                    if (esAdmin) {
+                        IconButton(onClick = onCancel) {
+                            Icon(Icons.Default.DeleteForever, null, tint = Color.Red)
+                        }
+                    }
                 }
             } else {
                 Icon(Icons.Default.ChevronRight, null, tint = Color.LightGray, modifier = Modifier.padding(start = 12.dp).size(20.dp))

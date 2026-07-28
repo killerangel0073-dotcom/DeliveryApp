@@ -77,9 +77,10 @@ class InventarioViewModel(
                         // CEO/Gerente: Vista Global (El mundo) por defecto
                         activarVistaGlobal()
                     } else if (esAlmacenRol) {
-                        // Almacenistas: Almacen Huasteca por defecto
-                        seleccionarAlmacen("Almacen Huasteca")
-                    } else if (!nombreAlmacen.isNullOrEmpty()) {
+                        // Almacenistas: Su almacén asignado por defecto (Fallback a Huasteca)
+                        seleccionarAlmacen(nombreAlmacen ?: "Almacen Huasteca")
+                    }
+ else if (!nombreAlmacen.isNullOrEmpty()) {
                         // Vendedores: Su propio almacén por defecto
                         seleccionarAlmacen(nombreAlmacen)
                         escucharNotificaciones(nombreAlmacen)

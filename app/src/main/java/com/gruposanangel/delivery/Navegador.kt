@@ -55,18 +55,18 @@ fun Navegador(
         }
 
         composable(
-            route = "LISTA PRODUCTOS?origen={origen}&destino={destino}&emergency={emergency}&isLiquidation={isLiquidation}",
+            route = "LISTA PRODUCTOS?origen={origen}&destino={destino}&emergency={emergency}&editOrderId={editOrderId}",
             arguments = listOf(
                 navArgument("origen") { type = NavType.StringType; nullable = true },
                 navArgument("destino") { type = NavType.StringType; nullable = true },
                 navArgument("emergency") { type = NavType.BoolType; defaultValue = false },
-                navArgument("isLiquidation") { type = NavType.BoolType; defaultValue = false }
+                navArgument("editOrderId") { type = NavType.StringType; nullable = true }
             )
         ) { backStackEntry ->
             val origen = backStackEntry.arguments?.getString("origen")
             val destino = backStackEntry.arguments?.getString("destino")
             val isEmergency = backStackEntry.arguments?.getBoolean("emergency") ?: false
-            val isLiquidation = backStackEntry.arguments?.getBoolean("isLiquidation") ?: false
+            val editOrderId = backStackEntry.arguments?.getString("editOrderId")
             
             MovimientosInventarioScreen(
                 navController = navController,
@@ -75,8 +75,20 @@ fun Navegador(
                 preSelectedOrigen = origen,
                 preSelectedDestino = destino,
                 isEmergency = isEmergency,
-                isLiquidationMode = isLiquidation
+                editOrderId = editOrderId
             )
+        }
+
+        composable(
+            route = "LIQUIDACION_DIRECTA?origen={origen}&destino={destino}",
+            arguments = listOf(
+                navArgument("origen") { type = NavType.StringType },
+                navArgument("destino") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val origen = backStackEntry.arguments?.getString("origen") ?: ""
+            val destino = backStackEntry.arguments?.getString("destino") ?: ""
+            PantallaLiquidacionDirecta(navController, origen, destino)
         }
 
         composable("NOTIFICACIONES") {
