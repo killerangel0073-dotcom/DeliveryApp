@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +32,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -50,6 +52,8 @@ import androidx.compose.ui.text.style.TextAlign
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.gruposanangel.delivery.R
+import com.gruposanangel.delivery.ui.theme.*
+import com.gruposanangel.delivery.utilidades.DialogoSeleccionImagen
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 import java.io.File
@@ -117,26 +121,29 @@ fun DropdownFieldEditar(
             readOnly = true,
             enabled = enabled,
             label = { Text(label) },
-            leadingIcon = { Icon(icon, null, tint = if (enabled) Color.Red else Color.Gray) },
+            leadingIcon = { Icon(icon, null, tint = if (enabled) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             modifier = Modifier.menuAnchor().fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color.Red,
-                focusedLabelColor = Color.Red,
-                disabledBorderColor = Color(0xFFEEEEEE),
-                disabledLabelColor = Color.LightGray
+                focusedBorderColor = DelisaRed,
+                focusedLabelColor = DelisaRed,
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
+                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
             )
         )
 
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier.background(Color.White)
+            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
         ) {
             options.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(option, fontWeight = FontWeight.Medium) },
+                    text = { Text(option, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface) },
                     onClick = {
                         expanded = false
                         onSelect(option)
@@ -161,16 +168,19 @@ fun ModernFieldEditar(
         value = value,
         onValueChange = onChange,
         label = { Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
-        leadingIcon = { Icon(icon, null, tint = Color.Red) },
-        prefix = if (prefix != null) { { Text(prefix) } } else null,
+        leadingIcon = { Icon(icon, null, tint = DelisaRed) },
+        prefix = if (prefix != null) { { Text(prefix, color = MaterialTheme.colorScheme.onSurface) } } else null,
         maxLines = maxLines,
         singleLine = maxLines == 1,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = Color.Red,
-            focusedLabelColor = Color.Red
+            focusedBorderColor = DelisaRed,
+            focusedLabelColor = DelisaRed,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline
         )
     )
 }
@@ -306,7 +316,7 @@ fun EditarProductoScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFFF8F9FA)
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(
             Modifier
@@ -321,10 +331,10 @@ fun EditarProductoScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 8.dp)
+                    .shadow(2.dp, RoundedCornerShape(24.dp)),
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(3.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Row(
                     modifier = Modifier
@@ -333,14 +343,14 @@ fun EditarProductoScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Regresar", tint = Color.Red)
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Regresar", tint = DelisaRed)
                     }
                     Spacer(Modifier.width(4.dp))
                     Text(
                         text = if (productoId == null && previewProducto == null) "NUEVO PRODUCTO" else "EDITAR PRODUCTO",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Black,
-                        color = Color.DarkGray,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 15.sp
                     )
                 }
@@ -348,7 +358,7 @@ fun EditarProductoScreen(
 
             if (isLoading) {
                 Box(Modifier.fillMaxSize().padding(vertical = 60.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color.Red)
+                    CircularProgressIndicator(color = DelisaRed)
                 }
                 return@Column
             }
@@ -365,10 +375,10 @@ fun EditarProductoScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxSize()
+                        .shadow(4.dp, RoundedCornerShape(24.dp))
                         .clickable { showDialog = true },
                     shape = RoundedCornerShape(24.dp),
-                    elevation = CardDefaults.cardElevation(4.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     if (imageBitmap != null) {
                         Image(
@@ -379,7 +389,7 @@ fun EditarProductoScreen(
                         )
                     } else {
                         Box(
-                            Modifier.fillMaxSize().background(Color.Red.copy(alpha = 0.05f)),
+                            Modifier.fillMaxSize().background(DelisaRed.copy(alpha = 0.05f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Image(
@@ -394,7 +404,7 @@ fun EditarProductoScreen(
 
                 Surface(
                     shape = CircleShape,
-                    color = Color.Red,
+                    color = DelisaRed,
                     shadowElevation = 4.dp,
                     modifier = Modifier
                         .size(36.dp)
@@ -413,10 +423,11 @@ fun EditarProductoScreen(
 
             // FORMULARIO CON ICONOS OUTLINED MODERNOS
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(2.dp, RoundedCornerShape(24.dp)),
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(2.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
@@ -426,7 +437,7 @@ fun EditarProductoScreen(
                         "Información General",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
-                        color = Color.DarkGray
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
                     ModernFieldEditar("Nombre del Producto", nombre, Icons.Outlined.Label) { nombre = it }
@@ -470,18 +481,18 @@ fun EditarProductoScreen(
                     // --- SECCIÓN DE PRODUCTO COMPUESTO (MIX) ---
                     Spacer(Modifier.height(8.dp))
                     Row(
-                        modifier = Modifier.fillMaxWidth().background(Color.Red.copy(alpha = 0.05f), RoundedCornerShape(12.dp)).padding(8.dp),
+                        modifier = Modifier.fillMaxWidth().background(DelisaRed.copy(alpha = 0.05f), RoundedCornerShape(12.dp)).padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Producto Compuesto (Mix)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("Activa si este producto se arma con otros (Ej. Mix Bandera)", fontSize = 11.sp, color = Color.Gray)
+                            Text("Producto Compuesto (Mix)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Activa si este producto se arma con otros (Ej. Mix Bandera)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(
                             checked = esCompuesto,
                             onCheckedChange = { esCompuesto = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color.Red, checkedTrackColor = Color.Red.copy(alpha = 0.5f))
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = DelisaRed)
                         )
                     }
 
@@ -490,7 +501,7 @@ fun EditarProductoScreen(
                             "INGREDIENTES DEL MIX",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Black,
-                            color = Color.Red,
+                            color = DelisaRed,
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                             textAlign = TextAlign.Center
                         )
@@ -499,12 +510,12 @@ fun EditarProductoScreen(
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F2F6))
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                             ) {
                                 Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text(ing.nombre, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        Text("Base: ${ing.id.takeLast(6)}", fontSize = 10.sp, color = Color.Gray)
+                                        Text(ing.nombre, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                                        Text("Base: ${ing.id.takeLast(6)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     OutlinedTextField(
                                         value = if(ing.gramos == 0.0) "" else ing.gramos.toString(),
@@ -516,10 +527,15 @@ fun EditarProductoScreen(
                                         suffix = { Text("g") },
                                         modifier = Modifier.width(90.dp),
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        singleLine = true
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = DelisaRed,
+                                            focusedLabelColor = DelisaRed,
+                                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                        )
                                     )
                                     IconButton(onClick = { ingredientes.removeAt(index) }) {
-                                        Icon(Icons.Outlined.Delete, null, tint = Color.Red)
+                                        Icon(Icons.Outlined.Delete, null, tint = DelisaRed)
                                     }
                                 }
                             }
@@ -528,12 +544,12 @@ fun EditarProductoScreen(
                         Button(
                             onClick = { showAddIngredientDialog = true },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onSurfaceVariant),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Icon(Icons.Outlined.Add, null)
+                            Icon(Icons.Outlined.Add, null, tint = MaterialTheme.colorScheme.surface)
                             Spacer(Modifier.width(8.dp))
-                            Text("AÑADIR INGREDIENTE", fontSize = 12.sp)
+                            Text("AÑADIR INGREDIENTE", fontSize = 12.sp, color = MaterialTheme.colorScheme.surface)
                         }
 
                         // Cálculo de Costo Sugerido (Suma de ingredientes)
@@ -547,16 +563,16 @@ fun EditarProductoScreen(
                         if (costoSugerido > 0) {
                             Card(
                                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+                                colors = CardDefaults.cardColors(containerColor = DelisaGreenLight.copy(alpha = if(isSystemInDarkTheme()) 0.2f else 1f)),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Outlined.Analytics, null, tint = Color(0xFF2E7D32))
+                                    Icon(Icons.Outlined.Analytics, null, tint = if(isSystemInDarkTheme()) Color(0xFF81C784) else DelisaGreenDark)
                                     Spacer(Modifier.width(12.dp))
                                     Column {
-                                        Text("Costo de Producción Sugerido", fontSize = 11.sp, color = Color.Gray)
-                                        Text("$ ${String.format(Locale.US, "%.2f", costoSugerido)}", fontWeight = FontWeight.Black, color = Color(0xFF2E7D32))
-                                        Text("* Basado en el costo de los ingredientes base.", fontSize = 9.sp, color = Color.Gray)
+                                        Text("Costo de Producción Sugerido", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("$ ${String.format(Locale.US, "%.2f", costoSugerido)}", fontWeight = FontWeight.Black, color = if(isSystemInDarkTheme()) Color(0xFF81C784) else DelisaGreenDark)
+                                        Text("* Basado en el costo de los ingredientes base.", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
@@ -568,7 +584,7 @@ fun EditarProductoScreen(
                             "CONFIGURACIÓN DE COMPRA",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Black,
-                            color = Color.Red,
+                            color = DelisaRed,
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                             textAlign = TextAlign.Center
                         )
@@ -609,7 +625,7 @@ fun EditarProductoScreen(
                         }
                     }
                     
-                    Text("Solo números: Ej. 900, 20, 45", fontSize = 10.sp, color = Color.Gray)
+                    Text("Solo números: Ej. 900, 20, 45", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                     ModernFieldEditar("Precio al Público", precio, Icons.Outlined.AttachMoney, keyboardType = KeyboardType.Number, prefix = "$") {
                         if (it.text.all { c -> c.isDigit() || c == '.' }) precio = it
@@ -627,7 +643,7 @@ fun EditarProductoScreen(
                 errorMessage?.let {
                     Text(
                         it,
-                        color = Color.Red,
+                        color = DelisaRed,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         modifier = Modifier.padding(vertical = 4.dp)
@@ -701,7 +717,7 @@ fun EditarProductoScreen(
                     .fillMaxWidth()
                     .height(52.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
             ) {
                 Icon(Icons.Outlined.Save, contentDescription = null, tint = Color.White)
                 Spacer(Modifier.width(8.dp))
@@ -714,7 +730,17 @@ fun EditarProductoScreen(
 
     // Diálogo de Cámara / Galería
     if (showDialog) {
-        // ... (código existente)
+        DialogoSeleccionImagen(
+            onDismiss = { showDialog = false },
+            onCameraSelected = { 
+                launcherCamera.launch(null)
+                showDialog = false 
+            },
+            onGallerySelected = { 
+                launcherGallery.launch("image/*")
+                showDialog = false
+            }
+        )
     }
 
     // --- DIÁLOGO PARA SELECCIONAR INGREDIENTES ---
@@ -726,8 +752,8 @@ fun EditarProductoScreen(
 
         AlertDialog(
             onDismissRequest = { showAddIngredientDialog = false },
-            containerColor = Color.White,
-            title = { Text("Añadir Ingrediente", fontWeight = FontWeight.Black) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = { Text("Añadir Ingrediente", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 Column(Modifier.height(400.dp)) {
                     OutlinedTextField(
@@ -735,8 +761,13 @@ fun EditarProductoScreen(
                         onValueChange = { query = it },
                         label = { Text("Buscar producto...") },
                         modifier = Modifier.fillMaxWidth(),
-                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                        singleLine = true
+                        leadingIcon = { Icon(Icons.Outlined.Search, null, tint = DelisaRed) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = DelisaRed,
+                            focusedLabelColor = DelisaRed,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        )
                     )
                     Spacer(Modifier.height(8.dp))
                     LazyColumn(Modifier.weight(1f)) {
@@ -756,18 +787,18 @@ fun EditarProductoScreen(
                                         .padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Outlined.Inventory2, null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Outlined.Inventory2, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(12.dp))
-                                    Text(nombreP, fontSize = 14.sp)
+                                    Text(nombreP, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
                                 }
-                                HorizontalDivider(color = Color(0xFFF1F2F6))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAddIngredientDialog = false }) { Text("CERRAR") }
+                TextButton(onClick = { showAddIngredientDialog = false }) { Text("CERRAR", color = DelisaRed) }
             }
         )
     }

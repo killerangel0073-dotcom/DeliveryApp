@@ -58,17 +58,13 @@ import coil.compose.AsyncImage
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.RutaEntity
 import com.gruposanangel.delivery.data.UsuarioEntity
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
+import com.gruposanangel.delivery.utilidades.DialogoSeleccionImagen
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
-
-private val RojoDelisa = Color(0xFFE53935)
-private val NegroPremium = Color(0xFF1E1E24)
-private val GrisFondoPremium = Color(0xFFF6F8FA)
-private val GrisTextoSecundario = Color(0xFF757575)
 
 @Composable
 fun Pantalla_Usuarios_Admin(navController: NavController) {
@@ -171,23 +167,28 @@ fun PantallaUsuariosAdminContent(
     Scaffold(
         topBar = { 
             TopAppBar(
-                title = { Text("GESTIÓN DE PERSONAL", fontWeight = FontWeight.Black, color = NegroPremium, style = MaterialTheme.typography.labelLarge) }, 
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RojoDelisa) } }, 
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                title = { Text("GESTIÓN DE PERSONAL", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge) }, 
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) } }, 
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             ) 
         },
-        containerColor = GrisFondoPremium
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             LazyRow(Modifier.fillMaxWidth().padding(vertical = 20.dp), contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 item { UserSelectorCard("Nuevo", "Crear cuenta", icon = Icons.Default.PersonAdd, isSelected = uiState.isNewUserMode, onClick = { onUserSelect(null) }) }
                 items(uiState.usuarios) { u -> UserSelectorCard(u.nombre, u.puestoTrabajo ?: "Sin puesto", photoUrl = u.photoUrl, isSelected = uiState.usuarioSeleccionado?.uid == u.uid && !uiState.isNewUserMode, onClick = { onUserSelect(u) }) }
             }
-            Card(Modifier.fillMaxWidth().weight(1f), shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(12.dp)) {
+            Card(
+                modifier = Modifier.fillMaxWidth().weight(1f), 
+                shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), 
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(0.dp) // Eliminamos elevación para evitar grises
+            ) {
                 Column(Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) { 
-                        Text(if (uiState.isNewUserMode) "Nuevo Usuario" else "Editar Perfil", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = RojoDelisa)
-                        if (!uiState.isNewUserMode) IconButton(onClick = { showDelDialog = true }) { Icon(Icons.Default.PersonRemove, null, tint = GrisTextoSecundario) } 
+                        Text(if (uiState.isNewUserMode) "Nuevo Usuario" else "Editar Perfil", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = DelisaRed)
+                        if (!uiState.isNewUserMode) IconButton(onClick = { showDelDialog = true }) { Icon(Icons.Default.PersonRemove, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } 
                     }
                     Box(
                         Modifier
@@ -203,11 +204,16 @@ fun PantallaUsuariosAdminContent(
                             ) { showImgDialog = true }, 
                         contentAlignment = Alignment.BottomEnd
                     ) {
-                        Surface(shape = CircleShape, shadowElevation = 4.dp, modifier = Modifier.fillMaxSize()) {
+                        Surface(
+                            shape = CircleShape, 
+                            shadowElevation = 4.dp, 
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.background
+                        ) {
                             if (imgBitmap != null) Image(bitmap = imgBitmap.asImageBitmap(), null, contentScale = ContentScale.Crop)
                             else AsyncImage(model = uiState.usuarioSeleccionado?.photoUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = null, contentScale = ContentScale.Crop)
                         }
-                        Surface(shape = CircleShape, color = RojoDelisa, modifier = Modifier.size(30.dp)) { Icon(Icons.Outlined.PhotoCamera, null, tint = Color.White, modifier = Modifier.padding(6.dp)) }
+                        Surface(shape = CircleShape, color = DelisaRed, modifier = Modifier.size(30.dp)) { Icon(Icons.Outlined.PhotoCamera, null, tint = Color.White, modifier = Modifier.padding(6.dp)) }
                     }
                     FormTextField(nombre, { nombre = it }, "Nombre Completo", Icons.Default.Badge)
                     FormTextField(email, { email = it }, "Correo Electrónico", Icons.Default.Email)
@@ -220,32 +226,32 @@ fun PantallaUsuariosAdminContent(
                             onValueChange = { },
                             readOnly = true,
                             label = { Text("Puesto / Cargo") },
-                            leadingIcon = { Icon(Icons.Default.Work, null, tint = RojoDelisa) },
+                            leadingIcon = { Icon(Icons.Default.Work, null, tint = DelisaRed) },
                             trailingIcon = { 
                                 IconButton(onClick = { expandedPuestos = true }) {
-                                    Icon(Icons.Default.ArrowDropDown, null, tint = NegroPremium)
+                                    Icon(Icons.Default.ArrowDropDown, null, tint = MaterialTheme.colorScheme.onSurface)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().clickable { expandedPuestos = true },
                             shape = RoundedCornerShape(16.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = RojoDelisa, 
-                                focusedLabelColor = RojoDelisa, 
-                                cursorColor = RojoDelisa,
-                                disabledBorderColor = Color.LightGray,
-                                disabledTextColor = NegroPremium,
-                                disabledLabelColor = GrisTextoSecundario
+                                focusedBorderColor = DelisaRed, 
+                                focusedLabelColor = DelisaRed, 
+                                cursorColor = DelisaRed,
+                                disabledBorderColor = MaterialTheme.colorScheme.outline,
+                                disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
                             ),
                             enabled = true
                         )
                         DropdownMenu(
                             expanded = expandedPuestos,
                             onDismissRequest = { expandedPuestos = false },
-                            modifier = Modifier.fillMaxWidth(0.9f).background(Color.White)
+                            modifier = Modifier.fillMaxWidth(0.9f).background(MaterialTheme.colorScheme.surface)
                         ) {
                             uiState.puestosDisponibles.forEach { p ->
                                 DropdownMenuItem(
-                                    text = { Text(p, fontWeight = FontWeight.Medium) },
+                                    text = { Text(p, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface) },
                                     onClick = { 
                                         if (p != puesto && !uiState.isNewUserMode) {
                                             pendingPuestoChange = p
@@ -265,17 +271,23 @@ fun PantallaUsuariosAdminContent(
                             value = password,
                             onValueChange = { password = it },
                             label = { Text("Contraseña de Acceso") },
-                            leadingIcon = { Icon(Icons.Default.Lock, null, tint = RojoDelisa) },
+                            leadingIcon = { Icon(Icons.Default.Lock, null, tint = DelisaRed) },
                             trailingIcon = {
                                 IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                    Icon(if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, null, tint = Color.Gray)
+                                    Icon(if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             },
                             visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = RojoDelisa, focusedLabelColor = RojoDelisa, cursorColor = RojoDelisa),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = DelisaRed, 
+                                focusedLabelColor = DelisaRed, 
+                                cursorColor = DelisaRed,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                            ),
                             singleLine = true
                         )
                     }
@@ -286,14 +298,14 @@ fun PantallaUsuariosAdminContent(
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
-                            border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f))
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         ) {
                             Column(Modifier.padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Explore, null, tint = RojoDelisa, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Default.Explore, null, tint = DelisaRed, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(8.dp))
-                                    Text("RUTA ASIGNADA", fontWeight = FontWeight.Black, fontSize = 12.sp, color = RojoDelisa)
+                                    Text("RUTA ASIGNADA", fontWeight = FontWeight.Black, fontSize = 12.sp, color = DelisaRed)
                                 }
                                 Spacer(Modifier.height(12.dp))
                                 
@@ -304,42 +316,41 @@ fun PantallaUsuariosAdminContent(
                                         onClick = { expandedRutas = true },
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(12.dp),
-                                        colors = CardDefaults.outlinedCardColors(containerColor = Color.White),
-                                        border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f))
+                                        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                                     ) {
                                         Row(
                                             Modifier.padding(12.dp).fillMaxWidth(),
                                             Arrangement.SpaceBetween,
                                             Alignment.CenterVertically
                                         ) {
-                                            // Mostrar el nombre propuesto si existe, sino el original
                                             val rutaAMostrar = uiState.rutaCambioPendienteNombre ?: user?.ultimaRutaNombre ?: "Sin ruta asignada"
                                             val esCambio = uiState.rutaCambioPendienteId != null
                                             
                                             Text(
                                                 text = if (esCambio) "$rutaAMostrar (Pendiente)" else rutaAMostrar,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (esCambio) RojoDelisa else (if (user?.ultimaRutaId != null) NegroPremium else GrisTextoSecundario)
+                                                color = if (esCambio) DelisaRed else (if (user?.ultimaRutaId != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
                                             )
-                                            Icon(Icons.Default.ArrowDropDown, null, tint = NegroPremium)
+                                            Icon(Icons.Default.ArrowDropDown, null, tint = MaterialTheme.colorScheme.onSurface)
                                         }
                                     }
 
                                     DropdownMenu(
                                         expanded = expandedRutas,
                                         onDismissRequest = { expandedRutas = false },
-                                        modifier = Modifier.fillMaxWidth(0.8f).background(Color.White)
+                                        modifier = Modifier.fillMaxWidth(0.8f).background(MaterialTheme.colorScheme.surface)
                                     ) {
                                         DropdownMenuItem(
-                                            text = { Text("Ninguna (Quitar ruta)", color = GrisTextoSecundario) },
+                                            text = { Text("Ninguna (Quitar ruta)", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                                             onClick = { onRutaClear(); expandedRutas = false }
                                         )
-                                        HorizontalDivider(color = GrisFondoPremium)
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.background)
                                         uiState.rutas.forEach { ruta ->
                                             DropdownMenuItem(
                                                 text = { 
                                                     Column {
-                                                        Text(ruta.nombre, fontWeight = FontWeight.Bold, color = NegroPremium)
+                                                        Text(ruta.nombre, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                                     }
                                                 },
                                                 onClick = { onRutaSelect(ruta); expandedRutas = false }
@@ -352,7 +363,7 @@ fun PantallaUsuariosAdminContent(
                                     Text(
                                         "El cambio se aplicará al guardar.", 
                                         fontSize = 11.sp, 
-                                        color = RojoDelisa, 
+                                        color = DelisaRed, 
                                         modifier = Modifier.padding(top = 4.dp)
                                     )
                                 }
@@ -365,14 +376,14 @@ fun PantallaUsuariosAdminContent(
                     val ineEstado = user?.ineEstado ?: "PENDIENTE"
                     
                     val colorLicencia = when(licenciaEstado) {
-                        "VIGENTE" -> Color(0xFF2E7D32)
-                        "VENCIDA" -> RojoDelisa
-                        else -> GrisTextoSecundario
+                        "VIGENTE" -> DelisaGreen
+                        "VENCIDA" -> DelisaRed
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                     val colorIne = when(ineEstado) {
-                        "VIGENTE" -> Color(0xFF2E7D32)
-                        "VENCIDA" -> RojoDelisa
-                        else -> GrisTextoSecundario
+                        "VIGENTE" -> DelisaGreen
+                        "VENCIDA" -> DelisaRed
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
 
                     // --- CARD LICENCIA ---
@@ -391,10 +402,10 @@ fun PantallaUsuariosAdminContent(
                                 Text("AUDITORÍA DE LICENCIA", fontWeight = FontWeight.Black, fontSize = 12.sp, color = colorLicencia)
                             }
                             Spacer(Modifier.height(8.dp))
-                            Text("Estado: $licenciaEstado", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = NegroPremium)
+                            Text("Estado: $licenciaEstado", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
                             
                             if (user?.licenciaVencimiento != null && user.licenciaVencimiento > 0) {
-                                Text("Vencimiento: ${sdf.format(Date(user.licenciaVencimiento))}", fontSize = 13.sp, color = GrisTextoSecundario)
+                                Text("Vencimiento: ${sdf.format(Date(user.licenciaVencimiento))}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
 
                             if (uiState.resultadoLicencia != null && !uiState.isLoadingLicencia) {
@@ -412,7 +423,7 @@ fun PantallaUsuariosAdminContent(
                             }
                             
                             if (uiState.errorLicencia != null) {
-                                Text("Delisa IA: ${uiState.errorLicencia}", fontSize = 11.sp, color = RojoDelisa, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                                Text("Delisa IA: ${uiState.errorLicencia}", fontSize = 11.sp, color = DelisaRed, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                             }
 
                             Spacer(Modifier.height(12.dp))
@@ -428,8 +439,8 @@ fun PantallaUsuariosAdminContent(
                                     colors = ButtonDefaults.buttonColors(containerColor = colorLicencia),
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
-                                    Icon(Icons.Default.PhotoCamera, null); Spacer(Modifier.width(8.dp))
-                                    Text("VALIDAR LICENCIA (IA)", fontWeight = FontWeight.Bold)
+                                    Icon(Icons.Default.PhotoCamera, null, tint = Color.White); Spacer(Modifier.width(8.dp))
+                                    Text("VALIDAR LICENCIA (IA)", fontWeight = FontWeight.Bold, color = Color.White)
                                 }
                             }
                         }
@@ -453,10 +464,10 @@ fun PantallaUsuariosAdminContent(
                                 Text("AUDITORÍA DE INE", fontWeight = FontWeight.Black, fontSize = 12.sp, color = colorIne)
                             }
                             Spacer(Modifier.height(8.dp))
-                            Text("Estado: $ineEstado", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = NegroPremium)
+                            Text("Estado: $ineEstado", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
                             
                             if (user?.ineVencimiento != null && user.ineVencimiento > 0) {
-                                Text("Vencimiento: ${sdf.format(Date(user.ineVencimiento))}", fontSize = 13.sp, color = GrisTextoSecundario)
+                                Text("Vencimiento: ${sdf.format(Date(user.ineVencimiento))}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
 
                             if (uiState.resultadoIne != null && !uiState.isLoadingIne) {
@@ -474,7 +485,7 @@ fun PantallaUsuariosAdminContent(
                             }
 
                             if (uiState.errorIne != null) {
-                                Text("Delisa IA: ${uiState.errorIne}", fontSize = 11.sp, color = RojoDelisa, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                                Text("Delisa IA: ${uiState.errorIne}", fontSize = 11.sp, color = DelisaRed, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                             }
 
                             Spacer(Modifier.height(12.dp))
@@ -490,8 +501,8 @@ fun PantallaUsuariosAdminContent(
                                     colors = ButtonDefaults.buttonColors(containerColor = colorIne),
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
-                                    Icon(Icons.Default.Fingerprint, null); Spacer(Modifier.width(8.dp))
-                                    Text("VALIDAR INE (IA)", fontWeight = FontWeight.Bold)
+                                    Icon(Icons.Default.Fingerprint, null, tint = Color.White); Spacer(Modifier.width(8.dp))
+                                    Text("VALIDAR INE (IA)", fontWeight = FontWeight.Bold, color = Color.White)
                                 }
                             }
                         }
@@ -500,7 +511,7 @@ fun PantallaUsuariosAdminContent(
                     Spacer(Modifier.height(16.dp))
 
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) { 
-                        Text("Acceso a la App (Suspendido/Activo)", fontWeight = FontWeight.Bold, color = NegroPremium)
+                        Text("Acceso a la App (Suspendido/Activo)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         Switch(
                             checked = activo, 
                             onCheckedChange = { 
@@ -509,25 +520,25 @@ fun PantallaUsuariosAdminContent(
                             }, 
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = RojoDelisa,
+                                checkedTrackColor = DelisaRed,
                                 uncheckedThumbColor = Color.White,
-                                uncheckedTrackColor = Color.LightGray,
-                                checkedBorderColor = RojoDelisa,
-                                uncheckedBorderColor = Color.LightGray
+                                uncheckedTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                checkedBorderColor = DelisaRed,
+                                uncheckedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                             )
                         ) 
                     }
                     
-                    if (uiState.isLoading) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally), color = RojoDelisa)
+                    if (uiState.isLoading) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally), color = DelisaRed)
                     else Button(
                         onClick = { onSave(nombre, email, puesto, activo, user?.licenciaConducir ?: "", user?.credencialElector ?: "", password) }, 
                         modifier = Modifier.fillMaxWidth().height(54.dp), 
                         shape = RoundedCornerShape(16.dp), 
-                        colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa)
+                        colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
                     ) { 
-                        Icon(if (uiState.isNewUserMode) Icons.Default.PersonAdd else Icons.Default.Save, null); 
+                        Icon(if (uiState.isNewUserMode) Icons.Default.PersonAdd else Icons.Default.Save, null, tint = Color.White); 
                         Spacer(Modifier.width(8.dp)); 
-                        Text(if (uiState.isNewUserMode) "CREAR CUENTA" else "ACTUALIZAR DATOS", fontWeight = FontWeight.ExtraBold) 
+                        Text(if (uiState.isNewUserMode) "CREAR CUENTA" else "ACTUALIZAR DATOS", fontWeight = FontWeight.ExtraBold, color = Color.White) 
                     }
                 }
             }
@@ -536,11 +547,12 @@ fun PantallaUsuariosAdminContent(
     if (showDelDialog) {
         AlertDialog(
             onDismissRequest = { showDelDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Text(
                     "BAJA DE PERSONAL", 
                     fontWeight = FontWeight.Black, 
-                    color = NegroPremium,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
@@ -554,14 +566,22 @@ fun PantallaUsuariosAdminContent(
                         else 
                             "¿Deseas dar de baja definitiva a ${uiState.usuarioSeleccionado?.nombre}?\nPerderá acceso inmediato a la plataforma.",
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     OutlinedTextField(
                         value = motivoBaja,
                         onValueChange = { motivoBaja = it },
                         label = { Text("Motivo de la baja") },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = DelisaRed,
+                            focusedLabelColor = DelisaRed,
+                            cursorColor = DelisaRed,
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                        )
                     )
                 }
             },
@@ -575,84 +595,33 @@ fun PantallaUsuariosAdminContent(
                             Toast.makeText(context, "Por favor escribe un motivo", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("CONFIRMAR BAJA DEFINITIVA", fontWeight = FontWeight.Bold)
+                    Text("CONFIRMAR BAJA DEFINITIVA", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDelDialog = false }, modifier = Modifier.fillMaxWidth()) {
-                    Text("CANCELAR", color = GrisTextoSecundario)
+                    Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         )
     }
 
     if (showImgDialog) {
-        AlertDialog(
-            onDismissRequest = { showImgDialog = false },
-            title = {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("Actualizar Foto", fontWeight = FontWeight.Black, color = NegroPremium)
-                }
-            },
-            text = {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable { onImageSourceSelected(true); showImgDialog = false }
-                            .padding(12.dp)
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = RojoDelisa.copy(alpha = 0.1f),
-                            modifier = Modifier.size(64.dp)
-                        ) {
-                            Icon(Icons.Outlined.PhotoCamera, null, tint = RojoDelisa, modifier = Modifier.padding(16.dp))
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Text("CÁMARA", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NegroPremium)
-                    }
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable { onImageSourceSelected(false); showImgDialog = false }
-                            .padding(12.dp)
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = RojoDelisa.copy(alpha = 0.1f),
-                            modifier = Modifier.size(64.dp)
-                        ) {
-                            Icon(Icons.Outlined.Collections, null, tint = RojoDelisa, modifier = Modifier.padding(16.dp))
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Text("GALERÍA", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NegroPremium)
-                    }
-                }
-            },
-            confirmButton = {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    TextButton(onClick = { showImgDialog = false }) {
-                        Text("CANCELAR", color = GrisTextoSecundario, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
+        DialogoSeleccionImagen(
+            onDismiss = { showImgDialog = false },
+            onCameraSelected = { onImageSourceSelected(true); showImgDialog = false },
+            onGallerySelected = { onImageSourceSelected(false); showImgDialog = false }
         )
     }
     
     if (showLicensePhotoDialog && uiState.usuarioSeleccionado?.licenciaFotoUrl != null) {
         AlertDialog(
             onDismissRequest = { showLicensePhotoDialog = false },
-            title = { Text("Evidencia de Licencia", fontWeight = FontWeight.Black) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = { Text("Evidencia de Licencia", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     AsyncImage(
@@ -662,23 +631,24 @@ fun PantallaUsuariosAdminContent(
                             .fillMaxWidth()
                             .aspectRatio(1.58f)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White),
+                            .background(MaterialTheme.colorScheme.background),
                         contentScale = ContentScale.FillBounds,
                         placeholder = painterResource(R.drawable.repartidor),
                         error = painterResource(R.drawable.repartidor)
                     )
                     Spacer(Modifier.height(12.dp))
-                    Text("Evidencia oficial de licencia de conducir.", fontSize = 12.sp, color = GrisTextoSecundario, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Text("Evidencia oficial de licencia de conducir.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             },
-            confirmButton = { Button(onClick = { showLicensePhotoDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa)) { Text("CERRAR") } }
+            confirmButton = { Button(onClick = { showLicensePhotoDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)) { Text("CERRAR", color = Color.White) } }
         )
     }
 
     if (showINEPhotoDialog && uiState.usuarioSeleccionado?.ineFotoUrl != null) {
         AlertDialog(
             onDismissRequest = { showINEPhotoDialog = false },
-            title = { Text("Evidencia de INE", fontWeight = FontWeight.Black) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = { Text("Evidencia de INE", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     AsyncImage(
@@ -688,48 +658,50 @@ fun PantallaUsuariosAdminContent(
                             .fillMaxWidth()
                             .aspectRatio(1.58f)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White),
+                            .background(MaterialTheme.colorScheme.background),
                         contentScale = ContentScale.FillBounds,
                         placeholder = painterResource(R.drawable.repartidor),
                         error = painterResource(R.drawable.repartidor)
                     )
                     Spacer(Modifier.height(12.dp))
-                    Text("Evidencia oficial de identificación INE/IFE.", fontSize = 12.sp, color = GrisTextoSecundario, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Text("Evidencia oficial de identificación INE/IFE.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             },
-            confirmButton = { Button(onClick = { showINEPhotoDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa)) { Text("CERRAR") } }
+            confirmButton = { Button(onClick = { showINEPhotoDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)) { Text("CERRAR", color = Color.White) } }
         )
     }
 
     if (uiState.showRutaConfirmation) {
         AlertDialog(
             onDismissRequest = onCancelRuta,
+            containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("Confirmar Cambio de Ruta", fontWeight = FontWeight.Black, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Text("Confirmar Cambio de Ruta", fontWeight = FontWeight.Black, textAlign = androidx.compose.ui.text.style.TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
                 }
             },
             text = {
                 Text(
                     uiState.rutaConfirmationMessage ?: "",
                     modifier = Modifier.fillMaxWidth(),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             },
             confirmButton = {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Button(
                         onClick = onConfirmRuta,
-                        colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa)
+                        colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
                     ) {
-                        Text("SÍ, CAMBIAR")
+                        Text("SÍ, CAMBIAR", color = Color.White)
                     }
                 }
             },
             dismissButton = {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     TextButton(onClick = onCancelRuta) {
-                        Text("CANCELAR", color = GrisTextoSecundario)
+                        Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -739,12 +711,14 @@ fun PantallaUsuariosAdminContent(
     if (showStatusConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showStatusConfirmDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Text(
                     if (pendingStatusChange) "Activar Cuenta" else "Desactivar Cuenta", 
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.fillMaxWidth(),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             },
             text = {
@@ -754,7 +728,8 @@ fun PantallaUsuariosAdminContent(
                     else 
                         "Al desactivar la cuenta, el usuario perderá acceso inmediato a la aplicación. ¿Deseas continuar?",
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             },
             confirmButton = {
@@ -763,15 +738,15 @@ fun PantallaUsuariosAdminContent(
                         activo = pendingStatusChange
                         showStatusConfirmDialog = false 
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("CONFIRMAR", fontWeight = FontWeight.Bold)
+                    Text("CONFIRMAR", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showStatusConfirmDialog = false }, modifier = Modifier.fillMaxWidth()) {
-                    Text("CANCELAR", color = GrisTextoSecundario)
+                    Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         )
@@ -780,12 +755,14 @@ fun PantallaUsuariosAdminContent(
     if (showPuestoConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showPuestoConfirmDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Text(
                     "Confirmar Cambio de Puesto", 
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.fillMaxWidth(),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             },
             text = {
@@ -796,18 +773,19 @@ fun PantallaUsuariosAdminContent(
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "¿Estás seguro de cambiar el puesto de ${uiState.usuarioSeleccionado?.nombre} a '$pendingPuestoChange'?",
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     
                     if (esVendedor && !nuevoEsVendedor && tieneRuta) {
                         Surface(
-                            color = RojoDelisa.copy(alpha = 0.1f),
+                            color = DelisaRed.copy(alpha = 0.1f),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.padding(top = 8.dp)
                         ) {
                             Text(
                                 "⚠️ ADVERTENCIA: Al dejar de ser vendedor, la ruta '${uiState.usuarioSeleccionado?.ultimaRutaNombre}' se liberará automáticamente.",
-                                color = RojoDelisa,
+                                color = DelisaRed,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(12.dp),
@@ -823,15 +801,15 @@ fun PantallaUsuariosAdminContent(
                         puesto = pendingPuestoChange
                         showPuestoConfirmDialog = false 
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("CONFIRMAR CAMBIO", fontWeight = FontWeight.Bold)
+                    Text("CONFIRMAR CAMBIO", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showPuestoConfirmDialog = false }, modifier = Modifier.fillMaxWidth()) {
-                    Text("CANCELAR", color = GrisTextoSecundario)
+                    Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         )
@@ -851,8 +829,8 @@ fun UserSelectorCard(nombre: String, subtitulo: String, photoUrl: String? = null
     )
 
     // 🎨 Animación de Colores Suaves
-    val bgColor by animateColorAsState(if (isSelected) Color.White else Color(0xFFF1F2F6), label = "bgColor")
-    val contentColor by animateColorAsState(if (isSelected) RojoDelisa else NegroPremium, label = "contentColor")
+    val bgColor by animateColorAsState(if (isSelected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surface, label = "bgColor")
+    val contentColor by animateColorAsState(if (isSelected) DelisaRed else MaterialTheme.colorScheme.onSurface, label = "contentColor")
     val elevation by animateDpAsState(if (isSelected) 10.dp else 2.dp, label = "elevation")
 
     Card(
@@ -865,16 +843,16 @@ fun UserSelectorCard(nombre: String, subtitulo: String, photoUrl: String? = null
             .shadow(
                 elevation = elevation,
                 shape = RoundedCornerShape(24.dp),
-                spotColor = if (isSelected) RojoDelisa.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.2f)
+                spotColor = if (isSelected) DelisaRed.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.2f)
             )
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = RojoDelisa.copy(alpha = 0.1f)),
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = DelisaRed.copy(alpha = 0.1f)),
                 onClick = onClick
             ),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = bgColor),
-        border = if (isSelected) BorderStroke(2.dp, RojoDelisa) else BorderStroke(1.dp, Color.Transparent)
+        border = if (isSelected) BorderStroke(2.dp, DelisaRed) else BorderStroke(1.dp, Color.Transparent)
     ) {
         Column(
             Modifier
@@ -888,10 +866,10 @@ fun UserSelectorCard(nombre: String, subtitulo: String, photoUrl: String? = null
                 Modifier
                     .size(50.dp)
                     .clip(CircleShape)
-                    .background(if (isSelected) RojoDelisa.copy(0.08f) else Color.White)
+                    .background(if (isSelected) DelisaRed.copy(0.08f) else MaterialTheme.colorScheme.surface)
                     .border(
                         width = if (isSelected) 1.dp else 0.dp,
-                        color = if (isSelected) RojoDelisa.copy(0.2f) else Color.Transparent,
+                        color = if (isSelected) DelisaRed.copy(0.2f) else Color.Transparent,
                         shape = CircleShape
                     ), 
                 Alignment.Center
@@ -907,7 +885,7 @@ fun UserSelectorCard(nombre: String, subtitulo: String, photoUrl: String? = null
                     Icon(
                         imageVector = icon ?: Icons.Default.Person, 
                         contentDescription = null, 
-                        tint = if (isSelected) RojoDelisa else GrisTextoSecundario, 
+                        tint = if (isSelected) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant, 
                         modifier = Modifier.size(26.dp)
                     )
                 }
@@ -927,7 +905,7 @@ fun UserSelectorCard(nombre: String, subtitulo: String, photoUrl: String? = null
             Text(
                 text = subtitulo, 
                 fontSize = 10.sp, 
-                color = if (isSelected) contentColor.copy(alpha = 0.7f) else GrisTextoSecundario, 
+                color = if (isSelected) contentColor.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant, 
                 maxLines = 1, 
                 overflow = TextOverflow.Ellipsis,
                 fontWeight = FontWeight.Medium
@@ -938,7 +916,22 @@ fun UserSelectorCard(nombre: String, subtitulo: String, photoUrl: String? = null
 
 @Composable
 fun FormTextField(value: String, onValueChange: (String) -> Unit, label: String, icon: ImageVector) {
-    OutlinedTextField(value = value, onValueChange = onValueChange, label = { Text(label) }, leadingIcon = { Icon(icon, null, tint = RojoDelisa) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = RojoDelisa, focusedLabelColor = RojoDelisa, cursorColor = RojoDelisa), singleLine = true)
+    OutlinedTextField(
+        value = value, 
+        onValueChange = onValueChange, 
+        label = { Text(label) }, 
+        leadingIcon = { Icon(icon, null, tint = DelisaRed) }, 
+        modifier = Modifier.fillMaxWidth(), 
+        shape = RoundedCornerShape(16.dp), 
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = DelisaRed, 
+            focusedLabelColor = DelisaRed, 
+            cursorColor = DelisaRed,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+        ), 
+        singleLine = true
+    )
 }
 
 @Composable
@@ -968,17 +961,17 @@ fun DelisaThinkingAnimation() {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.graphicsLayer(scaleX = scale, scaleY = scale)) {
             CircularProgressIndicator(
                 modifier = Modifier.size(54.dp),
-                color = RojoDelisa,
+                color = DelisaRed,
                 strokeWidth = 3.dp,
-                trackColor = RojoDelisa.copy(alpha = 0.1f)
+                trackColor = DelisaRed.copy(alpha = 0.1f)
             )
-            Icon(Icons.Default.AutoAwesome, null, tint = RojoDelisa, modifier = Modifier.size(26.dp))
+            Icon(Icons.Default.AutoAwesome, null, tint = DelisaRed, modifier = Modifier.size(26.dp))
         }
         Spacer(Modifier.height(12.dp))
         Text(
             "Delisa está analizando...", 
             style = MaterialTheme.typography.labelMedium,
-            color = RojoDelisa,
+            color = DelisaRed,
             fontWeight = FontWeight.Black,
             modifier = Modifier.graphicsLayer(alpha = alpha)
         )

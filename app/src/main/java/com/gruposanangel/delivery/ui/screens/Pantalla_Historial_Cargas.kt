@@ -2,7 +2,9 @@ package com.gruposanangel.delivery.ui.screens
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -22,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -31,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.gruposanangel.delivery.model.Plantila_carga
+import com.gruposanangel.delivery.ui.theme.*
 import android.widget.Toast
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
@@ -67,30 +71,32 @@ fun PantallaHistorialCargas(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8F9FA))
+            .background(MaterialTheme.colorScheme.background)
     ) {
         // --- CABECERA ---
         Card(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .shadow(2.dp, RoundedCornerShape(24.dp)),
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            elevation = CardDefaults.cardElevation(2.dp)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Row(
                 modifier = Modifier.padding(8.dp).fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = { navController.popBackStack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed)
                 }
                 
                 Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
-                    Text("HISTORIAL OPERATIVO", fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.DarkGray)
-                    Text("Auditoría de Movimientos", fontSize = 12.sp, color = Color.Gray)
+                    Text("HISTORIAL OPERATIVO", fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Auditoría de Movimientos", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 
                 IconButton(onClick = { vm.cargarHistorial() }) {
-                    Icon(Icons.Default.Refresh, null, tint = Color.Red)
+                    Icon(Icons.Default.Refresh, null, tint = DelisaRed)
                 }
             }
         }
@@ -98,12 +104,12 @@ fun PantallaHistorialCargas(
         // --- TABS DE NAVEGACIÓN ---
         TabRow(
             selectedTabIndex = tabIndex,
-            containerColor = Color.White,
-            contentColor = Color.Red,
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = DelisaRed,
             indicator = { tabPositions ->
                 TabRowDefaults.SecondaryIndicator(
                     modifier = Modifier.tabIndicatorOffset(tabPositions[tabIndex]),
-                    color = Color.Red
+                    color = DelisaRed
                 )
             },
             divider = {}
@@ -131,7 +137,8 @@ fun PantallaHistorialCargas(
                 OutlinedCard(
                     onClick = { showVendedorFilter = true },
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.outlinedCardColors(containerColor = Color.White)
+                    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -139,16 +146,20 @@ fun PantallaHistorialCargas(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("RUTA / DESTINO", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                            Text(uiState.filtroVendedor, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color.Red, maxLines = 1)
+                            Text("RUTA / DESTINO", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(uiState.filtroVendedor, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = DelisaRed, maxLines = 1)
                         }
-                        Icon(Icons.Default.FilterList, null, modifier = Modifier.size(16.dp), tint = Color.Gray)
+                        Icon(Icons.Default.FilterList, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                DropdownMenu(expanded = showVendedorFilter, onDismissRequest = { showVendedorFilter = false }) {
+                DropdownMenu(
+                    expanded = showVendedorFilter, 
+                    onDismissRequest = { showVendedorFilter = false },
+                    modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                ) {
                     uiState.listaVendedores.forEach { v ->
                         DropdownMenuItem(
-                            text = { Text(v) },
+                            text = { Text(v, color = MaterialTheme.colorScheme.onSurface) },
                             onClick = { 
                                 vm.actualizarFiltroVendedor(v)
                                 showVendedorFilter = false 
@@ -162,7 +173,8 @@ fun PantallaHistorialCargas(
                 modifier = Modifier.weight(1f),
                 onClick = { showDateRangePicker = true },
                 shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.outlinedCardColors(containerColor = Color.White)
+                colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -170,13 +182,13 @@ fun PantallaHistorialCargas(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("PERIODO", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text("PERIODO", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         val startStr = formatoFechaSimple.format(Date(uiState.fechaInicio))
                         val endStr = formatoFechaSimple.format(Date(uiState.fechaFin))
                         val label = if (startStr == endStr) startStr else "$startStr..."
-                        Text(label, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
+                        Text(label, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
                     }
-                    Icon(Icons.Default.DateRange, null, modifier = Modifier.size(16.dp), tint = Color.Gray)
+                    Icon(Icons.Default.DateRange, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -192,37 +204,46 @@ fun PantallaHistorialCargas(
             val totalPiezas = if (tabIndex == 0) listaFiltrada.sumOf { it.totalPiezas } else listaActual.sumOf { it.totalPiezas }
             
             Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .shadow(12.dp, RoundedCornerShape(24.dp)),
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
-                elevation = CardDefaults.cardElevation(12.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface)
             ) {
-                Row(
-                    modifier = Modifier.padding(vertical = 20.dp, horizontal = 12.dp).fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark)))
+                        .padding(vertical = 20.dp, horizontal = 12.dp)
                 ) {
-                    // 1. IZQUIERDA: CANTIDAD DE EVENTOS
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text(if (tabIndex == 0) "CARGAS" else "ARQUEOS", color = Color.White.copy(0.5f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        Text(text = "${if (tabIndex == 0) listaFiltrada.size else listaActual.size}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                    }
-                    
-                    Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.15f)))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        // 1. IZQUIERDA: CANTIDAD DE EVENTOS
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                            Text(if (tabIndex == 0) "CARGAS" else "ARQUEOS", color = Color.White.copy(0.6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "${if (tabIndex == 0) listaFiltrada.size else listaActual.size}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        }
+                        
+                        Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
 
-                    // 2. CENTRO: VALOR MONETARIO O PIEZAS NETAS
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1.5f)) {
-                        Text(if (tabIndex == 0) "TOTAL PERIODO" else "RESULTADO NETO", color = Color.White.copy(0.5f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        val valorTexto = if (tabIndex == 0) formatoMoneda.format(totalMonto) else "$totalPiezas pzas"
-                        Text(text = valorTexto, color = if (totalPiezas < 0 && tabIndex == 1) Color.Red else Color.White, fontSize = if (tabIndex == 0) 24.sp else 22.sp, fontWeight = FontWeight.Black)
-                    }
-                    
-                    Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.15f)))
+                        // 2. CENTRO: VALOR MONETARIO O PIEZAS NETAS
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1.5f)) {
+                            Text(if (tabIndex == 0) "TOTAL PERIODO" else "RESULTADO NETO", color = Color.White.copy(0.6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            val valorTexto = if (tabIndex == 0) formatoMoneda.format(totalMonto) else "$totalPiezas pzas"
+                            Text(text = valorTexto, color = if (totalPiezas < 0 && tabIndex == 1) Color.Yellow else Color.White, fontSize = if (tabIndex == 0) 24.sp else 22.sp, fontWeight = FontWeight.Black)
+                        }
+                        
+                        Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
 
-                    // 3. DERECHA: TOTAL PIEZAS (Suma absoluta para cargas, cuenta en arqueos)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                        Text("PIEZAS", color = Color.White.copy(0.5f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        Text(text = "${if (tabIndex == 0) totalPiezas else listaActual.sumOf { it.productos.size }}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        // 3. DERECHA: TOTAL PIEZAS
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                            Text("PIEZAS", color = Color.White.copy(0.6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "${if (tabIndex == 0) totalPiezas else listaActual.sumOf { it.productos.size }}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        }
                     }
                 }
             }
@@ -270,12 +291,12 @@ fun PantallaHistorialCargas(
     if (cargaSeleccionadaParaCancelar != null) {
         AlertDialog(
             onDismissRequest = { cargaSeleccionadaParaCancelar = null },
-            containerColor = Color.White,
+            containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Text(
                     "ANULAR CARGA", 
                     fontWeight = FontWeight.Black, 
-                    color = Color.Red,
+                    color = DelisaRed,
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center
                 )
@@ -286,7 +307,8 @@ fun PantallaHistorialCargas(
                         "Esta acción cancelará permanentemente la orden de transferencia a ${cargaSeleccionadaParaCancelar?.destino}.",
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(Modifier.height(16.dp))
                     OutlinedTextField(
@@ -295,7 +317,12 @@ fun PantallaHistorialCargas(
                         label = { Text("Motivo de cancelación") },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = DelisaRed,
+                            focusedLabelColor = DelisaRed,
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                        )
                     )
                 }
             },
@@ -317,15 +344,15 @@ fun PantallaHistorialCargas(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("CONFIRMAR ANULACIÓN", fontWeight = FontWeight.ExtraBold)
+                    Text("CONFIRMAR ANULACIÓN", fontWeight = FontWeight.ExtraBold, color = Color.White)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { cargaSeleccionadaParaCancelar = null }) {
-                    Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
+                    Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 }
             },
             shape = RoundedCornerShape(28.dp)
@@ -334,37 +361,63 @@ fun PantallaHistorialCargas(
 
     if (showDateRangePicker) {
         val dateRangePickerState = rememberDateRangePickerState(initialSelectedStartDateMillis = uiState.fechaInicio, initialSelectedEndDateMillis = uiState.fechaFin)
-        MaterialTheme(colorScheme = lightColorScheme(primary = Color.Red, onPrimary = Color.White, surface = Color.White, onSurface = Color.Black, secondaryContainer = Color(0xFFFFEBEE), onSecondaryContainer = Color.Red)) {
-            DatePickerDialog(onDismissRequest = { showDateRangePicker = false }, confirmButton = { Button(onClick = {
-                val start = dateRangePickerState.selectedStartDateMillis
-                val end = dateRangePickerState.selectedEndDateMillis
-                if (start != null) {
-                    val c = Calendar.getInstance(); c.timeInMillis = start; c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); val i = c.timeInMillis
-                    val f = if (end != null) { val ce = Calendar.getInstance(); ce.timeInMillis = end; ce.set(Calendar.HOUR_OF_DAY, 23); ce.set(Calendar.MINUTE, 59); ce.timeInMillis } else { i + 86399999L }
-                    vm.actualizarFechas(i, f)
-                }
-                showDateRangePicker = false
-            }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red), shape = RoundedCornerShape(12.dp)) { Text("APLICAR", fontWeight = FontWeight.ExtraBold) } }, dismissButton = { TextButton(onClick = { showDateRangePicker = false }) { Text("CANCELAR", color = Color.Gray) } }) {
+        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+        
+        DeliveryTheme(darkTheme = isDark) {
+            DatePickerDialog(
+                onDismissRequest = { showDateRangePicker = false }, 
+                confirmButton = { 
+                    Button(
+                        onClick = {
+                            val start = dateRangePickerState.selectedStartDateMillis
+                            val end = dateRangePickerState.selectedEndDateMillis
+                            if (start != null) {
+                                val c = Calendar.getInstance(); c.timeInMillis = start; c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); val i = c.timeInMillis
+                                val f = if (end != null) { val ce = Calendar.getInstance(); ce.timeInMillis = end; ce.set(Calendar.HOUR_OF_DAY, 23); ce.set(Calendar.MINUTE, 59); ce.timeInMillis } else { i + 86399999L }
+                                vm.actualizarFechas(i, f)
+                            }
+                            showDateRangePicker = false
+                        }, 
+                        colors = ButtonDefaults.buttonColors(containerColor = DelisaRed), 
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("APLICAR", fontWeight = FontWeight.ExtraBold, color = Color.White) } 
+                }, 
+                dismissButton = { 
+                    TextButton(onClick = { showDateRangePicker = false }) { 
+                        Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant) 
+                    } 
+                },
+                colors = DatePickerDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
                 DateRangePicker(
                     state = dateRangePickerState,
-                    title = { Text("PERIODO", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Black) },
+                    title = { Text("PERIODO", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) },
                     headline = {
                         val s = dateRangePickerState.selectedStartDateMillis; val e = dateRangePickerState.selectedEndDateMillis
                         val text = if (s != null && e != null) "${formatoFechaSimple.format(Date(s))} - ${formatoFechaSimple.format(Date(e))}" else "Selecciona Rango"
-                        Text(text, modifier = Modifier.padding(horizontal = 16.dp), fontWeight = FontWeight.Black, color = Color.Red, fontSize = 18.sp)
+                        Text(text, modifier = Modifier.padding(horizontal = 16.dp), fontWeight = FontWeight.Black, color = DelisaRed, fontSize = 18.sp)
                     },
                     showModeToggle = false,
                     modifier = Modifier.weight(1f),
                     colors = DatePickerDefaults.colors(
-                        containerColor = Color.White,
-                        titleContentColor = Color.DarkGray,
-                        headlineContentColor = Color.Red,
-                        selectedDayContainerColor = Color.Red,
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        headlineContentColor = DelisaRed,
+                        selectedDayContainerColor = DelisaRed,
                         selectedDayContentColor = Color.White,
-                        dayInSelectionRangeContainerColor = Color.Red.copy(alpha = 0.15f),
-                        dayInSelectionRangeContentColor = Color.Red,
-                        todayContentColor = Color.Red,
-                        todayDateBorderColor = Color.Red
+                        dayInSelectionRangeContainerColor = DelisaRed.copy(alpha = 0.15f),
+                        dayInSelectionRangeContentColor = DelisaRed,
+                        todayContentColor = DelisaRed,
+                        todayDateBorderColor = DelisaRed,
+                        navigationContentColor = MaterialTheme.colorScheme.onSurface,
+                        weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        subheadContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        yearContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        currentYearContentColor = DelisaRed,
+                        selectedYearContainerColor = DelisaRed,
+                        selectedYearContentColor = Color.White
                     )
                 )
             }
@@ -390,10 +443,10 @@ fun ItemHistorialCarga(
     val esPendiente = carga.estado == "PENDIENTE"
     
     val statusColor = when (carga.estado) { 
-        "ACEPTADA", "ARQUEADO", "COMPLETADA" -> Color(0xFF2E7D32)
-        "PENDIENTE" -> Color(0xFFF57C00)
-        "CANCELADA" -> Color.Red
-        else -> Color.Gray 
+        "ACEPTADA", "ARQUEADO", "COMPLETADA" -> DelisaGreen
+        "PENDIENTE" -> WarningOrange
+        "CANCELADA" -> DelisaRed
+        else -> MaterialTheme.colorScheme.onSurfaceVariant 
     }
 
     Card(
@@ -403,12 +456,12 @@ fun ItemHistorialCarga(
             .shadow(if (isPressed) 1.dp else 4.dp, RoundedCornerShape(24.dp))
             .clickable(
                 interactionSource = interactionSource, 
-                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = Color.Red.copy(0.1f)), 
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = DelisaRed.copy(alpha = 0.1f)), 
                 onClick = onClick
             ), 
         shape = RoundedCornerShape(24.dp), 
         colors = CardDefaults.cardColors(
-            containerColor = if (esCancelada) Color(0xFFEEEEEE) else Color.White
+            containerColor = if (esCancelada) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
         )
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -430,10 +483,10 @@ fun ItemHistorialCarga(
                     text = carga.destino, 
                     fontWeight = FontWeight.Black, 
                     fontSize = 15.sp, 
-                    color = if (esCancelada) Color.Gray else Color(0xFF1A1A1A),
+                    color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                     style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
                 )
-                Text(text = carga.fechaFormateada, fontSize = 11.sp, color = Color.Gray)
+                Text(text = carga.fechaFormateada, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(6.dp))
                 Surface(color = statusColor.copy(0.1f), shape = RoundedCornerShape(8.dp)) { 
                     Text(text = carga.estado, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = statusColor) 
@@ -444,7 +497,7 @@ fun ItemHistorialCarga(
                     text = "${carga.totalPiezas} pzas", 
                     fontWeight = FontWeight.Bold, 
                     fontSize = 13.sp, 
-                    color = Color.Gray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
                 )
                 if (carga.montoTotal > 0) {
@@ -452,7 +505,7 @@ fun ItemHistorialCarga(
                         text = formato.format(carga.montoTotal), 
                         fontWeight = FontWeight.Black, 
                         fontSize = 17.sp, 
-                        color = if (esCancelada) Color.Gray else Color.Red,
+                        color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else DelisaRed,
                         style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
                     )
                 }
@@ -462,17 +515,17 @@ fun ItemHistorialCarga(
                 Row {
                     if (puedeEditar) {
                         IconButton(onClick = onEdit) {
-                            Icon(Icons.Default.Edit, "Editar", tint = Color(0xFF00AAFF))
+                            Icon(Icons.Default.Edit, "Editar", tint = DelisaBlue)
                         }
                     }
                     if (esAdmin) {
                         IconButton(onClick = onCancel) {
-                            Icon(Icons.Default.DeleteForever, null, tint = Color.Red)
+                            Icon(Icons.Default.DeleteForever, null, tint = DelisaRed)
                         }
                     }
                 }
             } else {
-                Icon(Icons.Default.ChevronRight, null, tint = Color.LightGray, modifier = Modifier.padding(start = 12.dp).size(20.dp))
+                Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), modifier = Modifier.padding(start = 12.dp).size(20.dp))
             }
         }
     }

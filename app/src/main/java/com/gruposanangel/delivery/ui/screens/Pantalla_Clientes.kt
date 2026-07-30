@@ -84,13 +84,13 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
 fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (String) -> Unit, onClienteClick: (String) -> Unit, onCarritoClick: (String) -> Unit, onNuevoCliente: () -> Unit, isAdmin: Boolean, onEditClick: (String) -> Unit) {
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = onNuevoCliente, containerColor = Color.Red, contentColor = Color.White, shape = RoundedCornerShape(16.dp)) {
+            FloatingActionButton(onClick = onNuevoCliente, containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary, shape = RoundedCornerShape(16.dp)) {
                 Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.PersonAdd, null); Spacer(Modifier.width(8.dp)); Text("NUEVO", fontWeight = FontWeight.Black)
                 }
             }
         },
-        containerColor = Color.White
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
             Spacer(Modifier.height(8.dp))
@@ -101,11 +101,11 @@ fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (Stri
                     val label = if (uiState.totalClientes > 0) "Buscar Cliente (${uiState.totalClientes} disponibles)" else "Buscar negocio..."
                     Text(label) 
                 },
-                leadingIcon = { Icon(Icons.Default.Search, null, tint = Color.Red) }, modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, cursorColor = Color.Red)
+                leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.primary) }, modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, cursorColor = MaterialTheme.colorScheme.primary)
             )
             Spacer(Modifier.height(16.dp))
-            if (uiState.isLoading) { Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = Color.Red) } }
+            if (uiState.isLoading) { Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary) } }
             else {
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 80.dp)) {
                     items(uiState.clientes, key = { it.id }) { cliente ->
@@ -120,17 +120,17 @@ fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (Stri
 
                         Card(
                             shape = RoundedCornerShape(24.dp), 
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8F9FA)), 
-                            elevation = CardDefaults.cardElevation(if (isPressed) 2.dp else 4.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .graphicsLayer {
                                     scaleX = scale
                                     scaleY = scale
                                 }
+                                .shadow(if (isPressed) 2.dp else 4.dp, RoundedCornerShape(24.dp))
                                 .clickable(
                                     interactionSource = interactionSource,
-                                    indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = Color.Red.copy(alpha = 0.15f)),
+                                    indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
                                     onClick = { onClienteClick(cliente.id) }
                                 )
                         ) {
@@ -138,12 +138,12 @@ fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (Stri
                                 AsyncImage(model = cliente.fotografiaCliente, contentDescription = null, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentScale = ContentScale.Crop, modifier = Modifier.size(70.dp).clip(RoundedCornerShape(16.dp)))
                                 Spacer(Modifier.width(14.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(cliente.nombreNegocio, fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.Black)
-                                    Text(cliente.nombreDueno, color = Color.Gray, fontSize = 13.sp)
+                                    Text(cliente.nombreNegocio, fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                                    Text(cliente.nombreDueno, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                                     if (cliente.distanciaTexto.isNotEmpty()) {
                                         val enRango = cliente.distanciaMetros in 0f..200f
-                                        val colorTexto = if (enRango) Color(0xFF2E7D32) else Color.Red
-                                        val colorFondo = if (enRango) Color(0xFFE8F5E9) else Color.Red.copy(alpha = 0.1f)
+                                        val colorTexto = if (enRango) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary
+                                        val colorFondo = colorTexto.copy(alpha = 0.12f)
 
                                         Spacer(Modifier.height(4.dp))
                                         Box(
@@ -173,14 +173,14 @@ fun PantallaClientesContent(uiState: ClienteUiState, onSearchQueryChanged: (Stri
                                 Surface(
                                     onClick = { if (isAdmin) onEditClick(cliente.id) else onCarritoClick(cliente.id) },
                                     shape = RoundedCornerShape(12.dp),
-                                    color = Color.Red.copy(alpha = 0.1f),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
                                     modifier = Modifier.size(42.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = if (isAdmin) Icons.Default.EditNote else Icons.Default.ShoppingCart,
                                             contentDescription = null,
-                                            tint = Color.Red,
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(24.dp)
                                         )
                                     }

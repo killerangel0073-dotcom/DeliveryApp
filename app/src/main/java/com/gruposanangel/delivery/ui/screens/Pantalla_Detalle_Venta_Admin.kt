@@ -18,6 +18,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -45,6 +47,8 @@ import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
+import com.gruposanangel.delivery.ui.theme.*
+import androidx.compose.foundation.isSystemInDarkTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -144,231 +148,237 @@ fun Pantalla_Detalle_Venta_Admin(
         }
     }
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { 
-                    Text(
-                        text = "DETALLE DE VENTA", 
-                        fontWeight = FontWeight.Black,
-                        fontSize = 16.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red)
-                    }
-                },
-                actions = {
-                    if (ticketState != null) {
-                        // 🔥 BOTÓN ANULAR (Solo Autorizados y si no está cancelada)
-                        if (esAdminAutorizado && ticketState?.estado != "CANCELADA") {
-                            IconButton(onClick = { showAnularDialog = true }) {
-                                Icon(Icons.Default.DeleteForever, "Anular", tint = Color.Red)
+    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+
+    DeliveryTheme(darkTheme = isDark) {
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { 
+                        Text(
+                            text = "DETALLE DE VENTA", 
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { navController.popBackStack() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed)
+                        }
+                    },
+                    actions = {
+                        if (ticketState != null) {
+                            // 🔥 BOTÓN ANULAR (Solo Autorizados y si no está cancelada)
+                            if (esAdminAutorizado && ticketState?.estado != "CANCELADA") {
+                                IconButton(onClick = { showAnularDialog = true }) {
+                                    Icon(Icons.Default.DeleteForever, "Anular", tint = DelisaRed)
+                                }
+                            }
+                            IconButton(onClick = onImprimir) {
+                                Icon(Icons.Default.Print, "Imprimir", tint = DelisaBlue)
                             }
                         }
-                        IconButton(onClick = onImprimir) {
-                            Icon(Icons.Default.Print, "Imprimir", tint = Color.Red)
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                )
+            },
+            bottomBar = {
+                if (ticketState != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shadowElevation = 16.dp,
+                        color = MaterialTheme.colorScheme.surface
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            TotalCard(ticketState!!.total, formatoMoneda)
+                            Spacer(Modifier.height(16.dp))
+                            Button(
+                                onClick = onImprimir,
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DelisaBlue)
+                            ) {
+                                Icon(Icons.Default.Print, null, tint = Color.White)
+                                Spacer(Modifier.width(8.dp))
+                                Text("IMPRIMIR TICKET", fontWeight = FontWeight.ExtraBold, color = Color.White)
+                            }
                         }
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
-        },
-        bottomBar = {
-            if (ticketState != null) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shadowElevation = 16.dp,
-                    color = Color.White
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.background
+        ) { padding ->
+            if (isLoading) {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = DelisaRed)
+                }
+            } else if (ticketState == null) {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    Text("No se encontró la venta", color = MaterialTheme.colorScheme.onSurface)
+                }
+            } else {
+                val ticket = ticketState!!
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        TotalCard(ticketState!!.total, formatoMoneda)
-                        Spacer(Modifier.height(16.dp))
-                        Button(
-                            onClick = onImprimir,
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                        ) {
-                            Icon(Icons.Default.Print, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("IMPRIMIR TICKET", fontWeight = FontWeight.ExtraBold)
-                        }
-                    }
-                }
-            }
-        }
-    ) { padding ->
-        if (isLoading) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color.Red)
-            }
-        } else if (ticketState == null) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("No se encontró la venta")
-            }
-        } else {
-            val ticket = ticketState!!
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFFF8F9FA))
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // 🔥 BANNER DE CANCELACIÓN
-                if (ticket.estado == "CANCELADA") {
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.Black),
-                            elevation = CardDefaults.cardElevation(8.dp)
-                        ) {
-                            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.Cancel, null, tint = Color.Red, modifier = Modifier.size(48.dp))
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    text = "VENTA ANULADA", 
-                                    fontWeight = FontWeight.Black, 
-                                    color = Color.White, 
-                                    fontSize = 20.sp,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = "MOTIVO: ${ticket.motivoCancelacion ?: "No especificado"}",
-                                    color = Color.LightGray,
-                                    fontSize = 13.sp,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 🔹 CARD RESUMEN CABECERA
-                item {
-                    HeaderVentaCard(ticket, formatoMoneda, formatoFecha, formatoHora)
-                }
-
-                // 🔥 AUDITORÍA GEOGRÁFICA (EVIDENCIA FUERA DE RANGO)
-                if (ticket.fueraDeRango) {
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Red.copy(0.3f))
-                        ) {
-                            Column(Modifier.padding(16.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.LocationOff,
-                                        contentDescription = null,
-                                        tint = Color.Red,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(Modifier.width(8.dp))
+                    // 🔥 BANNER DE CANCELACIÓN
+                    if (ticket.estado == "CANCELADA") {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(24.dp)),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface)
+                            ) {
+                                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.Cancel, null, tint = DelisaRed, modifier = Modifier.size(48.dp))
+                                    Spacer(Modifier.height(8.dp))
                                     Text(
-                                        text = "VENTA REALIZADA FUERA DE RANGO",
-                                        fontWeight = FontWeight.Black,
-                                        color = Color.Red,
+                                        text = "VENTA ANULADA", 
+                                        fontWeight = FontWeight.Black, 
+                                        color = MaterialTheme.colorScheme.surface, 
+                                        fontSize = 20.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "MOTIVO: ${ticket.motivoCancelacion ?: "No especificado"}",
+                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
                                         fontSize = 13.sp,
-                                        letterSpacing = 0.5.sp
-                                    )
-                                }
-
-                                if (!ticket.fotoEvidenciaUrl.isNullOrEmpty()) {
-                                    Spacer(Modifier.height(12.dp))
-                                    Text(
-                                        text = "EVIDENCIA FÍSICA DE VISITA:",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.DarkGray
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    AsyncImage(
-                                        model = ticket.fotoEvidenciaUrl,
-                                        contentDescription = "Evidencia de Visita",
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(220.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(Color.White),
-                                        contentScale = ContentScale.Crop,
-                                        placeholder = painterResource(R.drawable.repartidor),
-                                        error = painterResource(R.drawable.repartidor)
-                                    )
-                                } else {
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        text = "⚠️ Atención: El vendedor no capturó fotografía de evidencia.",
-                                        fontSize = 12.sp,
-                                        color = Color.Gray,
-                                        modifier = Modifier.padding(start = 28.dp)
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
                                     )
                                 }
                             }
                         }
                     }
-                }
 
-                // 🔹 ACCIONES DE AJUSTE (AUDITORÍA)
-                if (mostrarAcciones && ticket.estado != "CANCELADA") {
+                    // 🔹 CARD RESUMEN CABECERA
                     item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = { tipoAjuste = "CAMBIO"; showBottomSheet = true },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
-                                contentPadding = PaddingValues(horizontal = 4.dp)
+                        HeaderVentaCard(ticket, formatoMoneda, formatoFecha, formatoHora)
+                    }
+
+                    // 🔥 AUDITORÍA GEOGRÁFICA (EVIDENCIA FUERA DE RANGO)
+                    if (ticket.fueraDeRango) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(24.dp)),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = DelisaRed.copy(alpha = 0.05f)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DelisaRed.copy(0.2f))
                             ) {
-                                Icon(Icons.Default.Sync, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("CAMBIO", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
-                            }
-                            OutlinedButton(
-                                onClick = { tipoAjuste = "DEVOLUCION"; showBottomSheet = true },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF9800)),
-                                contentPadding = PaddingValues(horizontal = 4.dp)
-                            ) {
-                                Icon(Icons.Default.AssignmentReturn, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("DEVOLUCIÓN", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                                Column(Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.LocationOff,
+                                            contentDescription = null,
+                                            tint = DelisaRed,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "VENTA REALIZADA FUERA DE RANGO",
+                                            fontWeight = FontWeight.Black,
+                                            color = DelisaRed,
+                                            fontSize = 13.sp,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                    }
+
+                                    if (!ticket.fotoEvidenciaUrl.isNullOrEmpty()) {
+                                        Spacer(Modifier.height(12.dp))
+                                        Text(
+                                            text = "EVIDENCIA FÍSICA DE VISITA:",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        AsyncImage(
+                                            model = ticket.fotoEvidenciaUrl,
+                                            contentDescription = "Evidencia de Visita",
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(220.dp)
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(MaterialTheme.colorScheme.surface),
+                                            contentScale = ContentScale.Crop,
+                                            placeholder = painterResource(R.drawable.repartidor),
+                                            error = painterResource(R.drawable.repartidor)
+                                        )
+                                    } else {
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            text = "⚠️ Atención: El vendedor no capturó fotografía de evidencia.",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(start = 28.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
-                }
 
-                // 🔹 SECCIÓN PRODUCTOS
-                item {
-                    Text(
-                        "Resumen de Productos",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Black,
-                        color = Color.DarkGray
-                    )
-                }
+                    // 🔹 ACCIONES DE AJUSTE (AUDITORÍA)
+                    if (mostrarAcciones && ticket.estado != "CANCELADA") {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { tipoAjuste = "CAMBIO"; showBottomSheet = true },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, DelisaRed),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = DelisaRed),
+                                    contentPadding = PaddingValues(horizontal = 4.dp)
+                                ) {
+                                    Icon(Icons.Default.Sync, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("CAMBIO", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                                }
+                                OutlinedButton(
+                                    onClick = { tipoAjuste = "DEVOLUCION"; showBottomSheet = true },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, WarningOrange),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = WarningOrange),
+                                    contentPadding = PaddingValues(horizontal = 4.dp)
+                                ) {
+                                    Icon(Icons.Default.AssignmentReturn, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("DEVOLUCIÓN", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
 
-                items(ticket.productos) { producto ->
-                    CardProductoVendido(producto, formatoMoneda)
-                }
-                
-                item {
-                    Spacer(Modifier.height(120.dp)) // Espacio para el bottom bar que ahora es más grande
+                    // 🔹 SECCIÓN PRODUCTOS
+                    item {
+                        Text(
+                            "Resumen de Productos",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    items(ticket.productos) { producto ->
+                        CardProductoVendido(producto, formatoMoneda)
+                    }
+                    
+                    item {
+                        Spacer(Modifier.height(120.dp)) // Espacio para el bottom bar que ahora es más grande
+                    }
                 }
             }
         }
@@ -378,12 +388,12 @@ fun Pantalla_Detalle_Venta_Admin(
     if (showAnularDialog) {
         AlertDialog(
             onDismissRequest = { showAnularDialog = false },
-            containerColor = Color.White,
+            containerColor = MaterialTheme.colorScheme.surface,
             title = { 
                 Text(
                     "ANULAR VENTA", 
                     fontWeight = FontWeight.Black, 
-                    color = Color.Red,
+                    color = DelisaRed,
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center
                 ) 
@@ -394,7 +404,8 @@ fun Pantalla_Detalle_Venta_Admin(
                         "Esta acción devolverá los productos al inventario del vendedor y anulará el ticket permanentemente.", 
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(Modifier.height(16.dp))
                     OutlinedTextField(
@@ -402,7 +413,11 @@ fun Pantalla_Detalle_Venta_Admin(
                         onValueChange = { motivoAnulacion = it },
                         label = { Text("Motivo de anulación") },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = DelisaRed,
+                            focusedLabelColor = DelisaRed
+                        )
                     )
                 }
             },
@@ -426,11 +441,11 @@ fun Pantalla_Detalle_Venta_Admin(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                ) { Text("CONFIRMAR ANULACIÓN", fontWeight = FontWeight.Bold) }
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
+                ) { Text("CONFIRMAR ANULACIÓN", fontWeight = FontWeight.Bold, color = Color.White) }
             },
             dismissButton = {
-                TextButton(onClick = { showAnularDialog = false }) { Text("CANCELAR", color = Color.Gray) }
+                TextButton(onClick = { showAnularDialog = false }) { Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
         )
     }
@@ -438,7 +453,7 @@ fun Pantalla_Detalle_Venta_Admin(
     if (showBottomSheet) {
         ModalBottomSheet(
             onDismissRequest = { showBottomSheet = false },
-            containerColor = Color.White
+            containerColor = MaterialTheme.colorScheme.surface
         ) {
             Column(
                 modifier = Modifier
@@ -451,30 +466,31 @@ fun Pantalla_Detalle_Venta_Admin(
                     text = if (tipoAjuste == "CAMBIO") "REGISTRAR CAMBIO" else "REGISTRAR DEVOLUCIÓN",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Black,
-                    color = if (tipoAjuste == "CAMBIO") Color.Red else Color(0xFFFF9800)
+                    color = if (tipoAjuste == "CAMBIO") DelisaRed else WarningOrange
                 )
                 Spacer(Modifier.height(16.dp))
 
                 // Selector de Producto RECIBIDO
-                Text("Producto a quitar (Cliente entrega):", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.align(Alignment.Start))
+                Text("Producto a quitar (Cliente entrega):", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Start))
                 var expandedRecibido by remember { mutableStateOf(false) }
                 Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = { expandedRecibido = true },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                     ) {
-                        Text(productoRecibido?.nombre ?: "Seleccionar producto...", color = Color.DarkGray)
-                        Icon(Icons.Default.ArrowDropDown, null)
+                        Text(productoRecibido?.nombre ?: "Seleccionar producto...", color = MaterialTheme.colorScheme.onSurface)
+                        Icon(Icons.Default.ArrowDropDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     DropdownMenu(
                         expanded = expandedRecibido,
                         onDismissRequest = { expandedRecibido = false },
-                        modifier = Modifier.fillMaxWidth(0.9f).background(Color.White)
+                        modifier = Modifier.fillMaxWidth(0.9f).background(MaterialTheme.colorScheme.surface)
                     ) {
                         inventoryState.catalogoCompleto.forEach { prod ->
                             DropdownMenuItem(
-                                text = { Text(prod.nombre) },
+                                text = { Text(prod.nombre, color = MaterialTheme.colorScheme.onSurface) },
                                 onClick = { 
                                     productoRecibido = prod
                                     expandedRecibido = false
@@ -500,7 +516,7 @@ fun Pantalla_Detalle_Venta_Admin(
                 Text(
                     text = "Producto a dejar (Vendedor entrega):", 
                     fontSize = 12.sp, 
-                    color = if (habilitarEntregado) Color.Gray else Color.LightGray, 
+                    color = if (habilitarEntregado) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), 
                     modifier = Modifier.align(Alignment.Start)
                 )
                 var expandedEntregado by remember { mutableStateOf(false) }
@@ -509,25 +525,26 @@ fun Pantalla_Detalle_Venta_Admin(
                         onClick = { expandedEntregado = true },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = habilitarEntregado,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if(habilitarEntregado) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                     ) {
                         val label = if (!habilitarEntregado) "Primero selecciona producto a quitar" 
                                    else if (productosMismoPrecio.isEmpty()) "No hay productos del mismo precio"
                                    else productoEntregado?.nombre ?: "Seleccionar reemplazo..."
                         
-                        Text(label, color = if (habilitarEntregado) Color.DarkGray else Color.Gray, maxLines = 1)
-                        Icon(Icons.Default.ArrowDropDown, null)
+                        Text(label, color = if (habilitarEntregado) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), maxLines = 1)
+                        Icon(Icons.Default.ArrowDropDown, null, tint = if(habilitarEntregado) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                     }
                     
                     if (productosMismoPrecio.isNotEmpty()) {
                         DropdownMenu(
                             expanded = expandedEntregado,
                             onDismissRequest = { expandedEntregado = false },
-                            modifier = Modifier.fillMaxWidth(0.9f).background(Color.White)
+                            modifier = Modifier.fillMaxWidth(0.9f).background(MaterialTheme.colorScheme.surface)
                         ) {
                             productosMismoPrecio.forEach { prod ->
                                 DropdownMenuItem(
-                                    text = { Text("${prod.nombre} (Stock: ${prod.cantidadDisponible})") },
+                                    text = { Text("${prod.nombre} (Stock: ${prod.cantidadDisponible})", color = MaterialTheme.colorScheme.onSurface) },
                                     onClick = { 
                                         productoEntregado = prod
                                         expandedEntregado = false
@@ -546,10 +563,10 @@ fun Pantalla_Detalle_Venta_Admin(
 
                 // Cantidad (Topeada por Stock del Entregado)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Cantidad:", fontWeight = FontWeight.Bold)
+                    Text("Cantidad:", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.width(16.dp))
-                    IconButton(onClick = { if (cantidadAjuste > 1) cantidadAjuste-- }) { Icon(Icons.Default.Remove, null) }
-                    Text("$cantidadAjuste", fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    IconButton(onClick = { if (cantidadAjuste > 1) cantidadAjuste-- }) { Icon(Icons.Default.Remove, null, tint = MaterialTheme.colorScheme.onSurface) }
+                    Text("$cantidadAjuste", fontSize = 18.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                     IconButton(
                         onClick = { 
                             val stockMax = productoEntregado?.cantidadDisponible ?: Int.MAX_VALUE
@@ -560,7 +577,7 @@ fun Pantalla_Detalle_Venta_Admin(
                         Icon(
                             Icons.Default.Add, 
                             null, 
-                            tint = if (productoEntregado != null && cantidadAjuste < productoEntregado!!.cantidadDisponible) Color.Red else Color.Gray
+                            tint = if (productoEntregado != null && cantidadAjuste < productoEntregado!!.cantidadDisponible) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         ) 
                     }
                 }
@@ -569,7 +586,7 @@ fun Pantalla_Detalle_Venta_Admin(
                     Text(
                         "Stock disponible: ${productoEntregado!!.cantidadDisponible}", 
                         fontSize = 11.sp, 
-                        color = Color.Red,
+                        color = DelisaRed,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -582,7 +599,11 @@ fun Pantalla_Detalle_Venta_Admin(
                     onValueChange = { motivoAjuste = it },
                     label = { Text(if (tipoAjuste == "CAMBIO") "Nota adicional" else "Motivo de la devolución") },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = if(tipoAjuste == "CAMBIO") DelisaRed else WarningOrange,
+                        focusedLabelColor = if(tipoAjuste == "CAMBIO") DelisaRed else WarningOrange
+                    )
                 )
 
                 Spacer(Modifier.height(24.dp))
@@ -619,10 +640,10 @@ fun Pantalla_Detalle_Venta_Admin(
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (tipoAjuste == "CAMBIO") Color.Red else Color(0xFFFF9800)
+                        containerColor = if (tipoAjuste == "CAMBIO") DelisaRed else WarningOrange
                     )
                 ) {
-                    Text("CONFIRMAR OPERACIÓN", fontWeight = FontWeight.ExtraBold)
+                    Text("CONFIRMAR OPERACIÓN", fontWeight = FontWeight.ExtraBold, color = Color.White)
                 }
             }
         }
@@ -637,10 +658,9 @@ fun HeaderVentaCard(
     fHora: SimpleDateFormat
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(24.dp)),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(4.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -657,12 +677,12 @@ fun HeaderVentaCard(
                     Surface(
                         modifier = Modifier.size(85.dp),
                         shape = CircleShape,
-                        color = Color.Red.copy(alpha = 0.1f)
+                        color = DelisaRed.copy(alpha = 0.1f)
                     ) {
                         Icon(
                             Icons.Default.Person,
                             null,
-                            tint = Color.Red,
+                            tint = DelisaRed,
                             modifier = Modifier.padding(20.dp)
                         )
                     }
@@ -673,19 +693,19 @@ fun HeaderVentaCard(
                         "TICKET #${ticket.numeroTicket.takeLast(6).uppercase()}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.Gray
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
                         ticket.cliente,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Black,
-                        color = Color.Black
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
 
             Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = Color(0xFFF1F2F6))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
             Spacer(Modifier.height(20.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -699,10 +719,9 @@ fun HeaderVentaCard(
 @Composable
 fun CardProductoVendido(producto: ProductoTicketDetalle, fMoneda: NumberFormat) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().shadow(1.dp, RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(1.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -710,31 +729,31 @@ fun CardProductoVendido(producto: ProductoTicketDetalle, fMoneda: NumberFormat) 
         ) {
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = Color(0xFFF8F9FA),
+                color = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.size(40.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
                         "${producto.cantidad}",
                         fontWeight = FontWeight.Black,
-                        color = Color.Red,
+                        color = DelisaRed,
                         fontSize = 16.sp
                     )
                 }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(producto.nombre, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(producto.nombre, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
                 Text(
                     "P. Unitario: ${fMoneda.format(producto.precio)}",
                     fontSize = 11.sp,
-                    color = Color.Gray
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Text(
                 fMoneda.format(producto.precio * producto.cantidad),
                 fontWeight = FontWeight.ExtraBold,
-                color = Color.Black,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 15.sp
             )
         }
@@ -752,13 +771,13 @@ fun TotalCard(total: Double, fMoneda: NumberFormat) {
     ) {
         Text(
             "TOTAL PAGADO: ",
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.Bold,
             fontSize = 14.sp
         )
         Text(
             fMoneda.format(total),
-            color = Color.Red,
+            color = DelisaRed,
             fontWeight = FontWeight.Black,
             fontSize = 26.sp
         )
@@ -768,7 +787,7 @@ fun TotalCard(total: Double, fMoneda: NumberFormat) {
 @Composable
 fun InfoCol(label: String, value: String) {
     Column {
-        Text(label, fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Black)
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color.DarkGray)
+        Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Black)
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
     }
 }

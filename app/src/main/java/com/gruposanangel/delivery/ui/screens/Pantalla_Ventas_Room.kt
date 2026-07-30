@@ -1,7 +1,6 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.content.Context
-import android.net.Uri
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -31,7 +31,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -48,16 +47,15 @@ import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.VentaEntity
-import com.gruposanangel.delivery.model.Plantilla_Producto
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.io.File
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.isSystemInDarkTheme
 
 data class VentaConFotoUI(val venta: VentaEntity, val fotoCliente: String)
 data class VentasRoomUiState(val isLoading: Boolean = false, val ventasConFoto: List<VentaConFotoUI> = emptyList())
@@ -77,13 +75,11 @@ class VentasRoomViewModel(private val ventaRepository: VentaRepository, context:
             
             _uiState.value = _uiState.value.copy(isLoading = true)
             
-            // 🔥 Sincronizamos con el servidor solo si no hay filtro de cliente o para el cliente específico
             if (clienteIdFiltro == null) {
                 ventaRepository.sincronizarVentasPeriodo(idParaQuery, inicio, fin)
             }
             
             val ventasRaw = if (clienteIdFiltro != null) {
-                // Si hay filtro de cliente, traemos sus ventas sin importar el rango de fecha (historial completo local)
                 ventaRepository.obtenerVentasPorPeriodo(idParaQuery, 0, System.currentTimeMillis())
                     .filter { it.clienteId == clienteIdFiltro }
             } else {
@@ -104,7 +100,7 @@ fun VentasRoomScreen(
     context: Context, 
     navController: NavController? = null, 
     ventaRepository: VentaRepository,
-    clienteId: String? = null // 🔥 Recibir ID opcional
+    clienteId: String? = null
 ) {
     val isPreview = LocalInspectionMode.current
     if (isPreview) {
@@ -129,17 +125,19 @@ fun VentasRoomScreen(
             vm.cargarVentas(ini, fin, clienteId)
         }
         
-        PantallaVentasRoomContent(
-            uiState = uiState, 
-            fecha = fechaSeleccionada, 
-            onFechaChange = { fechaSeleccionada = it }, 
-            onVentaClick = { v -> 
-                // Navegar al detalle de venta SIN los botones de acción
-                navController?.navigate("detalle_venta_admin/${v.id}?mostrarAcciones=false")
-            }, 
-            onBack = { navController?.popBackStack() },
-            isFiltradoPorCliente = clienteId != null
-        )
+        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+        DeliveryTheme(darkTheme = isDark) {
+            PantallaVentasRoomContent(
+                uiState = uiState, 
+                fecha = fechaSeleccionada, 
+                onFechaChange = { fechaSeleccionada = it }, 
+                onVentaClick = { v -> 
+                    navController?.navigate("detalle_venta_admin/${v.id}?mostrarAcciones=false")
+                }, 
+                onBack = { navController?.popBackStack() },
+                isFiltradoPorCliente = clienteId != null
+            )
+        }
     }
 }
 
@@ -151,7 +149,7 @@ fun PantallaVentasRoomContent(
     onFechaChange: (Date) -> Unit, 
     onVentaClick: (VentaEntity) -> Unit, 
     onBack: () -> Unit,
-    isFiltradoPorCliente: Boolean = false // 🔥 Nuevo
+    isFiltradoPorCliente: Boolean = false
 ) {
     val fmtMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     val fmtFecha = SimpleDateFormat("EEEE d 'de' MMMM", Locale.forLanguageTag("es-MX"))
@@ -163,42 +161,43 @@ fun PantallaVentasRoomContent(
             TopAppBar(
                 title = { 
                     Column { 
-                        Text(if (isFiltradoPorCliente) "HISTORIAL DEL CLIENTE" else "HISTORIAL DE VENTAS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = Color.Gray)
+                        Text(if (isFiltradoPorCliente) "HISTORIAL DEL CLIENTE" else "HISTORIAL DE VENTAS", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (!isFiltradoPorCliente) {
-                            Text(fmtFecha.format(fecha).uppercase(), fontSize = 16.sp, fontWeight = FontWeight.Black, color = Color.Red)
+                            Text(fmtFecha.format(fecha).uppercase(), fontSize = 16.sp, fontWeight = FontWeight.Black, color = DelisaRed)
                         } else if (uiState.ventasConFoto.isNotEmpty()) {
-                            Text(uiState.ventasConFoto.first().venta.clienteNombre.uppercase(), fontSize = 16.sp, fontWeight = FontWeight.Black, color = Color.Red, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(uiState.ventasConFoto.first().venta.clienteNombre.uppercase(), fontSize = 16.sp, fontWeight = FontWeight.Black, color = DelisaRed, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     } 
                 },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red) } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) } },
                 actions = { 
                     if (!isFiltradoPorCliente) {
-                        IconButton(onClick = { cal.time = fecha; cal.add(Calendar.DAY_OF_MONTH, -1); onFechaChange(cal.time) }) { Icon(Icons.Default.ChevronLeft, null, tint = Color.Red) }
-                        IconButton(onClick = { cal.time = fecha; cal.add(Calendar.DAY_OF_MONTH, 1); onFechaChange(cal.time) }) { Icon(Icons.Default.ChevronRight, null, tint = Color.Red) } 
+                        IconButton(onClick = { cal.time = fecha; cal.add(Calendar.DAY_OF_MONTH, -1); onFechaChange(cal.time) }) { Icon(Icons.Default.ChevronLeft, null, tint = DelisaRed) }
+                        IconButton(onClick = { cal.time = fecha; cal.add(Calendar.DAY_OF_MONTH, 1); onFechaChange(cal.time) }) { Icon(Icons.Default.ChevronRight, null, tint = DelisaRed) } 
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         },
         bottomBar = {
             if (uiState.ventasConFoto.isNotEmpty()) {
-                val total = uiState.ventasConFoto.sumOf { it.venta.total }
-                Card(shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(16.dp), modifier = Modifier.fillMaxWidth()) {
+                val total = uiState.ventasConFoto.filter { it.venta.estado != "CANCELADA" }.sumOf { it.venta.total }
+                Card(shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), modifier = Modifier.fillMaxWidth().shadow(20.dp, RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Row(Modifier.padding(24.dp).fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                        Column { Text("TOTAL VENTAS", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold); Text("${uiState.ventasConFoto.size} Tickets", fontWeight = FontWeight.Black, fontSize = 20.sp) }
-                        Column(horizontalAlignment = Alignment.End) { Text("RECAUDADO", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold); Text(fmtMoneda.format(total), fontWeight = FontWeight.Black, color = Color.Red, fontSize = 24.sp) }
+                        Column { Text("VENTAS", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold); Text("${uiState.ventasConFoto.count { it.venta.estado != "CANCELADA" }} Tickets", fontWeight = FontWeight.Black, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface) }
+                        Column(horizontalAlignment = Alignment.End) { Text("TOTAL RECAUDADO", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold); Text(fmtMoneda.format(total), fontWeight = FontWeight.Black, color = DelisaRed, fontSize = 24.sp) }
                     }
                 }
             }
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        if (uiState.isLoading) { Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { CircularProgressIndicator(color = Color.Red) } }
+        if (uiState.isLoading) { Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { CircularProgressIndicator(color = DelisaRed) } }
         else if (uiState.ventasConFoto.isEmpty()) { 
             Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Rounded.History, null, tint = Color.LightGray, modifier = Modifier.size(64.dp))
-                    Text("Sin historial disponible", color = Color.Gray, fontWeight = FontWeight.Medium) 
+                    Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), modifier = Modifier.size(64.dp))
+                    Text("Sin historial disponible", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium) 
                 }
             } 
         }
@@ -217,17 +216,17 @@ fun PantallaVentasRoomContent(
                                 scaleX = scale
                                 scaleY = scale
                             }
+                            .shadow(if (isPressed) 1.dp else 2.dp, RoundedCornerShape(24.dp))
                             .clip(RoundedCornerShape(24.dp)) 
                             .clickable(
                                 interactionSource = interactionSource,
-                                indication = rememberRipple(bounded = true, color = Color.Red.copy(alpha = 0.12f)),
+                                indication = rememberRipple(bounded = true, color = DelisaRed.copy(alpha = 0.12f)),
                                 onClick = { onVentaClick(item.venta) }
                             ), 
                         shape = RoundedCornerShape(24.dp), 
                         colors = CardDefaults.cardColors(
-                            containerColor = if (esCancelada) Color(0xFFEEEEEE) else Color.White
-                        ), 
-                        elevation = CardDefaults.cardElevation(if (isPressed) 1.dp else 2.dp)
+                            containerColor = if (esCancelada) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+                        )
                     ) {
                         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             val fechaVenta = Date(item.venta.fecha)
@@ -242,57 +241,57 @@ fun PantallaVentasRoomContent(
                                     modifier = Modifier
                                         .size(65.dp)
                                         .clip(RoundedCornerShape(16.dp))
-                                        .background(Color(0xFFF1F2F6))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
                                         .then(if (esCancelada) Modifier.graphicsLayer(alpha = 0.5f) else Modifier), 
                                     contentScale = ContentScale.Crop
                                 )
                                 if (esMismoDia && !esCancelada) {
-                                    Surface(color = Color(0xFF4CAF50), shape = CircleShape, modifier = Modifier.size(12.dp).border(2.dp, Color.White, CircleShape)) {}
+                                    Surface(color = Color(0xFF4CAF50), shape = CircleShape, modifier = Modifier.size(12.dp).border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)) {}
                                 }
                             }
                             
                             Spacer(Modifier.width(16.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    text = if (isFiltradoPorCliente) SimpleDateFormat("dd 'de' MMMM", Locale.forLanguageTag("es-MX")).format(fechaVenta) else item.venta.clienteNombre, 
+                                    text = if (isFiltradoPorCliente) SimpleDateFormat("dd 'de' MMMM", Locale("es", "MX")).format(fechaVenta) else item.venta.clienteNombre, 
                                     fontWeight = FontWeight.Black, 
-                                    fontSize = 17.sp, 
-                                    color = if (esCancelada) Color.Gray else Color.Black, 
+                                    fontSize = 15.sp, 
+                                    color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface, 
                                     maxLines = 1, 
                                     overflow = TextOverflow.Ellipsis,
-                                    style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
+                                    style = if (esCancelada) MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.LineThrough) else MaterialTheme.typography.bodyMedium
                                 )
-                                Text(fmtHora.format(fechaVenta), fontSize = 12.sp, color = Color.Gray)
+                                Text(fmtHora.format(fechaVenta), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
                                     text = fmtMoneda.format(item.venta.total), 
-                                    color = if (esCancelada) Color.Gray else if (item.venta.total > 0) Color.Red else Color.Gray, 
+                                    color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else if (item.venta.total > 0) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant, 
                                     fontWeight = FontWeight.Black, 
-                                    fontSize = 18.sp,
+                                    fontSize = 17.sp,
                                     style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
                                 )
                                 if (item.venta.total == 0.0) {
-                                    Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFFF1F2F6)) {
-                                        Text(item.venta.motivoVisita ?: "VISITA", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 9.sp, fontWeight = FontWeight.Black, color = Color.Gray)
+                                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                                        Text(item.venta.motivoVisita ?: "VISITA", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 9.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 } else {
                                     Surface(
                                         shape = RoundedCornerShape(8.dp), 
-                                        color = if (item.venta.sincronizado) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+                                        color = if (item.venta.sincronizado) DelisaGreen.copy(alpha = 0.1f) else DelisaRed.copy(alpha = 0.1f)
                                     ) { 
                                         Text(
-                                            text = if (item.venta.sincronizado) "SINCRONIZADA" else "PENDIENTE DE ENVÍO", 
+                                            text = if (item.venta.sincronizado) "SINCRONIZADA" else "PENDIENTE", 
                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), 
                                             fontSize = 8.sp, 
                                             fontWeight = FontWeight.Black, 
-                                            color = if (item.venta.sincronizado) Color(0xFF2E7D32) else Color(0xFFC62828)
+                                            color = if (item.venta.sincronizado) DelisaGreenDark else DelisaRed
                                         ) 
                                     }
                                 }
                                 if (esCancelada) {
                                     Spacer(Modifier.height(4.dp))
-                                    Surface(color = Color.Red, shape = RoundedCornerShape(8.dp)) {
+                                    Surface(color = DelisaRed, shape = RoundedCornerShape(8.dp)) {
                                         Text("ANULADA", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
                                     }
                                 }
@@ -317,5 +316,7 @@ fun VentasRoomPreview() {
         sincronizado = true, firestoreId = null
     )
     val items = listOf(VentaConFotoUI(dummyVenta, ""))
-    DeliveryTheme { PantallaVentasRoomContent(VentasRoomUiState(ventasConFoto = items), Date(), {}, {}, {}) }
+    DeliveryTheme(darkTheme = false) {
+        PantallaVentasRoomContent(VentasRoomUiState(ventasConFoto = items), Date(), {}, {}, {}) 
+    }
 }

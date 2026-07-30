@@ -24,6 +24,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -48,7 +49,7 @@ import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.data.RepositoryCliente
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
 import kotlinx.coroutines.launch
 
 @Composable
@@ -139,24 +140,44 @@ fun CrearClienteContent(
         }.joinToString(" ")
     }
 
-    Scaffold(containerColor = Color(0xFFF8F9FA)) { padding ->
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Card(Modifier.fillMaxWidth().padding(vertical = 8.dp), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(3.dp)) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .shadow(2.dp, RoundedCornerShape(24.dp)), 
+                shape = RoundedCornerShape(24.dp), 
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red) }
-                    Text("NUEVO CLIENTE", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color.DarkGray)
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) }
+                    Text("NUEVO CLIENTE", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                 }
             }
             Spacer(Modifier.height(16.dp))
             Box(Modifier.size(150.dp).padding(8.dp), contentAlignment = Alignment.BottomEnd) {
-                Card(Modifier.fillMaxSize().clickable { if (!isLoading) onTakePhoto() }, shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(4.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .shadow(4.dp, RoundedCornerShape(24.dp))
+                        .clickable { if (!isLoading) onTakePhoto() }, 
+                    shape = RoundedCornerShape(24.dp), 
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
                     if (uiState.imageBitmap != null) { Image(bitmap = uiState.imageBitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-                    else { Box(Modifier.fillMaxSize().background(Color.Red.copy(alpha = 0.05f)), contentAlignment = Alignment.Center) { Image(painter = painterResource(R.drawable.repartidor), contentDescription = null, modifier = Modifier.size(70.dp)) } }
+                    else { Box(Modifier.fillMaxSize().background(DelisaRed.copy(alpha = 0.05f)), contentAlignment = Alignment.Center) { Image(painter = painterResource(R.drawable.repartidor), contentDescription = null, modifier = Modifier.size(70.dp)) } }
                 }
-                Surface(shape = CircleShape, color = if (isLoading) Color.Gray else Color.Red, shadowElevation = 4.dp, modifier = Modifier.size(36.dp).clickable { if (!isLoading) onTakePhoto() }) { Icon(Icons.Outlined.PhotoCamera, null, tint = Color.White, modifier = Modifier.padding(8.dp)) }
+                Surface(shape = CircleShape, color = if (isLoading) Color.Gray else DelisaRed, shadowElevation = 4.dp, modifier = Modifier.size(36.dp).clickable { if (!isLoading) onTakePhoto() }) { Icon(Icons.Outlined.PhotoCamera, null, tint = Color.White, modifier = Modifier.padding(8.dp)) }
             }
             Spacer(Modifier.height(24.dp))
-            Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(2.dp, RoundedCornerShape(24.dp)), 
+                shape = RoundedCornerShape(24.dp), 
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ModernOutlinedField("Nombre del negocio", nombreNegocio, Icons.Outlined.Storefront, { 
                         val formatted = formatAsTitleCase(it.text)
@@ -169,9 +190,29 @@ fun CrearClienteContent(
                     ModernOutlinedField("Teléfono", telefono, Icons.Outlined.Phone, { telefono = it }, KeyboardType.Number)
                     ModernOutlinedField("Correo", correo, Icons.Outlined.Email, { correo = it }, KeyboardType.Email)
                     ExposedDropdownMenuBox(expanded = expanded && !isLoading, onExpandedChange = { expanded = !expanded }) {
-                        OutlinedTextField(value = tipoExhibidor, onValueChange = {}, readOnly = true, label = { Text("Exhibidor") }, leadingIcon = { Icon(Icons.Outlined.Layers, null, tint = Color.Red) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red, unfocusedBorderColor = if (tipoExhibidor == "Selecciona Exhibidor") Color.Red.copy(alpha = 0.5f) else Color.Gray))
-                        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            listOf("No asignado", "Mesa", "Normal", "Premium").forEach { opt -> DropdownMenuItem(text = { Text(opt) }, onClick = { tipoExhibidor = opt; expanded = false }) }
+                        OutlinedTextField(
+                            value = tipoExhibidor, 
+                            onValueChange = {}, 
+                            readOnly = true, 
+                            label = { Text("Exhibidor") }, 
+                            leadingIcon = { Icon(Icons.Outlined.Layers, null, tint = DelisaRed) }, 
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, 
+                            modifier = Modifier.menuAnchor().fillMaxWidth(), 
+                            shape = RoundedCornerShape(16.dp), 
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = DelisaRed, 
+                                focusedLabelColor = DelisaRed, 
+                                unfocusedBorderColor = if (tipoExhibidor == "Selecciona Exhibidor") DelisaRed.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expanded, 
+                            onDismissRequest = { expanded = false },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                        ) {
+                            listOf("No asignado", "Mesa", "Normal", "Premium").forEach { opt -> DropdownMenuItem(text = { Text(opt, color = MaterialTheme.colorScheme.onSurface) }, onClick = { tipoExhibidor = opt; expanded = false }) }
                         }
                     }
                     
@@ -180,16 +221,16 @@ fun CrearClienteContent(
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F3F4)),
-                            border = BorderStroke(1.dp, Color.Red.copy(0.2f))
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            border = BorderStroke(1.dp, DelisaRed.copy(0.2f))
                         ) {
                             Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                    Icon(Icons.Outlined.GpsFixed, null, tint = Color.Red, modifier = Modifier.size(24.dp))
+                                    Icon(Icons.Outlined.GpsFixed, null, tint = DelisaRed, modifier = Modifier.size(24.dp))
                                     Spacer(Modifier.width(12.dp))
                                     Column {
-                                        Text("MODO CAPTURA NATIVA", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.Gray)
-                                        Text(if (uiState.ubicacionValida) "GPS Conectado" else "Buscando satélites...", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (uiState.ubicacionValida) Color(0xFF2E7D32) else Color.Red)
+                                        Text("MODO CAPTURA NATIVA", fontSize = 10.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(if (uiState.ubicacionValida) "GPS Conectado" else "Buscando satélites...", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (uiState.ubicacionValida) DelisaGreenDark else DelisaRed)
                                     }
                                 }
                                 
@@ -198,7 +239,7 @@ fun CrearClienteContent(
                                 Text(
                                     text = uiState.ubicacionTexto,
                                     fontSize = 12.sp,
-                                    color = Color.DarkGray,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
                                 )
@@ -209,9 +250,9 @@ fun CrearClienteContent(
                                     onClick = onRetryLocation,
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Red),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = DelisaRed),
                                     elevation = ButtonDefaults.buttonElevation(2.dp),
-                                    border = BorderStroke(1.dp, Color.Red)
+                                    border = BorderStroke(1.dp, DelisaRed)
                                 ) {
                                     Icon(Icons.Outlined.GpsFixed, null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
@@ -234,7 +275,7 @@ fun CrearClienteContent(
                                     onClick = onRetryLocation,
                                     modifier = Modifier.padding(end = 8.dp)
                                 ) {
-                                    Icon(Icons.Outlined.Refresh, "Reintentar", tint = Color.Red)
+                                    Icon(Icons.Outlined.Refresh, "Reintentar", tint = DelisaRed)
                                 }
                             }
                         }
@@ -242,15 +283,36 @@ fun CrearClienteContent(
                 }
             }
             Spacer(Modifier.height(24.dp))
-            if (isLoading) { CircularProgressIndicator(color = Color.Red) }
-            else { Button(onClick = { onGuardar(nombreNegocio.text, nombreDueno.text, telefono.text, correo.text, tipoExhibidor) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("GUARDAR CLIENTE", fontWeight = FontWeight.ExtraBold) } }
+            if (isLoading) { CircularProgressIndicator(color = DelisaRed) }
+            else { Button(onClick = { onGuardar(nombreNegocio.text, nombreDueno.text, telefono.text, correo.text, tipoExhibidor) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)) { Text("GUARDAR CLIENTE", fontWeight = FontWeight.ExtraBold) } }
         }
     }
 }
 
 @Composable
 fun ModernOutlinedField(label: String, value: TextFieldValue, icon: ImageVector, onValueChange: (TextFieldValue) -> Unit, keyboardType: KeyboardType = KeyboardType.Text, maxLines: Int = 1, readOnly: Boolean = false) {
-    OutlinedTextField(value = value, onValueChange = onValueChange, label = { Text(label) }, leadingIcon = { Icon(icon, null, tint = if (readOnly) Color.Gray else Color.Red) }, singleLine = maxLines == 1, maxLines = maxLines, readOnly = readOnly, keyboardOptions = KeyboardOptions(keyboardType = keyboardType), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red, disabledBorderColor = Color(0xFFEEEEEE), disabledTextColor = Color.DarkGray, disabledLabelColor = Color.Gray), modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp))
+    OutlinedTextField(
+        value = value, 
+        onValueChange = onValueChange, 
+        label = { Text(label) }, 
+        leadingIcon = { Icon(icon, null, tint = if (readOnly) MaterialTheme.colorScheme.onSurfaceVariant else DelisaRed) }, 
+        singleLine = maxLines == 1, 
+        maxLines = maxLines, 
+        readOnly = readOnly, 
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType), 
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = DelisaRed, 
+            focusedLabelColor = DelisaRed, 
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), 
+            disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), 
+            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        ), 
+        modifier = Modifier.fillMaxWidth(), 
+        shape = RoundedCornerShape(16.dp)
+    )
 }
 
 @Preview(showBackground = true, showSystemUi = true, name = "Crear Cliente - Formulario")

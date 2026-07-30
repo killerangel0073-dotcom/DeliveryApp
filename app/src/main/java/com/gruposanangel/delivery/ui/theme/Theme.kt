@@ -1,53 +1,118 @@
 package com.gruposanangel.delivery.ui.theme
 
 import android.app.Activity
-import android.os.Build
+import android.content.Context
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+// --- GESTIÓN DE TEMA GLOBAL ---
+object ThemeConfig {
+    var isDarkTheme = mutableStateOf<Boolean?>(null) // null = automático (sensor o sistema)
+    var isSensorDark = mutableStateOf(false) // Estado controlado por el sensor de luz
+
+    fun loadTheme(context: Context) {
+        val prefs = context.getSharedPreferences("theme_prefs", Context.MODE_PRIVATE)
+        if (prefs.contains("is_dark")) {
+            isDarkTheme.value = prefs.getBoolean("is_dark", false)
+        }
+    }
+
+    fun saveTheme(context: Context, dark: Boolean?) {
+        isDarkTheme.value = dark
+        val prefs = context.getSharedPreferences("theme_prefs", Context.MODE_PRIVATE)
+        if (dark == null) {
+            prefs.edit().remove("is_dark").apply()
+        } else {
+            prefs.edit().putBoolean("is_dark", dark!!).apply()
+        }
+    }
+}
+
+val DarkColorScheme = darkColorScheme(
+    primary = DelisaRed,
+    onPrimary = Color.White,
+    primaryContainer = DelisaRedDark,
+    onPrimaryContainer = Color.White,
+    
+    secondary = DelisaBlue,
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFF003366), // Azul muy oscuro para contraste
+    
+    tertiary = DelisaGreen,
+    onTertiary = Color.White,
+    
+    background = DarkBackground,
+    onBackground = DarkOnBackground,
+    surface = DarkSurface,
+    onSurface = DarkOnSurface,
+    surfaceVariant = DarkVariant,
+    onSurfaceVariant = DarkOnBackground,
+    
+    error = ErrorRed,
+    onError = Color.White,
+    
+    // Eliminación de morados residuales de M3
+    outline = Color.Gray,
+    surfaceTint = Color.Transparent, // Evita el tinte morado en superficies
+    inversePrimary = DelisaRedLight
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
+val LightColorScheme = lightColorScheme(
+    primary = DelisaRed,
     onPrimary = Color.White,
+    primaryContainer = DelisaRedLight,
+    onPrimaryContainer = DelisaRedDark,
+    
+    secondary = DelisaBlue,
     onSecondary = Color.White,
+    secondaryContainer = DelisaBlueLight,
+    
+    tertiary = DelisaGreen,
     onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+    
+    background = NeutralBackground,
+    onBackground = NeutralOnBackground,
+    surface = NeutralSurface,
+    onSurface = NeutralOnSurface,
+    surfaceVariant = NeutralVariant,
+    onSurfaceVariant = Color.Gray,
+    
+    error = ErrorRed,
+    onError = Color.White,
+
+    // Eliminación de morados residuales de M3
+    outline = Color.LightGray,
+    surfaceTint = Color.Transparent, // Evita el tinte morado en superficies
+    inversePrimary = DelisaRedLight
 )
 
 @Composable
 fun DeliveryTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    // Si isDarkTheme es null (modo auto), usamos el sensor. 
+    // Si el sensor no ha detectado nada, podemos usar isSystemInDarkTheme() como respaldo.
+    darkTheme: Boolean = ThemeConfig.isDarkTheme.value ?: ThemeConfig.isSensorDark.value,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
+    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
 
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            window.statusBarColor = colorScheme.primary.toArgb()
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+        }
     }
 
     MaterialTheme(

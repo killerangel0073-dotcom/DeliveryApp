@@ -59,17 +59,13 @@ import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.model.Plantilla_Producto
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.DialogoConfirmacion
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import java.text.NumberFormat
 import java.util.*
-
-private val RojoDelisa = Color(0xFFE53935)
-private val NegroPremium = Color(0xFF1E1E24)
-private val GrisFondoPremium = Color(0xFFF6F8FA)
 
 @Composable
 fun MovimientosInventarioScreen(
@@ -171,16 +167,18 @@ fun MovimientosInventarioScreen(
     }
 
     Scaffold(
-        containerColor = GrisFondoPremium,
+        containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(horizontal = 16.dp)) {
             // 🔹 CABECERA PREMIUM
             Card(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp)
+                    .shadow(2.dp, RoundedCornerShape(28.dp)),
                 shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(2.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -190,21 +188,21 @@ fun MovimientosInventarioScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (!isTabMode) {
                             IconButton(onClick = { navController.popBackStack() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RojoDelisa)
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed)
                             }
                         }
                         Text(
                             text = if (isTabMode) "SURTIR VENDEDORES" else "GESTIÓN DE CARGAS",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Black,
-                            color = NegroPremium
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     
                     TextButton(onClick = { viewModel.limpiarPantalla() }) {
-                        Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp), tint = Color.Gray)
+                        Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(4.dp))
-                        Text("VACIAR", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text("VACIAR", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -249,7 +247,7 @@ fun MovimientosInventarioScreen(
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (state.isLoading && catalogo.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = RojoDelisa) }
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
                 } else {
                     LazyColumn(
                         state = listState,
@@ -277,30 +275,44 @@ fun MovimientosInventarioScreen(
             val habilitarBoton = totalPiezas > 0 && (state.destino != "Selecciona Destino" && (isEmergency || state.origen != "Selecciona Origen"))
 
             Card(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 16.dp)
+                    .shadow(12.dp, RoundedCornerShape(28.dp)),
                 shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = NegroPremium),
-                elevation = CardDefaults.cardElevation(12.dp)
+                colors = CardDefaults.cardColors(containerColor = DelisaRed)
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                        Column {
-                            Text("RESUMEN DE CARGA", color = Color.White.copy(0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "$totalPiezas unidades", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark)))
+                        .padding(20.dp)
+                ) {
+                    Column {
+                        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                            Column {
+                                Text("RESUMEN DE CARGA", color = Color.White.copy(0.6f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(text = "$totalPiezas unidades", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                            }
+                            Text(text = NumberFormat.getCurrencyInstance(Locale("es", "MX")).format(totalMonto), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
                         }
-                        Text(text = NumberFormat.getCurrencyInstance(Locale("es", "MX")).format(totalMonto), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Button(
-                        onClick = { mostrarDialogConfirmacion = true },
-                        enabled = habilitarBoton,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa, contentColor = Color.White)
-                    ) {
-                        Icon(imageVector = if (isEmergency) Icons.Default.FlashOn else Icons.Default.CheckCircle, contentDescription = null)
-                        Spacer(Modifier.width(12.dp))
-                        Text(text = if (isEmergency) "CONFIRMAR CARGA DIRECTA" else "ENVIAR CARGA", fontWeight = FontWeight.Black)
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = { mostrarDialogConfirmacion = true },
+                            enabled = habilitarBoton,
+                            modifier = Modifier.fillMaxWidth().height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White, 
+                                contentColor = DelisaRed,
+                                disabledContainerColor = Color.White.copy(alpha = 0.3f),
+                                disabledContentColor = Color.White.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Icon(imageVector = if (isEmergency) Icons.Default.FlashOn else Icons.Default.CheckCircle, contentDescription = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text(text = if (isEmergency) "CONFIRMAR CARGA DIRECTA" else "ENVIAR CARGA", fontWeight = FontWeight.Black)
+                        }
                     }
                 }
             }
@@ -355,25 +367,25 @@ fun SelectorCard(
                 scaleX = scale
                 scaleY = scale
             }
+            .shadow(if (isPressed) 1.dp else 2.dp, RoundedCornerShape(20.dp))
             .clip(RoundedCornerShape(20.dp))
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material.ripple.rememberRipple(color = RojoDelisa.copy(alpha = 0.1f)),
+                indication = androidx.compose.material.ripple.rememberRipple(color = DelisaRed.copy(alpha = 0.1f)),
                 enabled = enabled,
                 onClick = onClick
             ),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = if (enabled) Color.White else Color(0xFFEEEEEE)),
-        elevation = CardDefaults.cardElevation(1.dp)
+        colors = CardDefaults.cardColors(containerColor = if (enabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, tint = if (seleccionado == placeholder) Color.Gray else RojoDelisa, modifier = Modifier.size(16.dp))
+                Icon(icon, null, tint = if (seleccionado == placeholder) MaterialTheme.colorScheme.onSurfaceVariant else DelisaRed, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(titulo, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                Text(titulo, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(4.dp))
-            Text(text = seleccionado, fontSize = 12.sp, fontWeight = FontWeight.Black, color = NegroPremium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = seleccionado, fontSize = 12.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -382,34 +394,35 @@ fun SelectorCard(
 fun ItemProductoCargaModerno(producto: Plantilla_Producto, cantidadActual: Int, stockDisponible: Int, esCompra: Boolean, isAudit: Boolean = false, onCantidadChange: (Int) -> Unit, onStockLimitReached: () -> Unit) {
     val seleccionado = cantidadActual > 0
     val textColor = when {
-        !isAudit -> NegroPremium
-        cantidadActual < stockDisponible -> Color(0xFFFFB300) // Amarillo (Menor)
-        cantidadActual > stockDisponible -> Color.Red        // Rojo (Mayor)
-        else -> Color(0xFF2E7D32)                           // Verde (Igual)
+        !isAudit -> MaterialTheme.colorScheme.onSurface
+        cantidadActual < stockDisponible -> WarningOrange
+        cantidadActual > stockDisponible -> DelisaRed
+        else -> DelisaGreenDark
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(if (seleccionado) 8.dp else 2.dp, RoundedCornerShape(24.dp)),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = if (seleccionado) BorderStroke(1.5.dp, RojoDelisa.copy(0.5f)) else null,
-        elevation = CardDefaults.cardElevation(if (seleccionado) 8.dp else 2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = if (seleccionado) BorderStroke(1.5.dp, DelisaRed.copy(0.5f)) else null
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(contentAlignment = Alignment.BottomEnd) {
                 AsyncImage(model = producto.imagenUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(80.dp).clip(RoundedCornerShape(18.dp)))
-                Surface(color = if (stockDisponible > 0) Color(0xFF4CAF50) else Color.Red, shape = CircleShape, modifier = Modifier.size(30.dp).offset(x = 5.dp, y = 5.dp).border(2.dp, Color.White, CircleShape)) {
+                Surface(color = if (stockDisponible > 0) DelisaGreen else DelisaRed, shape = CircleShape, modifier = Modifier.size(30.dp).offset(x = 5.dp, y = 5.dp).border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)) {
                     Box(contentAlignment = Alignment.Center) { Text(text = stockDisponible.toString(), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black) }
                 }
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(producto.nombre, fontWeight = FontWeight.Black, fontSize = 15.sp, color = NegroPremium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(text = NumberFormat.getCurrencyInstance(Locale("es", "MX")).format(producto.precio), color = RojoDelisa, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(producto.nombre, fontWeight = FontWeight.Black, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(text = NumberFormat.getCurrencyInstance(Locale("es", "MX")).format(producto.precio), color = DelisaRed, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (cantidadActual > 0) {
-                    IconButton(onClick = { onCantidadChange(cantidadActual - 1) }, modifier = Modifier.size(32.dp).background(Color(0xFFF1F2F6), CircleShape)) { Icon(Icons.Default.Remove, null, modifier = Modifier.size(16.dp)) }
+                    IconButton(onClick = { onCantidadChange(cantidadActual - 1) }, modifier = Modifier.size(32.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)) { Icon(Icons.Default.Remove, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface) }
                     BasicTextField(
                         value = if (cantidadActual == 0) "" else cantidadActual.toString(),
                         onValueChange = { val n = it.toIntOrNull() ?: 0; if (esCompra || n <= stockDisponible) onCantidadChange(n) else onStockLimitReached() },
@@ -418,7 +431,7 @@ fun ItemProductoCargaModerno(producto: Plantilla_Producto, cantidadActual: Int, 
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                 }
-                IconButton(onClick = { if (esCompra || cantidadActual < stockDisponible) onCantidadChange(cantidadActual + 1) else onStockLimitReached() }, modifier = Modifier.size(38.dp).background(RojoDelisa, CircleShape)) { Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
+                IconButton(onClick = { if (esCompra || cantidadActual < stockDisponible) onCantidadChange(cantidadActual + 1) else onStockLimitReached() }, modifier = Modifier.size(38.dp).background(DelisaRed, CircleShape)) { Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
             }
         }
     }

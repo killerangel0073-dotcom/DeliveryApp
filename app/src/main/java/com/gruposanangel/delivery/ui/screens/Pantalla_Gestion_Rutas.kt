@@ -9,6 +9,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -39,16 +41,11 @@ import com.google.android.gms.maps.model.*
 import com.google.maps.android.compose.*
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.*
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 private const val TAG = "MAPA_DEBUG"
-
-private val ColorFondoLetras = Color(0xFF0F172A)
-private val ColorSubtitulos = Color(0xFF64748B)
-private val ColorBordesModernos = Color(0xFFF1F5F9)
-private val ColorFondoGrisClaro = Color(0xFFF8FAFC)
 
 @Composable
 fun Pantalla_Gestion_Rutas(navController: NavController) {
@@ -58,6 +55,8 @@ fun Pantalla_Gestion_Rutas(navController: NavController) {
     val viewModel: GestionRutasViewModel = viewModel(factory = GestionRutasViewModelFactory(repoRuta, RepositoryCliente(db.clienteDao())))
     val uiState by viewModel.uiState.collectAsState()
 
+    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+
     LaunchedEffect(uiState.successMessage) {
         uiState.successMessage?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
@@ -65,15 +64,17 @@ fun Pantalla_Gestion_Rutas(navController: NavController) {
         }
     }
 
-    PantallaGestionRutasContent(
-        uiState = uiState,
-        onBack = { navController.popBackStack() },
-        onRutaBaseSelect = { viewModel.setRutaBase(it) },
-        onDaySelect = { viewModel.setDay(it) },
-        onWeekSelect = { viewModel.setWeek(it) },
-        onToggleCliente = { viewModel.toggleSeleccionCliente(it) },
-        onSave = { viewModel.guardarConfiguracionRuta() }
-    )
+    DeliveryTheme(darkTheme = isDark) {
+        PantallaGestionRutasContent(
+            uiState = uiState,
+            onBack = { navController.popBackStack() },
+            onRutaBaseSelect = { viewModel.setRutaBase(it) },
+            onDaySelect = { viewModel.setDay(it) },
+            onWeekSelect = { viewModel.setWeek(it) },
+            onToggleCliente = { viewModel.toggleSeleccionCliente(it) },
+            onSave = { viewModel.guardarConfiguracionRuta() }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -121,9 +122,9 @@ fun PantallaGestionRutasContent(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Configurar Rutas", fontWeight = FontWeight.Bold, color = ColorFondoLetras, fontSize = 20.sp) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = ColorFondoLetras) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
+                title = { Text("Configurar Rutas", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
                 actions = {
                     FilterChip(
                         selected = vistaMapa,
@@ -131,14 +132,19 @@ fun PantallaGestionRutasContent(
                         label = { Text(if (vistaMapa) "Ver Lista" else "Ver Mapa", fontWeight = FontWeight.Bold) },
                         leadingIcon = { Icon(if (vistaMapa) Icons.Default.ListAlt else Icons.Default.Map, null, modifier = Modifier.size(16.dp)) },
                         colors = FilterChipDefaults.filterChipColors(
-                            containerColor = Color.White,
-                            labelColor = Color.DarkGray,
-                            iconColor = Color.Red,
-                            selectedContainerColor = Color.Red.copy(alpha = 0.1f),
-                            selectedLabelColor = Color.Red,
-                            selectedLeadingIconColor = Color.Red
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            iconColor = DelisaRed,
+                            selectedContainerColor = DelisaRed.copy(alpha = 0.1f),
+                            selectedLabelColor = DelisaRed,
+                            selectedLeadingIconColor = DelisaRed
                         ),
-                        border = FilterChipDefaults.filterChipBorder(enabled = true, selected = vistaMapa, borderColor = ColorBordesModernos, selectedBorderColor = Color.Red.copy(alpha = 0.3f)),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true, 
+                            selected = vistaMapa, 
+                            borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), 
+                            selectedBorderColor = DelisaRed.copy(alpha = 0.3f)
+                        ),
                         shape = RoundedCornerShape(99.dp),
                         modifier = Modifier.padding(end = 12.dp)
                     )
@@ -148,7 +154,7 @@ fun PantallaGestionRutasContent(
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onSave,
-                containerColor = Color.Red,
+                containerColor = DelisaRed,
                 contentColor = Color.White,
                 icon = { Icon(Icons.Default.DoneAll, null, modifier = Modifier.size(20.dp)) },
                 text = { Text("Guardar Cambios", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
@@ -156,7 +162,7 @@ fun PantallaGestionRutasContent(
                 elevation = FloatingActionButtonDefaults.elevation(6.dp)
             )
         },
-        containerColor = ColorFondoGrisClaro
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
 
@@ -167,7 +173,7 @@ fun PantallaGestionRutasContent(
                     selectedIds = uiState.selectedClientIds,
                     cameraState = estadoCamaraMapa,
                     onToggle = onToggleCliente,
-                    isMapVisible = vistaMapa, // 🎯 PASAMOS EL ESTADO DE VISIBILIDAD AL MAPA
+                    isMapVisible = vistaMapa, 
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(top = 84.dp)
@@ -180,13 +186,13 @@ fun PantallaGestionRutasContent(
                         onToggle = onToggleCliente,
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(ColorFondoGrisClaro)
+                            .background(MaterialTheme.colorScheme.background)
                             .padding(top = 84.dp)
                     )
                 }
 
                 if (uiState.isLoading) {
-                    Box(Modifier.fillMaxSize().background(Color.White.copy(0.6f)), Alignment.Center) { CircularProgressIndicator(color = Color.Red, strokeWidth = 3.dp) }
+                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(0.6f)), Alignment.Center) { CircularProgressIndicator(color = DelisaRed, strokeWidth = 3.dp) }
                 }
             }
 
@@ -202,9 +208,9 @@ fun PantallaGestionRutasContent(
                 Box(Modifier.weight(1.1f)) {
                     ExposedDropdownMenuBox(expanded = expandRuta, onExpandedChange = { expandRuta = !expandRuta }) {
                         MenuSelectorFlotante(label = "Ruta", valor = uiState.selectedRutaBase ?: "Seleccionar", activo = expandRuta, modifier = Modifier.menuAnchor())
-                        ExposedDropdownMenu(expanded = expandRuta, onDismissRequest = { expandRuta = false }, modifier = Modifier.background(Color.White)) {
+                        ExposedDropdownMenu(expanded = expandRuta, onDismissRequest = { expandRuta = false }, modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
                             listaRutas.forEach { id ->
-                                DropdownMenuItem(text = { Text(id, fontWeight = FontWeight.Medium) }, onClick = { onRutaBaseSelect(id); expandRuta = false })
+                                DropdownMenuItem(text = { Text(id, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface) }, onClick = { onRutaBaseSelect(id); expandRuta = false })
                             }
                         }
                     }
@@ -222,9 +228,9 @@ fun PantallaGestionRutasContent(
                             else -> uiState.selectedDay ?: "Elegir"
                         }
                         MenuSelectorFlotante(label = "Día", valor = diaCompletoVisual, activo = expandDia, modifier = Modifier.menuAnchor())
-                        ExposedDropdownMenu(expanded = expandDia, onDismissRequest = { expandDia = false }, modifier = Modifier.background(Color.White)) {
+                        ExposedDropdownMenu(expanded = expandDia, onDismissRequest = { expandDia = false }, modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
                             mapOf("Lun" to "Lunes", "Mar" to "Martes", "Mie" to "Miércoles", "Jue" to "Jueves", "Vie" to "Viernes", "Sab" to "Sábado").forEach { (clave, valor) ->
-                                DropdownMenuItem(text = { Text(valor, fontWeight = FontWeight.Medium) }, onClick = { onDaySelect(clave); expandDia = false })
+                                DropdownMenuItem(text = { Text(valor, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface) }, onClick = { onDaySelect(clave); expandDia = false })
                             }
                         }
                     }
@@ -233,9 +239,9 @@ fun PantallaGestionRutasContent(
                 Box(Modifier.weight(0.9f)) {
                     ExposedDropdownMenuBox(expanded = expandSemana, onExpandedChange = { expandSemana = !expandSemana }) {
                         MenuSelectorFlotante(label = "Ciclo", valor = if (uiState.selectedWeek != null) "Sem. ${uiState.selectedWeek}" else "Todos", activo = expandSemana, modifier = Modifier.menuAnchor())
-                        ExposedDropdownMenu(expanded = expandSemana, onDismissRequest = { expandSemana = false }, modifier = Modifier.background(Color.White)) {
+                        ExposedDropdownMenu(expanded = expandSemana, onDismissRequest = { expandSemana = false }, modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
                             listOf("Par", "Non").forEach { w ->
-                                DropdownMenuItem(text = { Text("Semana $w", fontWeight = FontWeight.Medium) }, onClick = { onWeekSelect(w); expandSemana = false })
+                                DropdownMenuItem(text = { Text("Semana $w", fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface) }, onClick = { onWeekSelect(w); expandSemana = false })
                             }
                         }
                     }
@@ -248,11 +254,10 @@ fun PantallaGestionRutasContent(
 @Composable
 fun MenuSelectorFlotante(label: String, valor: String, activo: Boolean, modifier: Modifier = Modifier) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().shadow(if (activo) 6.dp else 2.dp, RoundedCornerShape(14.dp)),
         shape = RoundedCornerShape(14.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, if (activo) Color.Red.copy(0.5f) else ColorBordesModernos),
-        shadowElevation = 3.dp
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, if (activo) DelisaRed.copy(0.5f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
     ) {
         Row(
             Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
@@ -260,10 +265,10 @@ fun MenuSelectorFlotante(label: String, valor: String, activo: Boolean, modifier
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
-                Text(label, fontSize = 9.sp, color = ColorSubtitulos, fontWeight = FontWeight.SemiBold)
-                Text(valor, fontSize = 12.sp, color = ColorFondoLetras, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(label, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
+                Text(valor, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Black, maxLines = 1)
             }
-            Icon(Icons.Default.ExpandMore, null, tint = ColorSubtitulos, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.ExpandMore, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
         }
     }
 }
@@ -287,36 +292,35 @@ fun VistaListaRutas(clientes: List<ClienteEntity>, selectedIds: Set<String>, onT
                 modifier = Modifier.animateItemPlacement()
             ) {
                 Card(
-                    modifier = Modifier.fillMaxWidth().clickable { onToggle(c.id) },
+                    modifier = Modifier.fillMaxWidth().clickable { onToggle(c.id) }.shadow(if (sel) 4.dp else 1.dp, RoundedCornerShape(22.dp)),
                     shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(
                         width = if (sel) 2.dp else 1.dp,
-                        color = if (sel) Color.Red.copy(alpha = 0.8f) else ColorBordesModernos // Color rojo para el borde si está en ruta
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = if (sel) 4.dp else 0.5.dp)
+                        color = if (sel) DelisaRed.copy(alpha = 0.8f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
+                    )
                 ) {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(contentAlignment = Alignment.BottomEnd) {
                             AsyncImage(model = c.fotografiaUrl, contentDescription = null, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentScale = ContentScale.Crop, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(16.dp)))
                             if (sel) {
-                                Box(modifier = Modifier.size(18.dp).background(Color.Red, CircleShape).padding(2.dp), contentAlignment = Alignment.Center) {
+                                Box(modifier = Modifier.size(18.dp).background(DelisaRed, CircleShape).padding(2.dp), contentAlignment = Alignment.Center) {
                                     Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(12.dp))
                                 }
                             }
                         }
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(c.nombreNegocio, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = ColorFondoLetras)
+                            Text(c.nombreNegocio, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
                             Spacer(Modifier.height(2.dp))
-                            Text(c.nombreDueno, fontSize = 12.sp, color = ColorSubtitulos, fontWeight = FontWeight.Medium)
+                            Text(c.nombreDueno, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.height(6.dp))
-                            Surface(shape = RoundedCornerShape(6.dp), color = if (sel) Color.Red.copy(0.1f) else ColorBordesModernos.copy(0.5f)) {
-                                Text(text = if (sel) "INCLUIDO EN RUTA" else "DISPONIBLE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (sel) Color.Red else ColorSubtitulos, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                            Surface(shape = RoundedCornerShape(6.dp), color = if (sel) DelisaRed.copy(0.1f) else MaterialTheme.colorScheme.surfaceVariant) {
+                                Text(text = if (sel) "INCLUIDO EN RUTA" else "DISPONIBLE", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (sel) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
                             }
                         }
-                        IconButton(onClick = { onToggle(c.id) }, colors = IconButtonDefaults.iconButtonColors(containerColor = if (sel) Color.Red else ColorFondoGrisClaro), modifier = Modifier.size(36.dp)) {
-                            Icon(imageVector = if (sel) Icons.Default.RemoveCircleOutline else Icons.Default.AddCircleOutline, contentDescription = null, tint = if (sel) Color.White else Color.Red, modifier = Modifier.size(20.dp))
+                        IconButton(onClick = { onToggle(c.id) }, colors = IconButtonDefaults.iconButtonColors(containerColor = if (sel) DelisaRed else MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.size(36.dp)) {
+                            Icon(imageVector = if (sel) Icons.Default.RemoveCircleOutline else Icons.Default.AddCircleOutline, contentDescription = null, tint = if (sel) Color.White else DelisaRed, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
@@ -419,18 +423,18 @@ fun VistaMapaRutas(
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp, start = 16.dp, end = 16.dp).zIndex(5f)
         ) {
             selMap?.let { c ->
-                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(16.dp)) {
+                Card(Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(24.dp)), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                         AsyncImage(model = c.fotografiaUrl, contentDescription = null, modifier = Modifier.size(60.dp).clip(RoundedCornerShape(16.dp)), contentScale = ContentScale.Crop)
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(c.nombreNegocio, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = ColorFondoLetras)
-                            Text(c.nombreDueno, color = ColorSubtitulos, fontSize = 13.sp)
+                            Text(c.nombreNegocio, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                            Text(c.nombreDueno, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                             val isSelected = selectedIds.contains(c.id)
                             Button(
                                 onClick = { onToggle(c.id) },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isSelected) Color.Red.copy(alpha = 0.6f) else Color.Red,
+                                    containerColor = if (isSelected) DelisaRed.copy(alpha = 0.6f) else DelisaRed,
                                     contentColor = Color.White
                                 ),
                                 shape = RoundedCornerShape(12.dp),
@@ -440,7 +444,7 @@ fun VistaMapaRutas(
                                 Text(if (isSelected) "QUITAR DE RUTA" else "AGREGAR A HOJA", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
-                        IconButton(onClick = { selMap = null }, modifier = Modifier.background(ColorBordesModernos, CircleShape).size(30.dp)) { Icon(Icons.Default.Close, null, modifier = Modifier.size(16.dp), tint = ColorSubtitulos) }
+                        IconButton(onClick = { selMap = null }, modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, CircleShape).size(30.dp)) { Icon(Icons.Default.Close, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
             }

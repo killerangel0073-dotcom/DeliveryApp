@@ -1,4 +1,4 @@
-package com.gruposanangel.delivery.ui.screens
+package com.gruposanangel.delivery
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -17,23 +17,27 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.ui.screens.LoginViewModel
 import com.gruposanangel.delivery.ui.screens.LoginViewModelFactory
 import kotlinx.coroutines.delay
-import com.gruposanangel.delivery.R
+import com.gruposanangel.delivery.ui.theme.*
+import androidx.compose.foundation.isSystemInDarkTheme
+import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
@@ -44,21 +48,23 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
     val repoUsuario = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
 
     val viewModel: LoginViewModel = viewModel(
-        factory = LoginViewModelFactory(repoUsuario)
+        factory = LoginViewModelFactory(repoUsuario),
     )
     val uiState by viewModel.uiState.collectAsState()
 
-    // Llamamos a la vista pura pasando los datos reales del ViewModel
-    PantallaLoginProContent(
-        isLoading = uiState.isLoading,
-        errorMessage = uiState.errorMessage,
-        onLoginClick = { em, pass -> viewModel.login(em, pass) },
-        onLoginSuccess = onLoginSuccess,
-        loginSuccessSignal = uiState.loginSuccess
-    )
+    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+
+    DeliveryTheme(darkTheme = isDark) {
+        PantallaLoginProContent(
+            isLoading = uiState.isLoading,
+            errorMessage = uiState.errorMessage,
+            onLoginClick = { em, pass -> viewModel.login(em, pass) },
+            onLoginSuccess = onLoginSuccess,
+            loginSuccessSignal = uiState.loginSuccess,
+        )
+    }
 }
 
-// 🔹 VISTA PURA (Separa el diseño de la base de datos para que el Preview funcione al 100%)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaLoginProContent(
@@ -66,19 +72,16 @@ fun PantallaLoginProContent(
     errorMessage: String?,
     onLoginClick: (String, String) -> Unit,
     onLoginSuccess: () -> Unit,
-    loginSuccessSignal: Boolean
+    loginSuccessSignal: Boolean,
 ) {
-    // -------------------- STATE LOCAL (Solo UI) --------------------
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
 
-    // Entrada escalonada
     var showEmail by remember { mutableStateOf(false) }
     var showPassword by remember { mutableStateOf(false) }
     var showButton by remember { mutableStateOf(false) }
 
-    // -------------------- EFFECTS --------------------
     LaunchedEffect(Unit) {
         showEmail = true
         delay(150)
@@ -94,82 +97,83 @@ fun PantallaLoginProContent(
         }
     }
 
-    // -------------------- ANIMATIONS --------------------
     val enterAnim = fadeIn(tween(400)) + slideInVertically(
         initialOffsetY = { it / 3 },
-        animationSpec = tween(400)
+        animationSpec = tween(400),
     )
 
-    // Animación de ancho del botón: 220dp -> 60dp (Círculo)
     val buttonWidth by animateDpAsState(
         targetValue = if (isLoading) 60.dp else 220.dp,
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
-        label = "width"
+        label = "width",
     )
 
-    // Animación de redondeo: 14dp -> 100dp (Círculo perfecto)
     val buttonCorner by animateDpAsState(
         targetValue = if (isLoading) 100.dp else 14.dp,
         animationSpec = tween(300),
-        label = "corner"
+        label = "corner",
     )
 
-    // -------------------- UI --------------------
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize(),
     ) {
-        // 🔹 FONDO
         Image(
             painter = painterResource(R.drawable.fondo_mapa),
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
+            contentScale = ContentScale.Crop,
         )
 
-        // 🔹 Overlay oscuro sutil para legibilidad (Gris/Negro sutil)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.35f))
+                .background(Color.Black.copy(alpha = 0.45f)),
         )
 
-        // 🔹 Bloqueo de clics mientras carga (Sin Card invasiva)
         if (isLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clickable(enabled = false) {} 
+                    .zIndex(10f)
+                    .clickable(enabled = false) {},
             )
         }
 
-        // 🔹 Contenido de login
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(24.dp),
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.Center,
         ) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
             ) {
 
                 Image(
-                    painter = painterResource(id = R.drawable.logotipo),
-                    contentDescription = "Logo",
+                    painter = painterResource(id = R.drawable.logo),
+                    contentDescription = "Logo Delisa",
                     modifier = Modifier
-                        .size(180.dp)
-                        .padding(bottom = 20.dp),
-                    contentScale = ContentScale.Fit
+                        .size(160.dp)
+                        .padding(bottom = 10.dp),
+                    contentScale = ContentScale.Fit,
                 )
 
                 Text(
-                    text = "Grupo San Ángel",
+                    text = "DELISA BOTANAS",
                     color = Color.White,
-                    fontSize = 32.sp,
+                    fontSize = 28.sp,
                     fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp
+                    letterSpacing = 1.sp,
+                )
+
+                Text(
+                    text = "SISTEMA DE GESTIÓN LOGÍSTICA",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -179,21 +183,23 @@ fun PantallaLoginProContent(
                     OutlinedTextField(
                         value = email,
                         onValueChange = { email = it },
-                        label = { Text("Correo del Usuario") },
-                        leadingIcon = { Icon(Icons.Default.Email, null) },
+                        label = { Text("Usuario / Email") },
+                        leadingIcon = { Icon(Icons.Default.Email, null, tint = DelisaRed) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
-                        colors = TextFieldDefaults.outlinedTextFieldColors(
-                            containerColor = Color.White,
-                            focusedBorderColor = Color(0xFFFF0000),
-                            unfocusedBorderColor = Color.Gray,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.9f),
+                            focusedBorderColor = DelisaRed,
+                            unfocusedBorderColor = Color.Transparent,
                             focusedLabelColor = Color.White,
-                            cursorColor = Color(0xFFFF0000),
+                            unfocusedLabelColor = Color.White.copy(alpha = 0.6f),
+                            cursorColor = DelisaRed,
                             focusedTextColor = Color.Black,
-                            unfocusedTextColor = Color.Black
-                        )
+                            unfocusedTextColor = Color.Black,
+                        ),
                     )
                 }
 
@@ -203,12 +209,13 @@ fun PantallaLoginProContent(
                         value = password,
                         onValueChange = { password = it },
                         label = { Text("Contraseña") },
-                        leadingIcon = { Icon(Icons.Default.Lock, null) },
+                        leadingIcon = { Icon(Icons.Default.Lock, null, tint = DelisaRed) },
                         trailingIcon = {
                             IconButton(onClick = { passwordVisible = !passwordVisible }) {
                                 Icon(
                                     if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    null
+                                    null,
+                                    tint = Color.Gray,
                                 )
                             }
                         },
@@ -217,15 +224,17 @@ fun PantallaLoginProContent(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
-                        colors = TextFieldDefaults.outlinedTextFieldColors(
-                            containerColor = Color.White,
-                            focusedBorderColor = Color(0xFFFF0000),
-                            unfocusedBorderColor = Color.Gray,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.9f),
+                            focusedBorderColor = DelisaRed,
+                            unfocusedBorderColor = Color.Transparent,
                             focusedLabelColor = Color.White,
-                            cursorColor = Color(0xFFFF0000),
+                            unfocusedLabelColor = Color.White.copy(alpha = 0.6f),
+                            cursorColor = DelisaRed,
                             focusedTextColor = Color.Black,
-                            unfocusedTextColor = Color.Black
-                        )
+                            unfocusedTextColor = Color.Black,
+                        ),
                     )
                 }
 
@@ -233,82 +242,82 @@ fun PantallaLoginProContent(
                 AnimatedVisibility(
                     visible = errorMessage != null,
                     enter = slideInVertically { -it } + fadeIn(),
-                    exit = slideOutVertically { -it } + fadeOut()
+                    exit = slideOutVertically { -it } + fadeOut(),
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFFFFEBEE), RoundedCornerShape(10.dp))
-                            .padding(12.dp)
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error),
                     ) {
                         Text(
                             errorMessage.orEmpty(),
-                            color = Color(0xFFD32F2F),
-                            fontSize = 14.sp
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(12.dp),
+                            textAlign = TextAlign.Center,
+                            fontWeight = FontWeight.Medium,
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // 🚀 BOTÓN DINÁMICO (MORFEO PREMIUM)
+                // 🚀 BOTÓN MORFEO PREMIUM
                 AnimatedVisibility(visible = showButton, enter = enterAnim) {
                     Button(
                         onClick = { onLoginClick(email, password) },
                         modifier = Modifier
-                            .height(60.dp) // Un poco más estético
-                            .width(buttonWidth),
+                            .height(56.dp)
+                            .width(buttonWidth)
+                            .shadow(if (isLoading) 0.dp else 10.dp, RoundedCornerShape(buttonCorner), ambientColor = DelisaRed),
                         shape = RoundedCornerShape(buttonCorner),
                         enabled = !isLoading,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF0000)),
-                        contentPadding = PaddingValues(0.dp) // Evita que el texto mueva el indicator
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DelisaRed,
+                            disabledContainerColor = DelisaRed.copy(alpha = 0.5f),
+                        ),
+                        contentPadding = PaddingValues(0.dp),
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
                                 color = Color.White,
                                 strokeWidth = 3.dp,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(28.dp),
                             )
                         } else {
                             Text(
-                                "Iniciar sesión", 
+                                "ACCEDER AL SISTEMA", 
                                 color = Color.White, 
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Black,
                             )
                         }
                     }
                 }
+                
+                Text(
+                    text = "© ${Calendar.getInstance()[Calendar.YEAR]} Delisa Botanas",
+                    color = Color.White.copy(alpha = 0.4f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 20.dp),
+                )
             }
         }
     }
 }
 
-// 🔹 PREVIEWS SEPARADOS PARA VER AMBOS ESTADOS
 @Preview(showBackground = true, showSystemUi = true, name = "Login - Estado Normal")
 @Composable
 fun PreviewLoginNormal() {
-    MaterialTheme {
+    DeliveryTheme(darkTheme = false) {
         PantallaLoginProContent(
             isLoading = false,
-            errorMessage = null,
+            errorMessage = "Credenciales incorrectas, intente de nuevo.",
             onLoginClick = { _, _ -> },
             onLoginSuccess = {},
-            loginSuccessSignal = false
-        )
-    }
-}
-
-@Preview(showBackground = true, showSystemUi = true, name = "Login - Estado Cargando")
-@Composable
-fun PreviewLoginLoading() {
-    MaterialTheme {
-        PantallaLoginProContent(
-            isLoading = true,
-            errorMessage = null,
-            onLoginClick = { _, _ -> },
-            onLoginSuccess = {},
-            loginSuccessSignal = false
+            loginSuccessSignal = false,
         )
     }
 }

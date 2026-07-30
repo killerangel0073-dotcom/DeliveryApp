@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -41,7 +42,7 @@ import coil.compose.AsyncImage
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.VentaEntity
 import com.gruposanangel.delivery.VentaRepository
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.PantallaSeleccionImpresora
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
@@ -49,11 +50,12 @@ import java.util.*
 
 @Composable
 fun shimmerBrush(showShimmer: Boolean = true, targetValue: Float = 1000f): Brush {
+    val baseColor = if (isSystemInDarkTheme()) Color.DarkGray else Color.LightGray
     return if (showShimmer) {
         val shimmerColors = listOf(
-            Color.LightGray.copy(alpha = 0.6f),
-            Color.LightGray.copy(alpha = 0.2f),
-            Color.LightGray.copy(alpha = 0.6f),
+            baseColor.copy(alpha = 0.6f),
+            baseColor.copy(alpha = 0.2f),
+            baseColor.copy(alpha = 0.6f),
         )
 
         val transition = rememberInfiniteTransition(label = "shimmer")
@@ -84,7 +86,7 @@ fun DashboardSkeleton() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8F9FA))
+            .background(MaterialTheme.colorScheme.background)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -231,16 +233,9 @@ fun DashboardContent(
             initialSelectedStartDateMillis = startDate.time,
             initialSelectedEndDateMillis = endDate.time
         )
-        
-        MaterialTheme(
-            colorScheme = lightColorScheme(
-                primary = Color.Red,
-                onPrimary = Color.White,
-                surface = Color.White,
-                onSurface = Color.Black,
-                secondary = Color.Red
-            )
-        ) {
+        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+
+        DeliveryTheme(darkTheme = isDark) {
             DatePickerDialog(
                 onDismissRequest = { showDatePicker = false },
                 confirmButton = {
@@ -269,29 +264,39 @@ fun DashboardContent(
                             onDateRangeSelected(sDate, eDate)
                         }
                         showDatePicker = false
-                    }) { Text("ACEPTAR", fontWeight = FontWeight.Bold) }
+                    }) { Text("ACEPTAR", fontWeight = FontWeight.Bold, color = DelisaRed) }
                 },
                 dismissButton = {
                     TextButton(onClick = { showDatePicker = false }) {
-                        Text("CANCELAR", color = Color.Gray)
+                        Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                }
+                },
+                colors = DatePickerDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             ) {
                 DateRangePicker(
                     state = dateRangePickerState,
                     modifier = Modifier.height(500.dp),
-                    title = { Text("Selecciona Periodo", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold) },
-                    headline = { Text("Filtro de Ventas", modifier = Modifier.padding(horizontal = 16.dp)) },
+                    title = { Text("Selecciona Periodo", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) },
+                    headline = { Text("Filtro de Ventas", modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurface) },
                     colors = DatePickerDefaults.colors(
-                        containerColor = Color.White,
-                        titleContentColor = Color.DarkGray,
-                        headlineContentColor = Color.Red,
-                        selectedDayContainerColor = Color.Red,
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        headlineContentColor = DelisaRed,
+                        selectedDayContainerColor = DelisaRed,
                         selectedDayContentColor = Color.White,
-                        todayContentColor = Color.Red,
-                        todayDateBorderColor = Color.Red,
-                        dayInSelectionRangeContainerColor = Color.Red.copy(alpha = 0.15f),
-                        dayInSelectionRangeContentColor = Color.Red
+                        todayContentColor = DelisaRed,
+                        todayDateBorderColor = DelisaRed,
+                        dayInSelectionRangeContainerColor = DelisaRed.copy(alpha = 0.15f),
+                        dayInSelectionRangeContentColor = DelisaRed,
+                        navigationContentColor = MaterialTheme.colorScheme.onSurface,
+                        weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        subheadContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        yearContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        currentYearContentColor = DelisaRed,
+                        selectedYearContainerColor = DelisaRed,
+                        selectedYearContentColor = Color.White
                     )
                 )
             }
@@ -302,8 +307,8 @@ fun DashboardContent(
         ModalBottomSheet(
             onDismissRequest = { showSheet = false },
             sheetState = sheetState,
-            containerColor = Color.White,
-            dragHandle = { BottomSheetDefaults.DragHandle(color = Color.Red) }
+            containerColor = MaterialTheme.colorScheme.surface,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = DelisaRed) }
         ) {
             Column(
                 modifier = Modifier
@@ -315,18 +320,18 @@ fun DashboardContent(
                     "Ventas de ${sellerSeleccionado!!.nombre}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF4CAF50)
+                    color = DelisaGreen
                 )
                 Text(
                     sellerSeleccionado!!.rutaNombre,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
-                    color = Color.Red
+                    color = DelisaRed
                 )
                 Text(
                     "${sellerSeleccionado!!.ventas.size} tickets registrados hoy",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(Modifier.height(16.dp))
@@ -349,7 +354,7 @@ fun DashboardContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8F9FA))
+            .background(MaterialTheme.colorScheme.background)
     ) {
         if (uiState.isLoading) {
             Box(Modifier.fillMaxSize().padding(16.dp)) {
@@ -367,7 +372,7 @@ fun DashboardContent(
                     text = textoFecha,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Black,
-                    color = Color.Gray
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -379,7 +384,7 @@ fun DashboardContent(
                         Icon(
                             imageVector = Icons.Default.Stars,
                             contentDescription = "Configurar Ranking",
-                            tint = Color(0xFFFFB300), // Dorado/Ambar
+                            tint = WarningOrange,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -394,7 +399,7 @@ fun DashboardContent(
                         Icon(
                             imageVector = Icons.Default.AccountBalanceWallet,
                             contentDescription = "Configurar Pagos",
-                            tint = Color(0xFF4CAF50),
+                            tint = DelisaGreen,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -409,7 +414,7 @@ fun DashboardContent(
                         Icon(
                             imageVector = Icons.Default.Speed,
                             contentDescription = "Configurar Velocidad",
-                            tint = Color.Red,
+                            tint = DelisaRed,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -434,7 +439,7 @@ fun DashboardContent(
                         Icon(
                             imageVector = Icons.Default.Print,
                             contentDescription = "Impresora",
-                            tint = if (impresoraBluetooth != null) Color.Red else Color.Gray,
+                            tint = if (impresoraBluetooth != null) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -448,7 +453,7 @@ fun DashboardContent(
                         Icon(
                             Icons.Default.CalendarToday,
                             contentDescription = "Fecha",
-                            tint = Color.Red,
+                            tint = DelisaRed,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -472,20 +477,21 @@ fun DashboardContent(
                 
                 AlertDialog(
                     onDismissRequest = { showFinanceDialog = false },
-                    containerColor = Color.White,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     title = {
                         Text(
                             text = "Configuración de Pagos",
                             fontWeight = FontWeight.Black,
                             modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     },
                     icon = {
                         Icon(
                             Icons.Default.AccountBalanceWallet,
                             contentDescription = null,
-                            tint = Color(0xFF4CAF50),
+                            tint = DelisaGreen,
                             modifier = Modifier.size(32.dp)
                         )
                     },
@@ -494,7 +500,7 @@ fun DashboardContent(
                             Text(
                                 text = "Ajusta los valores base para el cálculo de ganancias de los vendedores.",
                                 fontSize = 14.sp,
-                                color = Color.Gray,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -509,7 +515,7 @@ fun DashboardContent(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF4CAF50), focusedLabelColor = Color(0xFF4CAF50))
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DelisaGreen, focusedLabelColor = DelisaGreen)
                             )
                             
                             Spacer(Modifier.height(12.dp))
@@ -523,7 +529,7 @@ fun DashboardContent(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
-                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF4CAF50), focusedLabelColor = Color(0xFF4CAF50))
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DelisaGreen, focusedLabelColor = DelisaGreen)
                             )
                         }
                     },
@@ -543,7 +549,7 @@ fun DashboardContent(
                                 showFinanceDialog = false
                                 android.widget.Toast.makeText(context, "Configuración financiera actualizada", android.widget.Toast.LENGTH_SHORT).show()
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                            colors = ButtonDefaults.buttonColors(containerColor = DelisaGreen),
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             Text("GUARDAR", fontWeight = FontWeight.Bold)
@@ -551,7 +557,7 @@ fun DashboardContent(
                     },
                     dismissButton = {
                         TextButton(onClick = { showFinanceDialog = false }) {
-                            Text("CANCELAR", color = Color.Gray)
+                            Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 )
@@ -564,20 +570,21 @@ fun DashboardContent(
 
                 AlertDialog(
                     onDismissRequest = { showRankingDialog = false },
-                    containerColor = Color.White,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     title = {
                         Text(
                             text = "Ranking de Tiendas",
                             fontWeight = FontWeight.Black,
                             modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     },
                     icon = {
                         Icon(
                             Icons.Default.Stars,
                             contentDescription = null,
-                            tint = Color(0xFFFFB300),
+                            tint = WarningOrange,
                             modifier = Modifier.size(32.dp)
                         )
                     },
@@ -586,7 +593,7 @@ fun DashboardContent(
                             Text(
                                 text = "Define los umbrales de venta mensual para categorizar a los clientes.",
                                 fontSize = 14.sp,
-                                color = Color.Gray,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -601,7 +608,7 @@ fun DashboardContent(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF2E7D32), focusedLabelColor = Color(0xFF2E7D32))
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DelisaGreenDark, focusedLabelColor = DelisaGreenDark)
                             )
 
                             Spacer(Modifier.height(12.dp))
@@ -615,7 +622,7 @@ fun DashboardContent(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFFFB300), focusedLabelColor = Color(0xFFFFB300))
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = WarningOrange, focusedLabelColor = WarningOrange)
                             )
 
                             Spacer(Modifier.height(12.dp))
@@ -629,7 +636,7 @@ fun DashboardContent(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DelisaRed, focusedLabelColor = DelisaRed)
                             )
                         }
                     },
@@ -651,7 +658,7 @@ fun DashboardContent(
                                 showRankingDialog = false
                                 android.widget.Toast.makeText(context, "Ranking de tiendas actualizado", android.widget.Toast.LENGTH_SHORT).show()
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300)),
+                            colors = ButtonDefaults.buttonColors(containerColor = WarningOrange),
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             Text("GUARDAR", fontWeight = FontWeight.Bold)
@@ -659,7 +666,7 @@ fun DashboardContent(
                     },
                     dismissButton = {
                         TextButton(onClick = { showRankingDialog = false }) {
-                            Text("CANCELAR", color = Color.Gray)
+                            Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 )
@@ -669,17 +676,17 @@ fun DashboardContent(
                 var tempValue by remember { mutableStateOf(speedLimit.toInt().toString()) }
                 AlertDialog(
                     onDismissRequest = { showSpeedDialog = false },
-                    containerColor = Color.White,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Speed, null, tint = Color.Red)
+                            Icon(Icons.Default.Speed, null, tint = DelisaRed)
                             Spacer(Modifier.width(12.dp))
-                            Text("Límite de Velocidad", fontWeight = FontWeight.Black)
+                            Text("Límite de Velocidad", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                         }
                     },
                     text = {
                         Column {
-                            Text("Define la velocidad máxima permitida (km/h) para los vendedores antes de disparar la alarma.", fontSize = 14.sp, color = Color.Gray)
+                            Text("Define la velocidad máxima permitida (km/h) para los vendedores antes de disparar la alarma.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(16.dp))
                             OutlinedTextField(
                                 value = tempValue,
@@ -690,7 +697,7 @@ fun DashboardContent(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth(),
                                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DelisaRed, focusedLabelColor = DelisaRed)
                             )
                         }
                     },
@@ -709,7 +716,7 @@ fun DashboardContent(
                                 showSpeedDialog = false
                                 android.widget.Toast.makeText(context, "Límite global actualizado a ${nuevoLimite.toInt()} km/h", android.widget.Toast.LENGTH_SHORT).show()
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                            colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             Text("GUARDAR", fontWeight = FontWeight.Bold)
@@ -717,7 +724,7 @@ fun DashboardContent(
                     },
                     dismissButton = {
                         TextButton(onClick = { showSpeedDialog = false }) {
-                            Text("CANCELAR", color = Color.Gray)
+                            Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 )
@@ -729,13 +736,14 @@ fun DashboardContent(
                         showPasswordDialog = false
                         passwordInput = ""
                     },
-                    containerColor = Color.White,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     title = { 
                         Text(
                             "Acceso Restringido", 
                             fontWeight = FontWeight.Black,
                             modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSurface
                         ) 
                     },
                     text = {
@@ -743,7 +751,7 @@ fun DashboardContent(
                             Text(
                                 "Ingresa la contraseña de administrador para ver el resumen financiero.", 
                                 fontSize = 14.sp, 
-                                color = Color.Gray,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -757,7 +765,7 @@ fun DashboardContent(
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = DelisaRed, focusedLabelColor = DelisaRed)
                             )
                         }
                     },
@@ -771,7 +779,7 @@ fun DashboardContent(
                                 showPasswordDialog = false
                                 passwordInput = ""
                             }) {
-                                Text("CANCELAR", color = Color.Gray)
+                                Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Spacer(Modifier.width(16.dp))
                             Button(
@@ -784,7 +792,7 @@ fun DashboardContent(
                                         android.widget.Toast.makeText(context, "Contraseña Incorrecta", android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                                colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
                                 Text("ENTRAR", fontWeight = FontWeight.Bold)
@@ -858,7 +866,7 @@ fun DashboardContent(
                         "Desempeño por Ruta",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
-                        color = Color.DarkGray,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(top = 8.dp)
                     )
                 }
@@ -888,13 +896,13 @@ fun DashboardContent(
                         "Últimas Ventas",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
-                        color = Color.DarkGray
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
                 if (uiState.todasLasVentasHoy.isEmpty()) {
                     item {
-                        Text("No hay transacciones registradas hoy.", color = Color.Gray, modifier = Modifier.padding(8.dp))
+                        Text("No hay transacciones registradas hoy.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))
                     }
                 }
 
@@ -926,6 +934,7 @@ fun AccionCard(titulo: String, icon: ImageVector, color: Color, modifier: Modifi
                 scaleX = scale
                 scaleY = scale
             }
+            .shadow(2.dp, RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
             .clickable(
                 interactionSource = interactionSource,
@@ -933,8 +942,7 @@ fun AccionCard(titulo: String, icon: ImageVector, color: Color, modifier: Modifi
                 onClick = onClick
             ),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -943,7 +951,7 @@ fun AccionCard(titulo: String, icon: ImageVector, color: Color, modifier: Modifi
         ) {
             Icon(icon, null, tint = color, modifier = Modifier.size(28.dp))
             Spacer(Modifier.height(4.dp))
-            Text(titulo, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.DarkGray)
+            Text(titulo, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -971,6 +979,7 @@ fun ResumenTotalCard(
                 scaleX = scale
                 scaleY = scale
             }
+            .shadow(8.dp, RoundedCornerShape(24.dp))
             .clip(RoundedCornerShape(24.dp))
             .clickable(
                 interactionSource = interactionSource,
@@ -978,15 +987,14 @@ fun ResumenTotalCard(
                 onClick = onClick
             ),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Red),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        colors = CardDefaults.cardColors(containerColor = DelisaRed)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(Color.Red, Color(0xFFB71C1C))
+                        colors = listOf(DelisaRed, DelisaRedDark)
                     )
                 )
                 .padding(24.dp)
@@ -1045,15 +1053,15 @@ fun VendedorCard(
                 scaleX = scale
                 scaleY = scale
             }
+            .shadow(4.dp, RoundedCornerShape(20.dp))
             .clip(RoundedCornerShape(20.dp))
             .clickable(
                 interactionSource = interactionSource,
-                indication = rememberRipple(bounded = true, color = Color.Red),
+                indication = rememberRipple(bounded = true, color = DelisaRed.copy(alpha = 0.1f)),
                 onClick = onClick
             ),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(4.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1095,7 +1103,7 @@ fun VendedorCard(
                                 .size(54.dp)
                                 .graphicsLayer { rotationZ = rotation }
                                 .background(
-                                    Brush.sweepGradient(listOf(Color.Red, Color.White.copy(alpha = 0.1f), Color.Red)),
+                                    Brush.sweepGradient(listOf(DelisaRed, Color.White.copy(alpha = 0.1f), DelisaRed)),
                                     CircleShape
                                 )
                         )
@@ -1109,7 +1117,7 @@ fun VendedorCard(
                                     scaleY = glowScale
                                     alpha = glowAlpha
                                 }
-                                .background(Color.Red.copy(alpha = 0.5f), CircleShape)
+                                .background(DelisaRed.copy(alpha = 0.5f), CircleShape)
                         )
                     }
 
@@ -1121,12 +1129,12 @@ fun VendedorCard(
                                 scaleY = photoScale
                             }
                             .size(44.dp)
-                            .shadow(if (isPhotoPressed) 12.dp else 2.dp, RoundedCornerShape(12.dp), spotColor = Color.Red)
+                            .shadow(if (isPhotoPressed) 12.dp else 2.dp, RoundedCornerShape(12.dp), spotColor = DelisaRed)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White)
+                            .background(MaterialTheme.colorScheme.surface)
                             .clickable(
                                 interactionSource = photoInteractionSource,
-                                indication = rememberRipple(bounded = false, radius = 30.dp, color = Color.Red),
+                                indication = rememberRipple(bounded = false, radius = 30.dp, color = DelisaRed),
                                 onClick = { onPhotoClick(seller.uid) }
                             )
                     ) {
@@ -1141,13 +1149,13 @@ fun VendedorCard(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color.Red.copy(alpha = 0.1f)),
+                                    .background(DelisaRed.copy(alpha = 0.1f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     Icons.Default.Group,
                                     null,
-                                    tint = Color.Red,
+                                    tint = DelisaRed,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -1158,14 +1166,14 @@ fun VendedorCard(
                             modifier = Modifier
                                 .offset(x = 3.dp, y = 3.dp)
                                 .size(14.dp)
-                                .background(Color.White, CircleShape)
+                                .background(MaterialTheme.colorScheme.surface, CircleShape)
                                 .padding(2.dp)
                         ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .background(
-                                        if (seller.estaEnRuta) Color(0xFF4CAF50) else Color(0xFFBDBDBD),
+                                        if (seller.estaEnRuta) DelisaGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                         CircleShape
                                     )
                             )
@@ -1175,11 +1183,11 @@ fun VendedorCard(
                 
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(seller.rutaNombre, fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color.Black)
+                    Text(seller.rutaNombre, fontWeight = FontWeight.Black, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
                     Text(
                         text = if (seller.estaEnRuta) "RUTA ACTIVA" else "JORNADA DETENIDA",
                         fontSize = 9.sp,
-                        color = if (seller.estaEnRuta) Color(0xFF2E7D32) else Color.Gray,
+                        color = if (seller.estaEnRuta) DelisaGreenDark else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 0.5.sp
                     )
@@ -1187,13 +1195,13 @@ fun VendedorCard(
                 Text(
                     formato.format(seller.totalVendido),
                     fontWeight = FontWeight.Black,
-                    color = Color.Red,
+                    color = DelisaRed,
                     fontSize = 20.sp
                 )
             }
 
             Spacer(Modifier.height(16.dp))
-            HorizontalDivider(color = Color(0xFFF1F2F6), thickness = 1.dp)
+            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.dp)
             Spacer(Modifier.height(16.dp))
 
             Row(
@@ -1214,9 +1222,9 @@ fun VendedorCard(
 @Composable
 fun MetricItem(label: String, value: String, modifier: Modifier) {
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Black)
+        Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Black)
         Spacer(Modifier.height(4.dp))
-        Text(value, fontSize = 15.sp, color = Color.Black, fontWeight = FontWeight.ExtraBold)
+        Text(value, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.ExtraBold)
     }
 }
 
@@ -1226,7 +1234,7 @@ fun MetricDivider() {
         modifier = Modifier
             .height(30.dp)
             .width(1.dp)
-            .background(Color(0xFFEEEEEE))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
     )
 }
 
@@ -1251,15 +1259,16 @@ fun CardVentaAdmin(
                 scaleX = scale
                 scaleY = scale
             }
+            .shadow(2.dp, RoundedCornerShape(12.dp))
             .clip(RoundedCornerShape(12.dp))
             .clickable(
                 interactionSource = interactionSource,
-                indication = rememberRipple(bounded = true, color = Color.Gray),
+                indication = rememberRipple(bounded = true, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)),
                 onClick = onClick
             ),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (venta.estado == "CANCELADA") Color(0xFFEEEEEE) else Color.White
+            containerColor = if (venta.estado == "CANCELADA") MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
         )
     ) {
         Row(
@@ -1267,16 +1276,16 @@ fun CardVentaAdmin(
             verticalAlignment = Alignment.CenterVertically
         ) {
             val icon = if (venta.estado == "CANCELADA") Icons.Default.Cancel else Icons.Default.Payments
-            val tint = if (venta.estado == "CANCELADA") Color.Red else Color.Gray
+            val tint = if (venta.estado == "CANCELADA") DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant
             
             Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("FOLIO #${venta.id.takeLast(6).uppercase()}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                    Text("FOLIO #${venta.id.takeLast(6).uppercase()}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (venta.estado == "CANCELADA") {
                         Spacer(Modifier.width(8.dp))
-                        Surface(color = Color.Red, shape = RoundedCornerShape(4.dp)) {
+                        Surface(color = DelisaRed, shape = RoundedCornerShape(4.dp)) {
                             Text("ANULADA", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
                         }
                     }
@@ -1286,14 +1295,14 @@ fun CardVentaAdmin(
                     fontWeight = FontWeight.Bold, 
                     fontSize = 15.sp,
                     style = if (venta.estado == "CANCELADA") androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default,
-                    color = if (venta.estado == "CANCELADA") Color.Gray else Color.Black
+                    color = if (venta.estado == "CANCELADA") MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
                 )
-                Text(fHora.format(Date(venta.fecha)), fontSize = 11.sp, color = Color.Gray)
+                Text(fHora.format(Date(venta.fecha)), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(
                 text = formato.format(venta.total), 
                 fontWeight = FontWeight.ExtraBold, 
-                color = if (venta.estado == "CANCELADA") Color.Gray else Color.DarkGray
+                color = if (venta.estado == "CANCELADA") MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
             )
         }
     }

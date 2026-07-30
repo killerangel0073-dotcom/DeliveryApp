@@ -3,6 +3,7 @@ package com.gruposanangel.delivery.ui.screens
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -17,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -36,7 +38,7 @@ import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.*
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.MedidorDeMetaPremium
 import com.gruposanangel.delivery.utilidades.PreferenciasMetas
 import kotlinx.coroutines.*
@@ -62,6 +64,8 @@ fun PaginaVentaScreen(navController: NavController, ventaRepository: VentaReposi
     val ventasHoy by viewModel.ventasHoyFlow.collectAsState()
     var ticketsHoy by remember { mutableStateOf<List<TicketVenta>>(emptyList()) }
     var isRefreshing by remember { mutableStateOf(false) }
+
+    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
 
     LaunchedEffect(Unit) { 
         if (!isPreview) { 
@@ -90,11 +94,13 @@ fun PaginaVentaScreen(navController: NavController, ventaRepository: VentaReposi
         ticketsHoy = lista
     }
 
-    PaginaVentaContent(
-        ticketsHoy = ticketsHoy, 
-        isLoading = isRefreshing && ticketsHoy.isEmpty(),
-        onTicketClick = { navController.navigate("detalle_venta_admin/${it.id}") }
-    )
+    DeliveryTheme(darkTheme = isDark) {
+        PaginaVentaContent(
+            ticketsHoy = ticketsHoy, 
+            isLoading = isRefreshing && ticketsHoy.isEmpty(),
+            onTicketClick = { navController.navigate("detalle_venta_admin/${it.id}") }
+        )
+    }
 }
 
 @Composable
@@ -106,7 +112,7 @@ fun PaginaVentaContent(ticketsHoy: List<TicketVenta>, isLoading: Boolean = false
     val totalHoy = ticketsHoy.filter { it.estado != "CANCELADA" }.sumOf { it.total }
     val visitasHoy = ticketsHoy.count { it.estado != "CANCELADA" }
 
-    Column(Modifier.fillMaxSize().background(Color.White)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
             Spacer(Modifier.height(10.dp))
             MedidorDeMetaPremium(
@@ -120,9 +126,9 @@ fun PaginaVentaContent(ticketsHoy: List<TicketVenta>, isLoading: Boolean = false
             Spacer(Modifier.height(16.dp))
             
             if (isLoading && ticketsHoy.isEmpty()) {
-                Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = Color.Red) }
+                Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
             } else if (ticketsHoy.isEmpty()) { 
-                Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Sin ventas hoy", color = Color.Gray) } 
+                Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Sin ventas hoy", color = MaterialTheme.colorScheme.onSurfaceVariant) } 
             } else { 
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) { items(ticketsHoy, key = { it.id }) { t -> CardTicketRuta(t, fmtFecha, fmtMoneda, onTicketClick) } } 
             }
@@ -149,17 +155,17 @@ fun CardTicketRuta(ticket: TicketVenta, fmtFecha: SimpleDateFormat, fmtMoneda: N
                 scaleX = scale
                 scaleY = scale
             }
+            .shadow(if (isPressed) 2.dp else 4.dp, RoundedCornerShape(24.dp))
             .clip(RoundedCornerShape(24.dp))
             .clickable(
                 interactionSource = interactionSource,
-                indication = rememberRipple(bounded = true, color = Color.Red.copy(alpha = 0.12f)),
+                indication = rememberRipple(bounded = true, color = DelisaRed.copy(alpha = 0.12f)),
                 onClick = { onClick(ticket) }
             ), 
         shape = RoundedCornerShape(24.dp), 
         colors = CardDefaults.cardColors(
-            containerColor = if (esCancelada) Color(0xFFEEEEEE) else Color(0xFFF8F9FA)
-        ), 
-        elevation = CardDefaults.cardElevation(if (isPressed) 1.dp else 2.dp)
+            containerColor = if (esCancelada) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+        )
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
@@ -175,43 +181,43 @@ fun CardTicketRuta(ticket: TicketVenta, fmtFecha: SimpleDateFormat, fmtMoneda: N
             )
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text("FOLIO #${ticket.id.takeLast(6).uppercase()}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                Text("FOLIO #${ticket.id.takeLast(6).uppercase()}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     text = ticket.cliente, 
                     fontWeight = FontWeight.Black, 
                     fontSize = 17.sp, 
-                    color = if (esCancelada) Color.Gray else Color.Black, 
+                    color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface, 
                     maxLines = 1,
                     style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
                 )
-                Text(fmtFecha.format(ticket.fecha), fontSize = 11.sp, color = Color.Gray)
+                Text(fmtFecha.format(ticket.fecha), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = fmtMoneda.format(ticket.total), 
-                    color = if (esCancelada) Color.Gray else Color.Red, 
+                    color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else DelisaRed, 
                     fontWeight = FontWeight.Black, 
                     fontSize = 18.sp,
                     style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
                 )
                 Surface(
                     shape = RoundedCornerShape(8.dp), 
-                    color = if (ticket.sincronizado) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
-                    modifier = Modifier.width(90.dp) // Ancho fijo para ayudar al centrado vertical
+                    color = if (ticket.sincronizado) DelisaGreen.copy(alpha = 0.1f) else DelisaRed.copy(alpha = 0.1f),
+                    modifier = Modifier.width(90.dp)
                 ) { 
                     Text(
                         text = if (ticket.sincronizado) "SINCRONIZADO" else "PENDIENTE", 
                         modifier = Modifier.padding(vertical = 2.dp).fillMaxWidth(), 
                         fontSize = 10.sp, 
                         fontWeight = FontWeight.Black, 
-                        color = if (ticket.sincronizado) Color(0xFF2E7D32) else Color(0xFFC62828),
+                        color = if (ticket.sincronizado) DelisaGreenDark else DelisaRed,
                         textAlign = TextAlign.Center
                     ) 
                 }
                 if (esCancelada) {
                     Spacer(Modifier.height(4.dp))
                     Surface(
-                        color = Color.Red, 
+                        color = DelisaRed, 
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.width(90.dp)
                     ) {
@@ -232,10 +238,14 @@ fun CardTicketRuta(ticket: TicketVenta, fmtFecha: SimpleDateFormat, fmtMoneda: N
 
 @Composable
 fun ResumenVentasCard(count: Int, total: Double, fmt: NumberFormat) {
-    Card(shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(20.dp)) {
+    Card(
+        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), 
+        modifier = Modifier.fillMaxWidth().shadow(20.dp, RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)), 
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
         Row(Modifier.padding(24.dp).fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-            Column { Text("PRODUCTIVIDAD", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold); Text("$count Visitas", fontWeight = FontWeight.Black, fontSize = 20.sp) }
-            Column(horizontalAlignment = Alignment.End) { Text("RECAUDADO", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.Bold); Text(fmt.format(total), fontWeight = FontWeight.Black, color = Color.Red, fontSize = 24.sp) }
+            Column { Text("PRODUCTIVIDAD", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold); Text("$count Visitas", fontWeight = FontWeight.Black, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface) }
+            Column(horizontalAlignment = Alignment.End) { Text("RECAUDADO", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold); Text(fmt.format(total), fontWeight = FontWeight.Black, color = DelisaRed, fontSize = 24.sp) }
         }
     }
 }

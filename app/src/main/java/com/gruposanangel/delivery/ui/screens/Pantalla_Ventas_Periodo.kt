@@ -1,40 +1,38 @@
 package com.gruposanangel.delivery.ui.screens
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.gruposanangel.delivery.R
-import com.gruposanangel.delivery.data.VentaEntity
+import com.gruposanangel.delivery.ui.theme.*
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 import coil.compose.AsyncImage
+import androidx.compose.foundation.isSystemInDarkTheme
 
-// -----------------------------
-// Modelo UI para la pantalla
-// -----------------------------
 data class VentaPeriodo(
     val ticketNumero: String,
     val clienteNombre: String,
@@ -45,9 +43,6 @@ data class VentaPeriodo(
     val estado: String = "pagada"
 )
 
-// -----------------------------
-// Pantalla UI pura
-// -----------------------------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaVentaPeriodoContent(
@@ -58,9 +53,9 @@ fun PantallaVentaPeriodoContent(
     onCambiarFechaInicio: (Date) -> Unit,
     onCambiarFechaFin: (Date) -> Unit
 ) {
-    val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
-    val formatoFecha = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("es", "MX"))
-    val formatoFechaBtn = SimpleDateFormat("dd/MM/yyyy", Locale("es", "MX"))
+    val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
+    val formatoFecha = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.forLanguageTag("es-MX"))
+    val formatoFechaBtn = SimpleDateFormat("dd/MM/yyyy", Locale.forLanguageTag("es-MX"))
 
     val totalPeriodo by remember(listaVentas) { 
         derivedStateOf { 
@@ -68,77 +63,91 @@ fun PantallaVentaPeriodoContent(
         } 
     }
 
-    // Estados para DatePicker
     val fechaPickerInicio = remember { mutableStateOf(false) }
     val fechaPickerFin = remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Ventas por periodo") },
+                title = { Text("VENTAS POR PERIODO", fontWeight = FontWeight.Black, fontSize = 16.sp) },
                 navigationIcon = {
                     if (navController != null) {
-
-
                         IconButton(onClick = { navController.popBackStack() }) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Atrás", tint = Color.Black)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Atrás", tint = DelisaRed)
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.White,
-                    titleContentColor = Color.Black
-                ),modifier = Modifier.height(48.dp) // 🔹 ajusta la altura aquí
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                )
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFF5F5F5))
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
-            // Botones de fecha
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedButton(
+                OutlinedCard(
                     onClick = { fechaPickerInicio.value = true },
                     modifier = Modifier.weight(1f).height(60.dp),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color.Red)
+                    border = BorderStroke(1.dp, DelisaRed.copy(alpha = 0.2f)),
+                    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color.Red)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Desde: ${formatoFechaBtn.format(fechaInicio)}",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFF0000)
-                    )
-
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.CalendarToday, contentDescription = null, tint = DelisaRed, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("DESDE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                formatoFechaBtn.format(fechaInicio),
+                                fontWeight = FontWeight.ExtraBold,
+                                color = DelisaRed,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
                 }
 
-                OutlinedButton(
+                OutlinedCard(
                     onClick = { fechaPickerFin.value = true },
                     modifier = Modifier.weight(1f).height(60.dp),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color.Red)
+                    border = BorderStroke(1.dp, DelisaRed.copy(alpha = 0.2f)),
+                    colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
-                    Icon(Icons.Default.CalendarToday, contentDescription = null, tint = Color.Red)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Hasta: ${formatoFechaBtn.format(fechaFin)}",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFF0000)
-                    )
-
-
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.CalendarToday, contentDescription = null, tint = DelisaRed, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("HASTA", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                formatoFechaBtn.format(fechaFin),
+                                fontWeight = FontWeight.ExtraBold,
+                                color = DelisaRed,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
                 }
             }
 
-            // DatePickers
             if (fechaPickerInicio.value) {
                 DatePickerDialogMaterial3(
                     initialDate = fechaInicio,
@@ -162,21 +171,19 @@ fun PantallaVentaPeriodoContent(
 
             Spacer(Modifier.height(16.dp))
 
-            // Lista de ventas
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                contentPadding = PaddingValues(bottom = 16.dp)
             ) {
                 items(listaVentas) { venta ->
                     val esCancelada = venta.estado == "CANCELADA"
                     Card(
-                        shape = RoundedCornerShape(12.dp),
-                        elevation = CardDefaults.cardElevation(8.dp),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(20.dp)),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (esCancelada) Color(0xFFEEEEEE) else Color.White
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                            containerColor = if (esCancelada) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+                        )
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -195,34 +202,43 @@ fun PantallaVentaPeriodoContent(
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = if (venta.sincronizado) "Sincronizado" else "Por sincronizar",
-                                        fontSize = 12.sp,
-                                        color = if (venta.sincronizado) Color(0xFF388E3C) else Color(0xFFFF0000),
-                                        fontWeight = FontWeight.Medium
-                                    )
+                                    Surface(
+                                        color = if (venta.sincronizado) DelisaGreen.copy(0.1f) else DelisaRed.copy(0.1f),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = if (venta.sincronizado) "SINCRONIZADO" else "PENDIENTE",
+                                            fontSize = 9.sp,
+                                            color = if (venta.sincronizado) DelisaGreenDark else DelisaRed,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
                                     if (esCancelada) {
                                         Spacer(Modifier.width(8.dp))
-                                        Surface(color = Color.Red, shape = RoundedCornerShape(4.dp)) {
-                                            Text("ANULADA", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                        Surface(color = DelisaRed, shape = RoundedCornerShape(6.dp)) {
+                                            Text("ANULADA", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                                         }
                                     }
                                 }
-
-                                Text("Ticket: ${venta.ticketNumero}", fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(4.dp))
                                 Text(
-                                    text = "Cliente: ${venta.clienteNombre}", 
-                                    fontSize = 14.sp, 
-                                    color = if (esCancelada) Color.Gray else Color(0xFF555555),
-                                    style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
+                                    text = venta.clienteNombre, 
+                                    fontWeight = FontWeight.Black, 
+                                    fontSize = 15.sp, 
+                                    color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = if (esCancelada) MaterialTheme.typography.bodyMedium.copy(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else MaterialTheme.typography.bodyMedium
                                 )
-                                Text("Fecha: ${formatoFecha.format(venta.fecha)}", fontSize = 12.sp, color = Color.Gray)
+                                Text("Folio: ${venta.ticketNumero.takeLast(6).uppercase()}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                                Text(formatoFecha.format(venta.fecha), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Text(
                                 text = formatoMoneda.format(venta.total),
-                                fontWeight = FontWeight.Bold,
-                                color = if (esCancelada) Color.Gray else Color.Red,
-                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else DelisaRed,
+                                fontSize = 17.sp,
                                 style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
                             )
                         }
@@ -230,37 +246,33 @@ fun PantallaVentaPeriodoContent(
                 }
             }
 
-            // 🔹 Resumen
             Card(
-                shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(24.dp)),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         val clientesTotales = listaVentas.filter { it.estado != "CANCELADA" }
                             .map { it.clienteNombre }.distinct().size
-                        Text("$clientesTotales", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.Black)
-                        Text("Clientes totales", fontWeight = FontWeight.Medium, fontSize = 14.sp, color = Color.Gray)
+                        Text("CLIENTES", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("$clientesTotales", fontWeight = FontWeight.Black, fontSize = 24.sp, color = MaterialTheme.colorScheme.onSurface)
                     }
 
-                    Spacer(modifier = Modifier.width(50.dp))
+                    Box(modifier = Modifier.width(1.dp).height(40.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)))
 
                     Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.weight(1.5f),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(formatoMoneda.format(totalPeriodo), fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color(0xFFFF0000))
-                        Text("Total del periodo", fontWeight = FontWeight.Medium, fontSize = 14.sp, color = Color.Gray)
+                        Text("TOTAL RECAUDADO", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(formatoMoneda.format(totalPeriodo), fontWeight = FontWeight.Black, fontSize = 24.sp, color = DelisaRed)
                     }
                 }
             }
@@ -268,14 +280,6 @@ fun PantallaVentaPeriodoContent(
     }
 }
 
-
-
-
-
-
-// -----------------------------
-// Con ViewModel real
-// -----------------------------
 @Composable
 fun PantallaVentaPeriodo(
     navController: NavController,
@@ -284,18 +288,15 @@ fun PantallaVentaPeriodo(
     var fechaInicio by remember { mutableStateOf(Date()) }
     var fechaFin by remember { mutableStateOf(Date()) }
 
-    // Obtenemos la lista de ventas como StateFlow y la convertimos a State
     val ventasPeriodo by vistaModelo.ventasPeriodo.collectAsState()
 
-    // Cada vez que cambian las fechas, solicitamos cargar las ventas desde el ViewModel
     LaunchedEffect(fechaInicio, fechaFin) {
         vistaModelo.cargarVentasPorPeriodo(fechaInicio, fechaFin)
     }
 
-    // Mapeamos ventasPeriodo a nuestro modelo de UI; se recompondrá automáticamente al cambiar
     val listaVentas = ventasPeriodo.map { venta ->
         VentaPeriodo(
-            ticketNumero = venta.id.toString(),
+            ticketNumero = venta.id,
             clienteNombre = venta.clienteNombre,
             clienteImagenUrl = venta.clienteImagenUrl,
             fecha = Date(venta.fecha),
@@ -305,16 +306,19 @@ fun PantallaVentaPeriodo(
         )
     }
 
-    PantallaVentaPeriodoContent(
-        navController = navController,
-        listaVentas = listaVentas,
-        fechaInicio = fechaInicio,
-        fechaFin = fechaFin,
-        onCambiarFechaInicio = { fechaInicio = it },
-        onCambiarFechaFin = { fechaFin = it }
-    )
-}
+    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
 
+    DeliveryTheme(darkTheme = isDark) {
+        PantallaVentaPeriodoContent(
+            navController = navController,
+            listaVentas = listaVentas,
+            fechaInicio = fechaInicio,
+            fechaFin = fechaFin,
+            onCambiarFechaInicio = { fechaInicio = it },
+            onCambiarFechaFin = { fechaFin = it }
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -324,60 +328,52 @@ fun DatePickerDialogMaterial3(
     onDismiss: () -> Unit
 ) {
     val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialDate.time)
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = Color.White
-        ) {
-            // Aplica un tema rojo solo para el DatePicker
-            MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = Color(0xFFFF0000), // rojo
-                    onPrimary = Color.White,
-                    surface = Color.White,
-                    onSurface = Color.Black
-                )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    DatePicker(
-                        state = pickerState,
-                        title = { Text("Selecciona una fecha") }
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.End,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        TextButton(onClick = onDismiss) { Text("Cancelar") }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        TextButton(
-                            onClick = {
-                                pickerState.selectedDateMillis?.let { onDateSelected(Date(it)) }
-                            }
-                        ) { Text("Aceptar") }
-                    }
-                }
+    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+
+    DeliveryTheme(darkTheme = isDark) {
+        DatePickerDialog(
+            onDismissRequest = onDismiss,
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { onDateSelected(Date(it)) }
+                }) { Text("ACEPTAR", fontWeight = FontWeight.Bold, color = DelisaRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
+        ) {
+            DatePicker(
+                state = pickerState,
+                colors = DatePickerDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    headlineContentColor = DelisaRed,
+                    selectedDayContainerColor = DelisaRed,
+                    selectedDayContentColor = Color.White,
+                    todayDateBorderColor = DelisaRed,
+                    todayContentColor = DelisaRed
+                )
+            )
         }
     }
 }
-// -----------------------------
-// Preview sin ViewModel
-// -----------------------------
+
 @Preview(showBackground = true, showSystemUi = true)
 @Composable
 fun PantallaVentaPeriodoPreview() {
     val navController = rememberNavController()
-    PantallaVentaPeriodoContent(
-        navController = navController,
-        listaVentas = listOf(
-            VentaPeriodo("001", "Juan Pérez", null, Date(), 450.0, true),
-            VentaPeriodo("002", "María López", null, Date(), 320.0, false),
-            VentaPeriodo("003", "Carlos Sánchez", null, Date(), 210.0, true)
-        ),
-        fechaInicio = Date(),
-        fechaFin = Date(),
-        onCambiarFechaInicio = {},
-        onCambiarFechaFin = {}
-    )
+    DeliveryTheme(darkTheme = false) {
+        PantallaVentaPeriodoContent(
+            navController = navController,
+            listaVentas = listOf(
+                VentaPeriodo("001", "Abarrotes La Lupita", null, Date(), 450.0, true),
+                VentaPeriodo("002", "Mini Super El Sol", null, Date(), 320.0, false),
+                VentaPeriodo("003", "Tienda Don Juan", null, Date(), 210.0, true, "CANCELADA")
+            ),
+            fechaInicio = Date(),
+            fechaFin = Date(),
+            onCambiarFechaInicio = {},
+            onCambiarFechaFin = {}
+        )
+    }
 }

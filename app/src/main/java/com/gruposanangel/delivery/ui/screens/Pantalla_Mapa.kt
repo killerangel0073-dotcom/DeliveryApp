@@ -11,10 +11,13 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.util.Log
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +30,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -44,6 +48,7 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.*
 import com.google.maps.android.compose.*
 import com.gruposanangel.delivery.R
+import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.VendorBatteryIndicator
 import com.gruposanangel.delivery.utilidades.VendorGpsIndicator
 import com.gruposanangel.delivery.utilidades.VendorSpeedIndicator2
@@ -62,9 +67,24 @@ fun MapaScreen(
     val scope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
 
-    // 🔥 INICIAR SINCRONIZACIÓN EN TIEMPO REAL
+    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+
+    // 🔥 SINCRONIZACIÓN EN TIEMPO REAL Y AUTO-TEMA DE MAPA
     LaunchedEffect(Unit) {
         viewModel.startRealtimeSync(context)
+        // Inicializar estilo de mapa según el tema actual si no se ha cambiado
+        if (uiState.mapStyleJson == null && uiState.mapType == MapType.NORMAL) {
+            if (isDark) {
+                viewModel.setMapType(MapType.NORMAL, darkMapStyleJson)
+            }
+        }
+    }
+
+    // Seguir el tema si cambia el sistema/preferencia (opcional, pero recomendado para consistencia)
+    LaunchedEffect(isDark) {
+        if (uiState.mapType == MapType.NORMAL) {
+            viewModel.setMapType(MapType.NORMAL, if (isDark) darkMapStyleJson else null)
+        }
     }
 
     var mapIsReady by remember { mutableStateOf(false) }
@@ -182,7 +202,7 @@ fun MapaScreen(
                     state.animRotation.animateTo(rot, tween(500))
                 }
 
-                val haloColor = lerp(Color(0xFFB0B0B0).copy(0.35f), Color(0xFFFF4444).copy(0.35f), state.animHaloColorFactor.value)
+                val haloColor = lerp(MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f), DelisaRed.copy(0.35f), state.animHaloColorFactor.value)
                 val visualRadius = (state.animRadius.value * 5f).coerceIn(30f, 180f)
 
                 Circle(
@@ -242,7 +262,6 @@ fun MapaScreen(
         // CONTROLES DE CAPAS Y RUTAS PREMIUM
         Box(Modifier.fillMaxSize().padding(16.dp)) {
 
-            // 📍 Mi Ubicación Inteligente
             FloatingActionButton(
                 onClick = {
                     val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -257,12 +276,13 @@ fun MapaScreen(
                         }
                     }
                 },
-                containerColor = Color.Red,
+                containerColor = DelisaRed,
                 contentColor = Color.White,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(bottom = if (mostrarTarjetaInferior) 190.dp else 0.dp)
-                    .size(50.dp),
+                    .size(50.dp)
+                    .then(if (isDark) Modifier.border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape) else Modifier),
                 shape = CircleShape
             ) { Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(22.dp)) }
 
@@ -292,17 +312,17 @@ fun MapaScreen(
                                     scaleX = scale
                                     scaleY = scale
                                 }
+                                .shadow(4.dp, RoundedCornerShape(12.dp))
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable(
                                     interactionSource = interactionSource,
-                                    indication = rememberRipple(color = if (activo) Color.White else Color.Red),
+                                    indication = rememberRipple(color = if (activo) Color.White else DelisaRed),
                                     onClick = { viewModel.toggleSeguirVendedor(rutaAsignada) }
                                 ),
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (activo) Color.Red else Color.White
-                            ),
-                            elevation = CardDefaults.cardElevation(4.dp)
+                                containerColor = if (activo) DelisaRed else MaterialTheme.colorScheme.surface
+                            )
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -311,7 +331,7 @@ fun MapaScreen(
                                 Icon(
                                     Icons.Default.MyLocation,
                                     contentDescription = null,
-                                    tint = if (activo) Color.White else Color.Red,
+                                    tint = if (activo) Color.White else DelisaRed,
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Spacer(Modifier.width(6.dp))
@@ -319,7 +339,7 @@ fun MapaScreen(
                                     text = "MI RUTA",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = if (activo) Color.White else Color.DarkGray
+                                    color = if (activo) Color.White else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -342,17 +362,17 @@ fun MapaScreen(
                                     scaleX = scale
                                     scaleY = scale
                                 }
+                                .shadow(4.dp, RoundedCornerShape(16.dp))
                                 .clip(RoundedCornerShape(16.dp))
                                 .clickable(
                                     interactionSource = interactionSource,
-                                    indication = rememberRipple(color = if (activo) Color.White else Color.Red),
+                                    indication = rememberRipple(color = if (activo) Color.White else DelisaRed),
                                     onClick = { viewModel.toggleSeguirVendedor(v.ruta) }
                                 ),
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (activo) Color.Red else Color.White
-                            ),
-                            elevation = CardDefaults.cardElevation(4.dp)
+                                containerColor = if (activo) DelisaRed else MaterialTheme.colorScheme.surface
+                            )
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -361,7 +381,7 @@ fun MapaScreen(
                                 Icon(
                                     Icons.Default.LocalShipping,
                                     contentDescription = null,
-                                    tint = if (activo) Color.White else Color.Red,
+                                    tint = if (activo) Color.White else DelisaRed,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(Modifier.width(6.dp))
@@ -369,7 +389,7 @@ fun MapaScreen(
                                     text = v.ruta.replace(" Delisa", ""),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = if (activo) Color.White else Color.DarkGray
+                                    color = if (activo) Color.White else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -382,33 +402,52 @@ fun MapaScreen(
             Column(Modifier.align(Alignment.TopEnd).padding(top = 16.dp), horizontalAlignment = Alignment.End) {
                 FloatingActionButton(
                     onClick = { expanded = true },
-                    containerColor = Color.White,
-                    contentColor = Color.DarkGray,
-                    modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    elevation = FloatingActionButtonDefaults.elevation(3.dp)
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .shadow(3.dp, RoundedCornerShape(14.dp))
+                        .then(if (isDark) Modifier.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(14.dp)) else Modifier),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Icon(Icons.Default.Layers, null, modifier = Modifier.size(20.dp), tint = Color.Red)
+                    Icon(Icons.Default.Layers, null, modifier = Modifier.size(20.dp), tint = DelisaRed)
                 }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    DropdownMenuItem(text = { Text("Mapa Estándar") }, onClick = { viewModel.setMapType(MapType.NORMAL); expanded = false })
-                    DropdownMenuItem(text = { Text("Vista Satélite") }, onClick = { viewModel.setMapType(MapType.SATELLITE); expanded = false })
-                    DropdownMenuItem(text = { Text("Modo Oscuro") }, onClick = { viewModel.setMapType(MapType.NORMAL, darkMapStyleJson); expanded = false })
+                DropdownMenu(
+                    expanded = expanded, 
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Mapa Estándar", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }, 
+                        leadingIcon = { Icon(Icons.Default.Map, null, tint = DelisaRed) },
+                        onClick = { viewModel.setMapType(MapType.NORMAL); expanded = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Vista Satélite", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }, 
+                        leadingIcon = { Icon(Icons.Default.Satellite, null, tint = DelisaRed) },
+                        onClick = { viewModel.setMapType(MapType.SATELLITE); expanded = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Modo Oscuro", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }, 
+                        leadingIcon = { Icon(Icons.Default.DarkMode, null, tint = DelisaRed) },
+                        onClick = { viewModel.setMapType(MapType.NORMAL, darkMapStyleJson); expanded = false }
+                    )
                 }
                 
                 if (!esVendedor) {
                     Spacer(Modifier.height(12.dp))
 
-                    // 🕰️ Botón Historial Retroactivo (Tesla Style)
                     FloatingActionButton(
                         onClick = { navController.navigate("HISTORIAL_RUTA") },
-                        containerColor = Color.White,
-                        contentColor = Color.DarkGray,
-                        modifier = Modifier.size(44.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        elevation = FloatingActionButtonDefaults.elevation(3.dp)
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .shadow(3.dp, RoundedCornerShape(14.dp))
+                            .then(if (isDark) Modifier.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(14.dp)) else Modifier),
+                        shape = RoundedCornerShape(14.dp)
                     ) {
-                        Icon(Icons.Default.History, null, modifier = Modifier.size(20.dp), tint = Color.Red)
+                        Icon(Icons.Default.History, null, modifier = Modifier.size(20.dp), tint = DelisaRed)
                     }
                 }
             }
@@ -436,17 +475,22 @@ fun MapaScreen(
                             scaleX = scale
                             scaleY = scale
                         }
+                        .shadow(4.dp, RoundedCornerShape(24.dp))
                         .clip(RoundedCornerShape(24.dp))
                         .clickable(
                             interactionSource = interactionSource,
-                            indication = rememberRipple(color = if (uiState.markersVisible) Color.White else Color.Red),
+                            indication = rememberRipple(color = if (uiState.markersVisible) Color.White else DelisaRed),
                             onClick = { viewModel.toggleMarkersVisible() }
                         ),
                     shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (uiState.markersVisible) Color.DarkGray else Color.White
+                        containerColor = if (uiState.markersVisible) {
+                            if (isDark) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        }
                     ),
-                    elevation = CardDefaults.cardElevation(4.dp)
+                    border = if (isDark && !uiState.markersVisible) BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)) else null
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -454,21 +498,21 @@ fun MapaScreen(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         if (uiState.isLoading) {
-                            CircularProgressIndicator(color = Color.Red, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(color = if (uiState.markersVisible) Color.White else DelisaRed, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                             Spacer(Modifier.width(8.dp))
                         } else {
                             Icon(
                                 Icons.Default.Storefront,
                                 contentDescription = null,
-                                tint = if (uiState.markersVisible) Color.White else Color.Red,
+                                tint = if (uiState.markersVisible) Color.White else DelisaRed,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(Modifier.width(8.dp))
                         }
                         Text(
                             text = if (uiState.markersVisible) "Ocultar Clientes (${uiState.clientes.size})" else "Mostrar Clientes",
-                            color = if (uiState.markersVisible) Color.White else Color.DarkGray,
-                            fontWeight = FontWeight.Bold,
+                            color = if (uiState.markersVisible) Color.White else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Black,
                             fontSize = 13.sp
                         )
                     }
@@ -490,15 +534,15 @@ fun MapaScreen(
                                 scaleX = scale
                                 scaleY = scale
                             }
+                            .shadow(2.dp, RoundedCornerShape(12.dp))
                             .clip(RoundedCornerShape(12.dp))
                             .clickable(
                                 interactionSource = interactionSource,
-                                indication = rememberRipple(color = Color.Red),
+                                indication = rememberRipple(color = DelisaRed),
                                 onClick = { showRouteMenu = true }
                             ),
                         shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.9f)),
-                        elevation = CardDefaults.cardElevation(2.dp)
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -508,9 +552,9 @@ fun MapaScreen(
                                 text = uiState.filtroRuta,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color.Red
+                                color = DelisaRed
                             )
-                            Icon(Icons.Default.ArrowDropDown, null, tint = Color.Red, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.ArrowDropDown, null, tint = DelisaRed, modifier = Modifier.size(16.dp))
                         }
 
                         DropdownMenu(expanded = showRouteMenu, onDismissRequest = { showRouteMenu = false }) {
@@ -552,13 +596,15 @@ fun MapaScreen(
 
 @Composable
 fun ClienteCard(cliente: Cliente, navController: NavController) {
+    val isDark = isSystemInDarkTheme()
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .shadow(10.dp, RoundedCornerShape(24.dp))
             .clickable { navController.navigate("detalle_cliente/${cliente.id}?origen=Mapa") },
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(10.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = if (isDark) BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)) else null
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
@@ -570,18 +616,18 @@ fun ClienteCard(cliente: Cliente, navController: NavController) {
                 modifier = Modifier
                     .size(70.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0xFFF5F5F5)),
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentScale = ContentScale.Crop
             )
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(cliente.nombreNegocio, fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color.DarkGray)
-                Text(cliente.nombreDueno ?: "Propietario no registrado", color = Color.Gray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(cliente.nombreNegocio, fontWeight = FontWeight.Black, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text(cliente.nombreDueno ?: "Propietario no registrado", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Call, null, tint = Color.Red, modifier = Modifier.size(13.dp))
+                    Icon(Icons.Default.Call, null, tint = DelisaRed, modifier = Modifier.size(13.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(cliente.telefono ?: "Sin número", color = Color.Red, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                    Text(cliente.telefono ?: "Sin número", color = DelisaRed, fontSize = 13.sp, fontWeight = FontWeight.Black)
                 }
             }
 
@@ -602,10 +648,10 @@ fun ClienteCard(cliente: Cliente, navController: NavController) {
                         scaleY = scale
                     }
                     .clip(CircleShape)
-                    .background(Color.Red.copy(alpha = 0.1f))
+                    .background(DelisaRed.copy(alpha = 0.12f))
                     .clickable(
                         interactionSource = interactionSource,
-                        indication = rememberRipple(bounded = true, color = Color.Red, radius = 27.dp),
+                        indication = rememberRipple(bounded = true, color = DelisaRed, radius = 27.dp),
                         onClick = { navController.navigate("pantalla_ventas/${cliente.id}?origen=Mapa") }
                     ),
                 contentAlignment = Alignment.Center
@@ -613,7 +659,7 @@ fun ClienteCard(cliente: Cliente, navController: NavController) {
                 Icon(
                     imageVector = Icons.Default.ShoppingCart,
                     contentDescription = "Venta",
-                    tint = Color.Red,
+                    tint = DelisaRed,
                     modifier = Modifier.size(26.dp)
                 )
             }
@@ -623,32 +669,33 @@ fun ClienteCard(cliente: Cliente, navController: NavController) {
 
 @Composable
 fun VendedorInfoCard(vendedor: VendedorUbicacion) {
+    val isDark = isSystemInDarkTheme()
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().shadow(10.dp, RoundedCornerShape(24.dp)),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(10.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = if (isDark) BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)) else null
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(vendedor.ruta, fontWeight = FontWeight.Black, fontSize = 20.sp, color = Color.DarkGray)
+                Text(vendedor.ruta, fontWeight = FontWeight.Black, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface)
                 val moving = vendedor.speed > 0.5
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = (if (moving) Color(0xFF2E7D32) else Color(0xFFE65100)).copy(0.1f)
+                    color = (if (moving) DelisaGreen else WarningOrange).copy(alpha = 0.15f)
                 ) {
                     Text(
                         text = if (moving) "EN MOVIMIENTO" else "UNIDAD DETENIDA",
-                        color = if (moving) Color(0xFF2E7D32) else Color(0xFFE65100),
+                        color = if (moving) DelisaGreenDark else WarningOrange,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Black
                     )
                 }
             }
-            Text("Último reporte: ${tiempoTranscurrido(vendedor.timestamp)}", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Text("Último reporte: ${tiempoTranscurrido(vendedor.timestamp)}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(16.dp))
-            HorizontalDivider(color = Color(0xFFF5F5F5), thickness = 1.dp)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), thickness = 1.dp)
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 VendorGpsIndicator(accuracy = vendedor.accuracy)

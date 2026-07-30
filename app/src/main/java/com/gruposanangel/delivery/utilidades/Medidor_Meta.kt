@@ -26,8 +26,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.gruposanangel.delivery.ui.theme.*
 import java.text.NumberFormat
 import java.util.*
+import androidx.compose.ui.draw.shadow
 
 /**
  * Lógica de persistencia de metas
@@ -103,11 +105,11 @@ fun MedidorDeMetaPremium(
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Card(
-            modifier = Modifier.fillMaxWidth(0.95f).wrapContentHeight(),
+            modifier = Modifier.fillMaxWidth(0.95f).wrapContentHeight().shadow(12.dp, RoundedCornerShape(28.dp), ambientColor = DelisaRed.copy(0.4f)),
             shape = RoundedCornerShape(28.dp),
-            elevation = CardDefaults.cardElevation(20.dp)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface)
         ) {
-            Column(modifier = Modifier.background(Color(0xFFD50000)).padding(18.dp)) {
+            Column(modifier = Modifier.background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark))).padding(18.dp)) {
                 // HEADER
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -229,13 +231,13 @@ fun EditValueDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color.White,
+        containerColor = MaterialTheme.colorScheme.surface,
         title = {
             Text(
                 text = title,
-                color = Color(0xFFD50000), // Rojo fuerte
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
+                color = DelisaRed,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -250,58 +252,51 @@ fun EditValueDialog(
                     },
                     visualTransformation = if (esDinero) MoneyVisualTransformation() else VisualTransformation.None,
                     textStyle = androidx.compose.ui.text.TextStyle(
-                        fontSize = 28.sp,
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.Black,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurface
                     ),
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                         keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
                     ),
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = DelisaRed,
+                        focusedLabelColor = DelisaRed,
+                        cursorColor = DelisaRed
+                    )
                 )
             }
         },
         confirmButton = {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // BOTÓN GUARDAR
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                }
+
                 Button(
                     onClick = {
                         val finalVal = if (esDinero) (text.toDoubleOrNull() ?: 0.0) / 100.0
                         else (text.toDoubleOrNull() ?: 0.0)
                         onConfirm(finalVal.toString())
                     },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFD50000),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f) // Hace que los botones tengan el mismo tamaño
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1.2f)
                 ) {
-                    Text("GUARDAR", fontWeight = FontWeight.Bold)
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                // BOTÓN CANCELAR
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFE0E0E0),
-                        contentColor = Color.Gray
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("CANCELAR", fontWeight = FontWeight.Bold)
+                    Text("GUARDAR", fontWeight = FontWeight.Black, color = Color.White)
                 }
             }
-        },
-        dismissButton = null // Lo dejamos nulo porque ya pusimos ambos botones en confirmButton
+        }
     )
 }
 class MoneyVisualTransformation : VisualTransformation {

@@ -22,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -49,7 +50,7 @@ import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.model.Plantila_carga
 import com.gruposanangel.delivery.model.Plantilla_Producto
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
 import java.util.Date
 import java.util.Calendar
 import java.util.Locale
@@ -174,38 +175,38 @@ fun PantallaNotificacionesContent(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("CENTRO DE MENSAJES", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color.DarkGray, letterSpacing = 1.sp) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Regresar", tint = Color.Red) } },
+                title = { Text("CENTRO DE MENSAJES", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, letterSpacing = 1.sp) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Regresar", tint = DelisaRed) } },
                 actions = {
                     IconButton(onClick = { showRangePicker.value = true }) {
-                        Icon(Icons.Default.CalendarMonth, "Filtrar por fecha", tint = Color.Red)
+                        Icon(Icons.Default.CalendarMonth, "Filtrar por fecha", tint = DelisaRed)
                     }
                     IconButton(onClick = onEmergencyClick) {
-                        Icon(Icons.Default.WifiOff, "Carga Emergencia", tint = Color.Red)
+                        Icon(Icons.Default.WifiOff, "Carga Emergencia", tint = DelisaRed)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         },
-        containerColor = Color(0xFFF8F9FA)
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (uiState.isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Color.Red, strokeWidth = 3.dp)
+                        CircularProgressIndicator(color = DelisaRed, strokeWidth = 3.dp)
                         Spacer(Modifier.height(12.dp))
-                        Text("Sincronizando...", fontSize = 12.sp, color = Color.Gray)
+                        Text("Sincronizando...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else if (uiState.notificaciones.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Notifications, null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
+                        Icon(Icons.Default.Notifications, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                         Spacer(Modifier.height(16.dp))
-                        Text("Sin notificaciones en este periodo", fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text("Sin notificaciones en este periodo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         TextButton(onClick = { showRangePicker.value = true }) {
-                            Text("Cambiar fechas", color = Color.Red)
+                            Text("Cambiar fechas", color = DelisaRed)
                         }
                     }
                 }
@@ -236,35 +237,35 @@ fun DateRangePickerDialogMaterial3(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = Color.White,
+            color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 DateRangePicker(
                     state = state,
                     modifier = Modifier.weight(1f),
-                    title = { Text("Selecciona el periodo", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold) },
+                    title = { Text("Selecciona el periodo", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) },
                     headline = { 
                         val start = state.selectedStartDateMillis
                         val end = state.selectedEndDateMillis
                         if (start != null && end != null) {
                             val sdf = SimpleDateFormat("dd MMM", Locale.forLanguageTag("es-MX"))
-                            Text("${sdf.format(Date(start))} - ${sdf.format(Date(end))}", modifier = Modifier.padding(horizontal = 16.dp))
+                            Text("${sdf.format(Date(start))} - ${sdf.format(Date(end))}", modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurface)
                         } else {
-                            Text("Rango de fechas", modifier = Modifier.padding(horizontal = 16.dp))
+                            Text("Rango de fechas", modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurface)
                         }
                     },
                     showModeToggle = false,
                     colors = DatePickerDefaults.colors(
-                        containerColor = Color.White,
-                        titleContentColor = Color.Black,
-                        headlineContentColor = Color.Red,
-                        selectedDayContainerColor = Color.Red,
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        headlineContentColor = DelisaRed,
+                        selectedDayContainerColor = DelisaRed,
                         selectedDayContentColor = Color.White,
-                        dayInSelectionRangeContainerColor = Color.Red.copy(alpha = 0.15f),
-                        dayInSelectionRangeContentColor = Color.Red,
-                        todayContentColor = Color.Red,
-                        todayDateBorderColor = Color.Red
+                        dayInSelectionRangeContainerColor = DelisaRed.copy(alpha = 0.15f),
+                        dayInSelectionRangeContentColor = DelisaRed,
+                        todayContentColor = DelisaRed,
+                        todayDateBorderColor = DelisaRed
                     )
                 )
                 
@@ -272,7 +273,7 @@ fun DateRangePickerDialogMaterial3(
                     modifier = Modifier.fillMaxWidth().padding(8.dp),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) { Text("CANCELAR") }
+                    TextButton(onClick = onDismiss) { Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = {
@@ -283,8 +284,8 @@ fun DateRangePickerDialogMaterial3(
                                 onRangeSelected(start, end ?: (start + 86399999))
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                    ) { Text("APLICAR") }
+                        colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
+                    ) { Text("APLICAR", color = Color.White) }
                 }
             }
         }
@@ -305,9 +306,9 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
     val esAceptada = noti.aceptada && !esCancelada
     
     val statusColor = when {
-        esCancelada -> Color(0xFFFBC02D) // Amarillo para cancelado como pidió el usuario
-        esAceptada -> Color(0xFF2E7D32)
-        else -> RojoDelisa
+        esCancelada -> WarningOrange
+        esAceptada -> DelisaGreen
+        else -> DelisaRed
     }
 
     Card(
@@ -318,6 +319,7 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                 scaleY = scale 
                 alpha = if (esCancelada) 0.8f else 1f
             }
+            .shadow(if (isPressed) 2.dp else 4.dp, RoundedCornerShape(20.dp))
             .border(
                 width = if (esAceptada) 0.dp else 2.dp,
                 color = if (esAceptada) Color.Transparent else statusColor,
@@ -329,8 +331,7 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                 onClick = onClick
             ),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(if (isPressed) 1.dp else 2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Box {
             // Barra de acento lateral (Sutil)
@@ -372,7 +373,7 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                         Text(
                             text = noti.titulo.uppercase(),
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, letterSpacing = 1.sp),
-                            color = if (esCancelada) Color.DarkGray else Color.DarkGray,
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
                         )
                         // Etiqueta de estado pequeña y limpia
@@ -396,7 +397,7 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                             fontWeight = if (!esAceptada && !esCancelada) FontWeight.Bold else FontWeight.Normal,
                             textDecoration = if (esCancelada) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
                         ),
-                        color = if (esCancelada) Color.Gray else Color.Black,
+                        color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -405,7 +406,7 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                         Text(
                             text = "MOTIVO: ${noti.motivo}",
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                            color = Color.Red.copy(alpha = 0.7f),
+                            color = DelisaRed.copy(alpha = 0.7f),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -417,7 +418,7 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                             text = formatoMoneda.format(noti.monto),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Black,
-                            color = if (esCancelada) Color.Gray else RojoDelisa,
+                            color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else DelisaRed,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
@@ -437,10 +438,10 @@ fun DialogoAutorizacionEmergencia(
     var password by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = { if (!isAuthenticating) onDismiss() },
-        title = { Text("Autorización de Emergencia", fontWeight = FontWeight.Black) },
+        title = { Text("Autorización de Emergencia", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Esta función es solo para cuando no hay internet. Un supervisor debe autorizar físicamente el ingreso del producto.")
+                Text("Esta función es solo para cuando no hay internet. Un supervisor debe autorizar físicamente el ingreso del producto.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
@@ -450,24 +451,29 @@ fun DialogoAutorizacionEmergencia(
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     isError = error != null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = DelisaRed,
+                        focusedLabelColor = DelisaRed,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
                 )
-                if (error != null) Text(error, color = Color.Red, fontSize = 12.sp)
-                if (isAuthenticating) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Color.Red)
+                if (error != null) Text(error, color = DelisaRed, fontSize = 12.sp)
+                if (isAuthenticating) LinearProgressIndicator(Modifier.fillMaxWidth(), color = DelisaRed)
             }
         },
         confirmButton = {
             Button(
                 onClick = { onConfirm(password) },
                 enabled = password.length >= 4 && !isAuthenticating,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-            ) { Text("AUTORIZAR") }
+                colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
+            ) { Text("AUTORIZAR", color = Color.White) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isAuthenticating) { Text("CANCELAR") }
+            TextButton(onClick = onDismiss, enabled = !isAuthenticating) { Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         },
         shape = RoundedCornerShape(24.dp),
-        containerColor = Color.White
+        containerColor = MaterialTheme.colorScheme.surface
     )
 }
 

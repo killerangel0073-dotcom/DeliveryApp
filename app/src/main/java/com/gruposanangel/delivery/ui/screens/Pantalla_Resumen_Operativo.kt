@@ -1,6 +1,7 @@
 package com.gruposanangel.delivery.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -64,6 +65,7 @@ import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.rounded.ShoppingCart
+import com.gruposanangel.delivery.ui.theme.*
 
 data class ProdVendidoReporte(
     val nombre: String,
@@ -357,9 +359,9 @@ fun PantallaResumenOperativo(navController: NavController) {
         AlertDialog(onDismissRequest = { showPurchaseDialog = false }, title = { Text("Asistente de Compra Inteligente", fontWeight = FontWeight.Black) },
             text = {
                 Column {
-                    Text("¿Cuánto deseas invertir en total?", fontSize = 14.sp, color = Color.Gray); Spacer(Modifier.height(16.dp))
+                    Text("¿Cuánto deseas invertir en total?", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(16.dp))
                     OutlinedTextField(value = budgetInput, onValueChange = { if (it.all { c -> c.isDigit() }) budgetInput = it }, label = { Text("Presupuesto de Inversión") }, prefix = { Text("$ ") }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Text("* El sistema comprará cajas completas priorizando los productos con menos días de stock.", fontSize = 10.sp, color = Color.Red, modifier = Modifier.padding(top = 8.dp))
+                    Text("* El sistema comprará cajas completas priorizando los productos con menos días de stock.", fontSize = 10.sp, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
                 }
             },
             confirmButton = {
@@ -373,65 +375,101 @@ fun PantallaResumenOperativo(navController: NavController) {
                         } catch (e: Exception) { Toast.makeText(context, "Error al generar plan", Toast.LENGTH_SHORT).show() }
                         finally { isGeneratingPdf = false; processingMessage = "PROCESANDO REPORTE" }
                     }
-                }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00AAFF))) { Text("GENERAR PLAN", fontWeight = FontWeight.Bold) }
+                }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) { Text("GENERAR PLAN", fontWeight = FontWeight.Bold) }
             }, dismissButton = { TextButton(onClick = { showPurchaseDialog = false }) { Text("CANCELAR") } }
         )
     }
 
     if (showDatePicker) {
         val dateRangePickerState = rememberDateRangePickerState(initialSelectedStartDateMillis = startDate.time, initialSelectedEndDateMillis = endDate.time)
-        MaterialTheme(colorScheme = lightColorScheme(primary = Color.Red, onPrimary = Color.White, surface = Color.White, onSurface = Color.Black, secondary = Color.Red)) {
-            DatePickerDialog(onDismissRequest = { showDatePicker = false }, confirmButton = {
-                TextButton(onClick = {
-                    val startMillis = dateRangePickerState.selectedStartDateMillis; val endMillis = dateRangePickerState.selectedEndDateMillis
-                    if (startMillis != null) {
-                        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")); cal.timeInMillis = startMillis
-                        val sDate = Calendar.getInstance().apply { set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 0, 0, 0) }.time
-                        val eDate = if (endMillis != null) { cal.timeInMillis = endMillis; Calendar.getInstance().apply { set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 23, 59, 59) }.time } else sDate
-                        startDate = sDate; endDate = eDate; showDatePicker = false
-                        scope.launch { isGeneratingPdf = true
-                            try { val ventas = viewModel.obtenerVentasPeriodo(sDate, eDate)
-                                if (ventas.isNotEmpty()) { val file = generarPdfVentasPeriodo(context, ventas, sDate, eDate); abrirPdfResumen(context, file)
-                                } else Toast.makeText(context, "No hay ventas", Toast.LENGTH_SHORT).show()
-                            } catch (e: Exception) { } finally { isGeneratingPdf = false }
+        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+        
+        DeliveryTheme(darkTheme = isDark) {
+            DatePickerDialog(
+                onDismissRequest = { showDatePicker = false }, 
+                confirmButton = {
+                    TextButton(onClick = {
+                        val startMillis = dateRangePickerState.selectedStartDateMillis; val endMillis = dateRangePickerState.selectedEndDateMillis
+                        if (startMillis != null) {
+                            val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")); cal.timeInMillis = startMillis
+                            val sDate = Calendar.getInstance().apply { set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 0, 0, 0) }.time
+                            val eDate = if (endMillis != null) { cal.timeInMillis = endMillis; Calendar.getInstance().apply { set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 23, 59, 59) }.time } else sDate
+                            startDate = sDate; endDate = eDate; showDatePicker = false
+                            scope.launch { isGeneratingPdf = true
+                                try { val ventas = viewModel.obtenerVentasPeriodo(sDate, eDate)
+                                    if (ventas.isNotEmpty()) { val file = generarPdfVentasPeriodo(context, ventas, sDate, eDate); abrirPdfResumen(context, file)
+                                    } else Toast.makeText(context, "No hay ventas", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) { } finally { isGeneratingPdf = false }
+                            }
                         }
-                    }
-                }) { Text("ACEPTAR", fontWeight = FontWeight.Bold) }
-            }, dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("CANCELAR", color = Color.Gray) } }) {
-                DateRangePicker(state = dateRangePickerState, modifier = Modifier.height(500.dp), title = { Text("Seleccionar Periodo", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold) }, headline = { Text("Filtro de Reporte", modifier = Modifier.padding(horizontal = 16.dp)) }, colors = DatePickerDefaults.colors(containerColor = Color.White, titleContentColor = Color.DarkGray, headlineContentColor = Color.Red, selectedDayContainerColor = Color.Red, selectedDayContentColor = Color.White, todayContentColor = Color.Red, todayDateBorderColor = Color.Red, dayInSelectionRangeContainerColor = Color.Red.copy(alpha = 0.15f), dayInSelectionRangeContentColor = Color.Red))
+                    }) { Text("ACEPTAR", fontWeight = FontWeight.Bold, color = DelisaRed) }
+                }, 
+                dismissButton = { 
+                    TextButton(onClick = { showDatePicker = false }) { 
+                        Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant) 
+                    } 
+                },
+                colors = DatePickerDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
+                DateRangePicker(
+                    state = dateRangePickerState,
+                    modifier = Modifier.height(500.dp),
+                    title = { Text("Seleccionar Periodo", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) },
+                    headline = { Text("Filtro de Reporte", modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurface) },
+                    colors = DatePickerDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        headlineContentColor = DelisaRed,
+                        selectedDayContainerColor = DelisaRed,
+                        selectedDayContentColor = Color.White,
+                        todayContentColor = DelisaRed,
+                        todayDateBorderColor = DelisaRed,
+                        dayInSelectionRangeContainerColor = DelisaRed.copy(alpha = 0.15f),
+                        dayInSelectionRangeContentColor = DelisaRed,
+                        navigationContentColor = MaterialTheme.colorScheme.onSurface,
+                        weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        subheadContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        yearContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        currentYearContentColor = DelisaRed,
+                        selectedYearContainerColor = DelisaRed,
+                        selectedYearContentColor = Color.White
+                    )
+                )
             }
         }
     }
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(topBar = {
-            TopAppBar(title = { Text("RESUMEN OPERATIVO", fontWeight = FontWeight.Black, fontSize = 16.sp) }, navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red) } }, actions = {
+            TopAppBar(title = { Text("RESUMEN OPERATIVO", fontWeight = FontWeight.Black, fontSize = 16.sp) }, navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) } }, actions = {
                 if (!uiState.isLoading) {
-                    IconButton(onClick = { showPurchaseDialog = true }) { Icon(Icons.Rounded.ShoppingCart, null, tint = Color(0xFF00AAFF)) }
-                    IconButton(onClick = { showDatePicker = true }) { Icon(Icons.Rounded.BarChart, null, tint = Color(0xFF4CAF50)) }
-                    IconButton(onClick = { scope.launch { isGeneratingPdf = true; try { val file = generarPdfInventarioGlobal(context, uiState.productos, uiState.stockGlobal); abrirPdfResumen(context, file) } finally { isGeneratingPdf = false } } }) { Icon(Icons.Rounded.PictureAsPdf, null, tint = Color.Red) }
+                    IconButton(onClick = { showPurchaseDialog = true }) { Icon(Icons.Rounded.ShoppingCart, null, tint = DelisaBlue) }
+                    IconButton(onClick = { showDatePicker = true }) { Icon(Icons.Rounded.BarChart, null, tint = DelisaGreen) }
+                    IconButton(onClick = { scope.launch { isGeneratingPdf = true; try { val file = generarPdfInventarioGlobal(context, uiState.productos, uiState.stockGlobal); abrirPdfResumen(context, file) } finally { isGeneratingPdf = false } } }) { Icon(Icons.Rounded.PictureAsPdf, null, tint = DelisaRed) }
                 }
-            }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White))
-        }, containerColor = Color(0xFFF8F9FA)) { padding ->
-            if (uiState.isLoading) { Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { CircularProgressIndicator(color = Color.Red) }
+            }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface))
+        }, containerColor = MaterialTheme.colorScheme.background) { padding ->
+            if (uiState.isLoading) { Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
             } else {
                 val margins = uiState.productos.map { calcularMargen(it) }
                 val maxMargen = if (margins.isNotEmpty()) margins.maxOrNull() ?: 0.0 else 0.0
                 val minMargen = if (margins.isNotEmpty()) margins.minOrNull() ?: 0.0 else 0.0
                 LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     item { ResumenGeneralFinanzas(uiState.productos) }
-                    item { Text("Análisis de Rentabilidad", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.DarkGray, modifier = Modifier.padding(top = 8.dp)) }
+                    item { Text("Análisis de Rentabilidad", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 8.dp)) }
                     items(uiState.productos.sortedByDescending { calcularMargen(it) }) { prod -> CardProductoFinanzas(prod, formatoMoneda, minMargen, maxMargen) }
                 }
             }
         }
         if (isGeneratingPdf) {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable(enabled = false){}, contentAlignment = Alignment.Center) {
-                Card(modifier = Modifier.padding(32.dp), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(16.dp)) {
+                Card(modifier = Modifier.padding(32.dp), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(16.dp)) {
                     Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        Box(contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(80.dp), Color.Red, 6.dp, trackColor = Color.Red.copy(0.1f)); Icon(Icons.Rounded.PictureAsPdf, null, tint = Color.Red, modifier = Modifier.size(32.dp)) }
-                        Spacer(Modifier.height(24.dp)); Text(processingMessage, fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.Black, letterSpacing = 1.sp)
-                        Text("Estamos analizando las ventas y\nconstruyendo tu documento...", fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
+                        Box(contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(80.dp), DelisaRed, 6.dp, trackColor = DelisaRed.copy(0.1f)); Icon(Icons.Rounded.PictureAsPdf, null, tint = DelisaRed, modifier = Modifier.size(32.dp)) }
+                        Spacer(Modifier.height(24.dp)); Text(processingMessage, fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, letterSpacing = 1.sp)
+                        Text("Estamos analizando las ventas y\nconstruyendo tu documento...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
@@ -443,7 +481,7 @@ fun PantallaResumenOperativo(navController: NavController) {
 fun ResumenGeneralFinanzas(productos: List<Map<String, Any>>) {
     val margenPromedio = if (productos.isNotEmpty()) productos.map { calcularMargen(it) }.filter { it > 0 }.average() else 0.0
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(8.dp)) {
-        Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Red, Color(0xFFB71C1C)))).padding(24.dp)) {
+        Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark))).padding(24.dp)) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.AutoMirrored.Filled.TrendingUp, null, tint = Color.White, modifier = Modifier.size(32.dp))
                 Text("MARGEN DE UTILIDAD PROM.", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -464,25 +502,25 @@ fun CardProductoFinanzas(prod: Map<String, Any>, formato: NumberFormat, minMarge
     val gVenta = prod["gramosVenta"]?.toString()?.toDoubleOrNull() ?: 0.0
     val costoPz = if (gBolsa > 0) (pCompra / gBolsa) * gVenta else 0.0
     val utilidad = pVenta - costoPz; val margen = if (pVenta > 0) (utilidad / pVenta) * 100 else 0.0
-    val colorMargen = if (maxMargen == minMargen) Color(0xFF4CAF50) else {
+    val colorMargen = if (maxMargen == minMargen) DelisaGreen else {
         val ratio = (margen - minMargen) / (maxMargen - minMargen)
-        when { ratio >= 0.75 -> Color(0xFF2E7D32); ratio >= 0.50 -> Color(0xFF4CAF50); ratio >= 0.25 -> Color(0xFFFF9800); else -> Color(0xFFD32F2F) }
+        when { ratio >= 0.75 -> DelisaGreenDark; ratio >= 0.50 -> DelisaGreen; ratio >= 0.25 -> WarningOrange; else -> ErrorRed }
     }
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(3.dp)) {
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(3.dp)) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(colorMargen.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Inventory2, null, tint = colorMargen, modifier = Modifier.size(24.dp)) }
-                Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(nombre, fontWeight = FontWeight.Black, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Costo Display: ${formato.format(pCompra)} ($display pzas)", fontSize = 10.sp, color = Color.Gray) }
+                Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(nombre, fontWeight = FontWeight.Black, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Costo Display: ${formato.format(pCompra)} ($display pzas)", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Surface(color = colorMargen, shape = RoundedCornerShape(8.dp)) { Text("${String.format(Locale.US, "%.0f", margen)}%", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black) }
             }
-            Spacer(Modifier.height(16.dp)); HorizontalDivider(color = Color(0xFFF1F2F6), thickness = 1.dp); Spacer(Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { InfoFinanzasItem("COSTO UNIT.", formato.format(costoPz), Color.DarkGray); InfoFinanzasItem("PRECIO VENTA", formato.format(pVenta), Color.Black); InfoFinanzasItem("UTILIDAD PZ", formato.format(utilidad), colorMargen) }
-            if (display > 0 && gBolsa > 0 && gVenta > 0) Text("* Rendimiento: aprox. ${String.format(Locale.US, "%.0f", (display * gBolsa) / gVenta)} bolsitas por display", fontSize = 9.sp, color = Color.Gray, modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(16.dp)); HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.dp); Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { InfoFinanzasItem("COSTO UNIT.", formato.format(costoPz), MaterialTheme.colorScheme.onSurface); InfoFinanzasItem("PRECIO VENTA", formato.format(pVenta), MaterialTheme.colorScheme.onSurface); InfoFinanzasItem("UTILIDAD PZ", formato.format(utilidad), colorMargen) }
+            if (display > 0 && gBolsa > 0 && gVenta > 0) Text("* Rendimiento: aprox. ${String.format(Locale.US, "%.0f", (display * gBolsa) / gVenta)} bolsitas por display", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.Medium)
         }
     }
 }
 
-@Composable fun InfoFinanzasItem(l: String, v: String, c: Color) { Column { Text(l, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.Gray); Spacer(Modifier.height(2.dp)); Text(v, fontSize = 15.sp, fontWeight = FontWeight.Black, color = c) } }
+@Composable fun InfoFinanzasItem(l: String, v: String, c: Color) { Column { Text(l, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(2.dp)); Text(v, fontSize = 15.sp, fontWeight = FontWeight.Black, color = c) } }
 
 fun calcularMargen(prod: Map<String, Any>): Double {
     val pV = prod["precio"]?.toString()?.toDoubleOrNull() ?: 0.0; val pC = prod["precioCompra"]?.toString()?.toDoubleOrNull() ?: 0.0

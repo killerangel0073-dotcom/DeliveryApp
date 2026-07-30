@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -125,7 +126,7 @@ fun Pantalla_Principal(
 
     Scaffold(
         bottomBar = {
-            Column(modifier = Modifier.background(Color(0xFFFF0000))) {
+            Column(modifier = Modifier.background(com.gruposanangel.delivery.ui.theme.DelisaRed)) {
                 AnimatedCurvedBottomBarPro(
                     items = navigationItems,
                     selectedScreen = selectedScreen,
@@ -143,7 +144,8 @@ fun Pantalla_Principal(
                 )
                 Spacer(Modifier.navigationBarsPadding())
             }
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -224,31 +226,32 @@ fun ModernProfileHeader(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(targetValue = if (isPressed) 0.94f else 1f, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow), label = "")
+    val isDark = isSystemInDarkTheme()
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).shadow(8.dp, RoundedCornerShape(24.dp)),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(contentAlignment = Alignment.BottomEnd, modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.clip(CircleShape).clickable(interactionSource = interactionSource, indication = null, onClick = onProfileClick)) {
-                Surface(modifier = Modifier.size(52.dp).border(2.dp, Color.Red.copy(0.1f), CircleShape), shape = CircleShape, color = Color(0xFFF8F9FA)) {
+                Surface(modifier = Modifier.size(52.dp).border(2.dp, com.gruposanangel.delivery.ui.theme.DelisaRed.copy(0.1f), CircleShape), shape = CircleShape, color = MaterialTheme.colorScheme.background) {
                     if (photoUrl.isNotEmpty()) AsyncImage(model = photoUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                     else Image(painter = painterResource(R.drawable.repartidor), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 }
-                Box(Modifier.size(14.dp).background(Color.White, CircleShape).padding(2.dp)) {
-                    Box(Modifier.fillMaxSize().background(if (enRuta) Color(0xFF4CAF50) else Color.LightGray, CircleShape))
+                Box(Modifier.size(14.dp).background(MaterialTheme.colorScheme.surface, CircleShape).padding(2.dp)) {
+                    Box(Modifier.fillMaxSize().background(if (enRuta) com.gruposanangel.delivery.ui.theme.DelisaGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape))
                 }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(text = nombre, fontSize = 17.sp, fontWeight = FontWeight.Black, color = Color(0xFF1A1A1A), maxLines = 1)
-                Surface(color = Color.Red.copy(alpha = 0.08f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(top = 2.dp)) {
-                    Text(text = puesto.uppercase(), color = Color.Red, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                Text(text = nombre, fontSize = 17.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                Surface(color = com.gruposanangel.delivery.ui.theme.DelisaRed.copy(alpha = 0.08f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(top = 2.dp)) {
+                    Text(text = puesto.uppercase(), color = com.gruposanangel.delivery.ui.theme.DelisaRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
                 }
             }
-            IconButton(onClick = onLogout, modifier = Modifier.size(40.dp).background(Color(0xFFFDECEA), CircleShape)) {
-                Icon(imageVector = Icons.Default.Logout, contentDescription = "Salir", tint = Color.Red, modifier = Modifier.size(18.dp))
+            IconButton(onClick = onLogout, modifier = Modifier.size(40.dp).background(com.gruposanangel.delivery.ui.theme.DelisaRed.copy(alpha = 0.1f), CircleShape)) {
+                Icon(imageVector = Icons.Default.Logout, contentDescription = "Salir", tint = com.gruposanangel.delivery.ui.theme.DelisaRed, modifier = Modifier.size(18.dp))
             }
         }
     }
@@ -276,7 +279,7 @@ fun AnimatedCurvedBottomBarPro(items: List<Screen>, selectedScreen: Screen, onIt
                 cubicTo(notchX + radius * 0.5f, -lift, notchX + radius * 0.8f, 0f, notchX + radius * 1.2f, 0f)
                 lineTo(size.width, 0f); lineTo(size.width, size.height); lineTo(0f, size.height); close()
             }
-            drawPath(path = path, color = Color(0xFFFF0000), alpha = 0.95f)
+            drawPath(path = path, color = com.gruposanangel.delivery.ui.theme.DelisaRed, alpha = 0.95f)
         }
         Row(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             items.forEachIndexed { index, screen ->

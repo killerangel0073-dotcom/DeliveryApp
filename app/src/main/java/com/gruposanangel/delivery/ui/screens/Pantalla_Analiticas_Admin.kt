@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -33,10 +34,7 @@ import coil.compose.AsyncImage
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
-
-private val RojoDelisa = Color(0xFFE53935)
-private val NegroPremium = Color(0xFF1E1E24)
-private val GrisFondo = Color(0xFFF8F9FA)
+import com.gruposanangel.delivery.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,46 +57,46 @@ fun Pantalla_Analiticas_Admin(
             CenterAlignedTopAppBar(
                 title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("DESEMPEÑO GLOBAL", fontWeight = FontWeight.Black, fontSize = 16.sp)
+                        Text("DESEMPEÑO GLOBAL", fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
                         Text(
                             text = "${sdf.format(Date(startTime))} - ${sdf.format(Date(endTime))}".uppercase(),
                             fontSize = 10.sp,
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = RojoDelisa)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed)
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.White)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         },
-        containerColor = GrisFondo
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         if (uiState.isLoading) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = RojoDelisa)
+                CircularProgressIndicator(color = DelisaRed)
             }
         } else if (uiState.error != null) {
             Box(Modifier.fillMaxSize().padding(padding).padding(24.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.ErrorOutline, null, tint = RojoDelisa, modifier = Modifier.size(48.dp))
+                    Icon(Icons.Default.ErrorOutline, null, tint = DelisaRed, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.height(16.dp))
                     Text(
                         text = uiState.error!!,
-                        color = Color.Gray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         fontSize = 14.sp
                     )
                     Spacer(Modifier.height(24.dp))
                     Button(
                         onClick = { viewModel.cargarAnaliticas(Date(startTime), Date(endTime)) },
-                        colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa)
+                        colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
                     ) {
-                        Text("REINTENTAR")
+                        Text("REINTENTAR", color = Color.White)
                     }
                 }
             }
@@ -133,17 +131,17 @@ fun Pantalla_Analiticas_Admin(
                     item { SectionHeader("Distribución de Gastos", Icons.Default.PieChart) }
                     item {
                         Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(24.dp)),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                             shape = RoundedCornerShape(24.dp)
                         ) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 uiState.desgloseGastos.forEach { gasto ->
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(Modifier.size(8.dp).background(RojoDelisa, CircleShape))
+                                        Box(Modifier.size(8.dp).background(DelisaRed, CircleShape))
                                         Spacer(Modifier.width(12.dp))
-                                        Text(gasto.categoria, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
-                                        Text(formatoMoneda.format(gasto.total), fontWeight = FontWeight.Black)
+                                        Text(gasto.categoria, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+                                        Text(formatoMoneda.format(gasto.total), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                                     }
                                 }
                             }
@@ -179,10 +177,9 @@ fun TrendChart(days: List<DayStat>) {
     val scrollState = rememberScrollState()
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(24.dp)),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(
@@ -197,10 +194,10 @@ fun TrendChart(days: List<DayStat>) {
                     val hFactor = (day.monto / maxMonto).toFloat().coerceIn(0.01f, 1f)
                     Column(
                         modifier = Modifier
-                            .width(60.dp) // Un poco más de aire
+                            .width(60.dp) 
                             .fillMaxHeight(),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Bottom // Todo nace desde abajo
+                        verticalArrangement = Arrangement.Bottom 
                     ) {
                         if (day.monto > 0) {
                             val label = if (day.monto >= 1000) {
@@ -210,15 +207,14 @@ fun TrendChart(days: List<DayStat>) {
                             }
                             Text(
                                 text = label,
-                                fontSize = 10.sp, // Un poco más grande para legibilidad
+                                fontSize = 10.sp, 
                                 fontWeight = FontWeight.Black,
-                                color = RojoDelisa,
+                                color = DelisaRed,
                                 maxLines = 1
                             )
                             Spacer(Modifier.height(4.dp))
                         }
                         
-                        // ÁREA DE BARRA (Altura calculada sobre un máximo de 110dp)
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -227,7 +223,7 @@ fun TrendChart(days: List<DayStat>) {
                                 .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                                 .background(
                                     Brush.verticalGradient(
-                                        listOf(RojoDelisa, RojoDelisa.copy(alpha = 0.7f))
+                                        listOf(DelisaRed, DelisaRed.copy(alpha = 0.7f))
                                     )
                                 )
                         )
@@ -238,7 +234,7 @@ fun TrendChart(days: List<DayStat>) {
                             text = day.fecha, 
                             fontSize = 9.sp, 
                             fontWeight = FontWeight.Bold, 
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             textAlign = TextAlign.Center
                         )
@@ -252,27 +248,28 @@ fun TrendChart(days: List<DayStat>) {
 @Composable
 fun BalanceCard(bruta: Double, gastos: Double, neto: Double, formato: NumberFormat) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(28.dp)),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = NegroPremium),
-        elevation = CardDefaults.cardElevation(8.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface)
     ) {
-        Column(Modifier.padding(24.dp)) {
-            Text("UTILIDAD NETA OPERATIVA", color = Color.White.copy(0.6f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            Text(formato.format(neto), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Black)
-            
-            Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = Color.White.copy(0.1f))
-            Spacer(Modifier.height(20.dp))
-            
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text("VENTA BRUTA", color = Color.White.copy(0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(formato.format(bruta), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("GASTOS TOTALES", color = Color.White.copy(0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text("-${formato.format(gastos)}", color = RojoDelisa, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Box(modifier = Modifier.background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark)))) {
+            Column(Modifier.padding(24.dp)) {
+                Text("UTILIDAD NETA OPERATIVA", color = Color.White.copy(0.6f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(formato.format(neto), color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Black)
+                
+                Spacer(Modifier.height(20.dp))
+                HorizontalDivider(color = Color.White.copy(0.2f))
+                Spacer(Modifier.height(20.dp))
+                
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("VENTA BRUTA", color = Color.White.copy(0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(formato.format(bruta), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("GASTOS TOTALES", color = Color.White.copy(0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("-${formato.format(gastos)}", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -282,24 +279,23 @@ fun BalanceCard(bruta: Double, gastos: Double, neto: Double, formato: NumberForm
 @Composable
 fun ProductStatItem(prod: ProductStat, formato: NumberFormat) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(20.dp)),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = prod.imagenUrl,
                 contentDescription = null,
-                modifier = Modifier.size(50.dp).clip(RoundedCornerShape(12.dp)).background(GrisFondo),
+                modifier = Modifier.size(50.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.background),
                 contentScale = ContentScale.Crop
             )
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(prod.nombre, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1)
-                Text("${prod.cantidad} unidades vendidas", fontSize = 12.sp, color = Color.Gray)
+                Text(prod.nombre, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, color = MaterialTheme.colorScheme.onSurface)
+                Text("${prod.cantidad} unidades vendidas", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(formato.format(prod.monto), fontWeight = FontWeight.Black, color = NegroPremium)
+            Text(formato.format(prod.monto), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
@@ -307,10 +303,9 @@ fun ProductStatItem(prod: ProductStat, formato: NumberFormat) {
 @Composable
 fun SellerStatItem(seller: SellerStat, formato: NumberFormat) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(20.dp)),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -322,19 +317,19 @@ fun SellerStatItem(seller: SellerStat, formato: NumberFormat) {
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    Surface(Modifier.size(40.dp), shape = CircleShape, color = RojoDelisa.copy(0.1f)) {
-                        Icon(Icons.Default.Person, null, tint = RojoDelisa, modifier = Modifier.padding(10.dp))
+                    Surface(Modifier.size(40.dp), shape = CircleShape, color = DelisaRed.copy(0.1f)) {
+                        Icon(Icons.Default.Person, null, tint = DelisaRed, modifier = Modifier.padding(10.dp))
                     }
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(seller.nombre, fontWeight = FontWeight.Black, fontSize = 15.sp)
-                    Text("${seller.numTickets} tickets | ${seller.cancelaciones} anuladas", fontSize = 11.sp, color = Color.Gray)
+                    Text(seller.nombre, fontWeight = FontWeight.Black, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                    Text("${seller.numTickets} tickets | ${seller.cancelaciones} anuladas", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(formato.format(seller.totalVenta), fontWeight = FontWeight.Black, color = Color(0xFF2E7D32))
+                    Text(formato.format(seller.totalVenta), fontWeight = FontWeight.Black, color = DelisaGreen)
                     if (seller.totalGastos > 0) {
-                        Text("-${formato.format(seller.totalGastos)} gastos", fontSize = 10.sp, color = RojoDelisa, fontWeight = FontWeight.Bold)
+                        Text("-${formato.format(seller.totalGastos)} gastos", fontSize = 10.sp, color = DelisaRed, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -345,8 +340,8 @@ fun SellerStatItem(seller: SellerStat, formato: NumberFormat) {
 @Composable
 fun SectionHeader(title: String, icon: ImageVector) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-        Icon(icon, null, tint = RojoDelisa, modifier = Modifier.size(18.dp))
+        Icon(icon, null, tint = DelisaRed, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
-        Text(title.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.Gray, letterSpacing = 1.sp)
+        Text(title.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = 1.sp)
     }
 }

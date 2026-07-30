@@ -4,11 +4,13 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,16 +34,12 @@ import androidx.navigation.NavController
 import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.VentaEntity
+import com.gruposanangel.delivery.ui.theme.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
-
-private val RojoDelisa = Color(0xFFE53935)
-private val NegroPremium = Color(0xFF1E1E24)
-private val GrisFondoPremium = Color(0xFFF6F8FA)
-private val VerdeExito = Color(0xFF2E7D32)
 
 data class RendimientoUiState(
     val isLoading: Boolean = false,
@@ -203,11 +201,11 @@ fun Pantalla_Mi_Rendimiento(
         }
     )
     val uiState by viewModel.uiState.collectAsState()
-    val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
+    val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     
     var showDatePicker by remember { mutableStateOf(false) }
     
-    val dfRange = remember { SimpleDateFormat("dd MMM", Locale("es", "MX")).apply { timeZone = TimeZone.getTimeZone("UTC") } }
+    val dfRange = remember { SimpleDateFormat("dd MMM", Locale.forLanguageTag("es-MX")).apply { timeZone = TimeZone.getTimeZone("UTC") } }
     val rangoFechas = remember(uiState.fechaInicioSemana) {
         val calEnd = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { 
             timeInMillis = uiState.fechaInicioSemana
@@ -216,164 +214,181 @@ fun Pantalla_Mi_Rendimiento(
         "${dfRange.format(Date(uiState.fechaInicioSemana))} - ${dfRange.format(calEnd.time)}".uppercase()
     }
 
-    if (showDatePicker) {
-        val dateRangePickerState = rememberDateRangePickerState(
-            initialSelectedStartDateMillis = uiState.fechaInicioSemana,
-            initialSelectedEndDateMillis = uiState.fechaInicioSemana + (6L * 24 * 60 * 60 * 1000)
-        )
+    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
 
-        LaunchedEffect(dateRangePickerState.selectedStartDateMillis, dateRangePickerState.selectedEndDateMillis) {
-            val selection = dateRangePickerState.selectedEndDateMillis ?: dateRangePickerState.selectedStartDateMillis
-            selection?.let { millis ->
-                val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = millis }
-                while (cal.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) { cal.add(Calendar.DAY_OF_MONTH, -1) }
-                val lunesMs = cal.timeInMillis
-                cal.add(Calendar.DAY_OF_MONTH, 6)
-                val domingoMs = cal.timeInMillis
-                if (dateRangePickerState.selectedStartDateMillis != lunesMs || dateRangePickerState.selectedEndDateMillis != domingoMs) {
-                    dateRangePickerState.setSelection(lunesMs, domingoMs)
+    DeliveryTheme(darkTheme = isDark) {
+        if (showDatePicker) {
+            val dateRangePickerState = rememberDateRangePickerState(
+                initialSelectedStartDateMillis = uiState.fechaInicioSemana,
+                initialSelectedEndDateMillis = uiState.fechaInicioSemana + (6L * 24 * 60 * 60 * 1000)
+            )
+
+            LaunchedEffect(dateRangePickerState.selectedStartDateMillis, dateRangePickerState.selectedEndDateMillis) {
+                val selection = dateRangePickerState.selectedEndDateMillis ?: dateRangePickerState.selectedStartDateMillis
+                selection?.let { millis ->
+                    val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = millis }
+                    while (cal.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) { cal.add(Calendar.DAY_OF_MONTH, -1) }
+                    val lunesMs = cal.timeInMillis
+                    cal.add(Calendar.DAY_OF_MONTH, 6)
+                    val domingoMs = cal.timeInMillis
+                    if (dateRangePickerState.selectedStartDateMillis != lunesMs || dateRangePickerState.selectedEndDateMillis != domingoMs) {
+                        dateRangePickerState.setSelection(lunesMs, domingoMs)
+                    }
                 }
             }
-        }
 
-        AlertDialog(
-            onDismissRequest = { showDatePicker = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-            modifier = Modifier.fillMaxWidth(0.95f),
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = { showDatePicker = false }) {
-                        Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Button(
-                        onClick = {
-                            dateRangePickerState.selectedStartDateMillis?.let { viewModel.cambiarSemana(it) }
-                            showDatePicker = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
-                        shape = RoundedCornerShape(12.dp)
+            AlertDialog(
+                onDismissRequest = { showDatePicker = false },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+                modifier = Modifier.fillMaxWidth(0.95f),
+                confirmButton = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("ACEPTAR", fontWeight = FontWeight.Black)
+                        TextButton(onClick = { showDatePicker = false }) {
+                            Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Button(
+                            onClick = {
+                                dateRangePickerState.selectedStartDateMillis?.let { viewModel.cambiarSemana(it) }
+                                showDatePicker = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("ACEPTAR", fontWeight = FontWeight.Black, color = Color.White)
+                        }
                     }
-                }
-            },
-            containerColor = Color.White,
-            text = {
-                Box(modifier = Modifier.fillMaxWidth().height(450.dp)) {
-                    DateRangePicker(
-                        state = dateRangePickerState,
-                        title = { Text("Selecciona la semana", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold) },
-                        showModeToggle = false,
-                        headline = {
-                            val start = dateRangePickerState.selectedStartDateMillis
-                            val end = dateRangePickerState.selectedEndDateMillis
-                            if (start != null && end != null) {
-                                Text(
-                                    text = "${dfRange.format(Date(start))} - ${dfRange.format(Date(end))}".uppercase(),
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                    fontWeight = FontWeight.Black,
-                                    color = RojoDelisa
-                                )
-                            }
-                        },
-                        colors = DatePickerDefaults.colors(
-                            selectedDayContainerColor = RojoDelisa,
-                            dayInSelectionRangeContainerColor = RojoDelisa.copy(alpha = 0.1f),
-                            selectedDayContentColor = Color.White,
-                            todayContentColor = RojoDelisa,
-                            todayDateBorderColor = RojoDelisa
+                },
+                containerColor = MaterialTheme.colorScheme.surface,
+                text = {
+                    Box(modifier = Modifier.fillMaxWidth().height(450.dp)) {
+                        DateRangePicker(
+                            state = dateRangePickerState,
+                            title = { Text("Selecciona la semana", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) },
+                            showModeToggle = false,
+                            headline = {
+                                val start = dateRangePickerState.selectedStartDateMillis
+                                val end = dateRangePickerState.selectedEndDateMillis
+                                if (start != null && end != null) {
+                                    Text(
+                                        text = "${dfRange.format(Date(start))} - ${dfRange.format(Date(end))}".uppercase(),
+                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                        fontWeight = FontWeight.Black,
+                                        color = DelisaRed
+                                    )
+                                }
+                            },
+                            colors = DatePickerDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                                headlineContentColor = DelisaRed,
+                                selectedDayContainerColor = DelisaRed,
+                                selectedDayContentColor = Color.White,
+                                todayContentColor = DelisaRed,
+                                todayDateBorderColor = DelisaRed,
+                                dayInSelectionRangeContainerColor = DelisaRed.copy(alpha = 0.15f),
+                                dayInSelectionRangeContentColor = DelisaRed,
+                                navigationContentColor = MaterialTheme.colorScheme.onSurface,
+                                weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                subheadContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                yearContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                currentYearContentColor = DelisaRed,
+                                selectedYearContainerColor = DelisaRed,
+                                selectedYearContentColor = Color.White
+                            )
                         )
-                    )
+                    }
                 }
-            }
-        )
-    }
-
-    Scaffold(
-        containerColor = GrisFondoPremium,
-        topBar = {
-            TopAppBar(
-                title = { 
-                    Column {
-                        Text("MI BOLSO", fontWeight = FontWeight.Black, fontSize = 18.sp, color = NegroPremium)
-                        Text(rangoFechas, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 1.sp)
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Rounded.ArrowBackIosNew, null, tint = RojoDelisa)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showDatePicker = true }) {
-                        Icon(Icons.Rounded.CalendarMonth, null, tint = RojoDelisa)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.padding(padding).fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 32.dp)
-        ) {
-            item {
-                ResumenGaneCard(
-                    totalGane = uiState.totalGaneSemana,
-                    formato = formatoMoneda,
-                    nombre = uiState.nombreVendedor
+
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                TopAppBar(
+                    title = { 
+                        Column {
+                            Text("MI BOLSO", fontWeight = FontWeight.Black, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                            Text(rangoFechas, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = 1.sp)
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { navController.popBackStack() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed)
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showDatePicker = true }) {
+                            Icon(Icons.Rounded.CalendarMonth, null, tint = DelisaRed)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
                 )
             }
-
-            item {
-                Row(
-                    modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) { padding ->
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 32.dp)
                 ) {
-                    MiniKPI(
-                        titulo = "Sueldo Base",
-                        valor = formatoMoneda.format(uiState.sueldoBaseAcumulado),
-                        subtitulo = "Base: $${uiState.sueldoBaseConfig.toInt()}/día\n${uiState.diasTrabajados} días lab.",
-                        color = NegroPremium,
-                        icon = Icons.Rounded.WorkHistory,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MiniKPI(
-                        titulo = "Comisión",
-                        valor = formatoMoneda.format(uiState.comisionAcumulada),
-                        subtitulo = "Pct: ${uiState.comisionConfig}%\nS/ Venta: ${formatoMoneda.format(uiState.totalVentaSemana)}",
-                        color = RojoDelisa,
-                        icon = Icons.Rounded.Percent,
-                        modifier = Modifier.weight(1f)
-                    )
+                    item {
+                        ResumenGaneCard(
+                            totalGane = uiState.totalGaneSemana,
+                            formato = formatoMoneda,
+                            nombre = uiState.nombreVendedor
+                        )
+                    }
+
+                    item {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            MiniKPI(
+                                titulo = "Sueldo Base",
+                                valor = formatoMoneda.format(uiState.sueldoBaseAcumulado),
+                                subtitulo = "Base: $${uiState.sueldoBaseConfig.toInt()}/día\n${uiState.diasTrabajados} días lab.",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                icon = Icons.Rounded.WorkHistory,
+                                modifier = Modifier.weight(1f)
+                            )
+                            MiniKPI(
+                                titulo = "Comisión",
+                                valor = formatoMoneda.format(uiState.comisionAcumulada),
+                                subtitulo = "Pct: ${uiState.comisionConfig}%\nS/ Venta: ${formatoMoneda.format(uiState.totalVentaSemana)}",
+                                color = DelisaRed,
+                                icon = Icons.Rounded.Percent,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    item {
+                        Text(
+                            text = "DESGLOSE DIARIO",
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            letterSpacing = 1.5.sp
+                        )
+                    }
+
+                    items(uiState.desgloseDias.size) { index ->
+                        val dia = uiState.desgloseDias[index]
+                        DiaGaneItem(dia, formatoMoneda, uiState.sueldoBaseConfig)
+                    }
                 }
-            }
 
-            item {
-                Text(
-                    text = "DESGLOSE DIARIO",
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Black,
-                    color = Color.Gray,
-                    letterSpacing = 1.5.sp
-                )
-            }
-
-            items(uiState.desgloseDias.size) { index ->
-                val dia = uiState.desgloseDias[index]
-                DiaGaneItem(dia, formatoMoneda, uiState.sueldoBaseConfig)
-            }
-        }
-
-        if (uiState.isLoading) {
-            Box(Modifier.fillMaxSize().background(Color.White.copy(0.4f)), Alignment.Center) {
-                CircularProgressIndicator(color = RojoDelisa)
+                if (uiState.isLoading) {
+                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(0.4f)), Alignment.Center) {
+                        CircularProgressIndicator(color = DelisaRed)
+                    }
+                }
             }
         }
     }
@@ -385,15 +400,15 @@ fun ResumenGaneCard(totalGane: Double, formato: NumberFormat, nombre: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(20.dp)
-            .shadow(20.dp, RoundedCornerShape(32.dp), ambientColor = RojoDelisa.copy(0.4f)),
+            .shadow(20.dp, RoundedCornerShape(32.dp), ambientColor = DelisaRed.copy(0.4f)),
         shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.cardColors(containerColor = NegroPremium)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface)
     ) {
         Column(
             Modifier
                 .background(
                     Brush.verticalGradient(
-                        listOf(NegroPremium, Color(0xFF2C2C34))
+                        listOf(DelisaRed, DelisaRedDark)
                     )
                 )
                 .padding(28.dp)
@@ -422,7 +437,7 @@ fun ResumenGaneCard(totalGane: Double, formato: NumberFormat, nombre: String) {
                 }
                 
                 Surface(
-                    color = RojoDelisa,
+                    color = Color.White.copy(alpha = 0.2f),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.size(40.dp)
                 ) {
@@ -440,13 +455,13 @@ fun ResumenGaneCard(totalGane: Double, formato: NumberFormat, nombre: String) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Box(
                     Modifier
                         .size(28.dp)
-                        .background(RojoDelisa, CircleShape),
+                        .background(Color.White.copy(alpha = 0.2f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Rounded.Person, null, tint = Color.White, modifier = Modifier.size(16.dp))
@@ -467,10 +482,9 @@ fun ResumenGaneCard(totalGane: Double, formato: NumberFormat, nombre: String) {
 @Composable
 fun MiniKPI(titulo: String, valor: String, subtitulo: String, color: Color, icon: ImageVector, modifier: Modifier) {
     Card(
-        modifier = modifier.height(140.dp),
+        modifier = modifier.height(140.dp).shadow(2.dp, RoundedCornerShape(28.dp)),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(4.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(
             Modifier
@@ -500,7 +514,7 @@ fun MiniKPI(titulo: String, valor: String, subtitulo: String, color: Color, icon
             Column {
                 Text(
                     titulo.uppercase(), 
-                    color = Color.Gray, 
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, 
                     fontSize = 9.sp, 
                     fontWeight = FontWeight.Black,
                     letterSpacing = 0.5.sp
@@ -516,8 +530,8 @@ fun MiniKPI(titulo: String, valor: String, subtitulo: String, color: Color, icon
                 Spacer(Modifier.height(4.dp))
                 Text(
                     subtitulo, 
-                    color = Color.DarkGray, 
-                    fontSize = 12.sp, 
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, 
+                    fontSize = 11.sp, 
                     fontWeight = FontWeight.Bold,
                     lineHeight = 14.sp
                 )
@@ -531,10 +545,10 @@ fun DiaGaneItem(dia: DiaGane, formato: NumberFormat, sueldoBase: Double) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 6.dp),
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .shadow(1.dp, RoundedCornerShape(24.dp)),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
             Modifier
@@ -545,13 +559,13 @@ fun DiaGaneItem(dia: DiaGane, formato: NumberFormat, sueldoBase: Double) {
             Surface(
                 modifier = Modifier.size(48.dp),
                 shape = RoundedCornerShape(14.dp),
-                color = if (dia.trabajado) VerdeExito.copy(0.1f) else Color(0xFFF5F5F5)
+                color = if (dia.trabajado) DelisaGreen.copy(0.1f) else MaterialTheme.colorScheme.surfaceVariant
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         if (dia.trabajado) Icons.Rounded.EventAvailable else Icons.Rounded.EventBusy,
                         null,
-                        tint = if (dia.trabajado) VerdeExito else Color.Gray,
+                        tint = if (dia.trabajado) DelisaGreenDark else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -564,7 +578,7 @@ fun DiaGaneItem(dia: DiaGane, formato: NumberFormat, sueldoBase: Double) {
                     dia.nombre.uppercase(), 
                     fontWeight = FontWeight.Black, 
                     fontSize = 15.sp, 
-                    color = NegroPremium,
+                    color = MaterialTheme.colorScheme.onSurface,
                     letterSpacing = 0.5.sp
                 )
                 Spacer(Modifier.height(2.dp))
@@ -572,7 +586,7 @@ fun DiaGaneItem(dia: DiaGane, formato: NumberFormat, sueldoBase: Double) {
                     if (dia.trabajado) "VENTA: ${formato.format(dia.venta)}" else "SIN ACTIVIDAD",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = if (dia.trabajado) Color.DarkGray else RojoDelisa.copy(0.6f)
+                    color = if (dia.trabajado) MaterialTheme.colorScheme.onSurfaceVariant else DelisaRed.copy(0.6f)
                 )
             }
             
@@ -581,18 +595,18 @@ fun DiaGaneItem(dia: DiaGane, formato: NumberFormat, sueldoBase: Double) {
                     formato.format(if (dia.trabajado) sueldoBase + dia.comision else 0.0),
                     fontWeight = FontWeight.Black,
                     fontSize = 20.sp,
-                    color = if (dia.trabajado) NegroPremium else Color.LightGray
+                    color = if (dia.trabajado) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                 )
                 if (dia.trabajado) {
                     Surface(
-                        color = VerdeExito.copy(alpha = 0.1f),
+                        color = DelisaGreen.copy(alpha = 0.1f),
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
                             "GANANCIA DÍA", 
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             fontSize = 8.sp, 
-                            color = VerdeExito, 
+                            color = DelisaGreenDark,
                             fontWeight = FontWeight.Black
                         )
                     }

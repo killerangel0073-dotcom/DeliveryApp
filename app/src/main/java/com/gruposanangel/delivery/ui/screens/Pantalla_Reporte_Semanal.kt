@@ -23,7 +23,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -40,7 +39,7 @@ import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.RepositoryGasto
 import com.gruposanangel.delivery.data.VentaEntity
-import com.gruposanangel.delivery.data.VentaDetalleEntity
+import com.gruposanangel.delivery.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -51,14 +50,8 @@ import java.io.FileOutputStream
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.unit.Dp
-
-private val RojoDelisa = Color(0xFFE53935)
-private val NegroPremium = Color(0xFF1E1E24)
-private val GrisFondoPremium = Color(0xFFF6F8FA)
-private val VerdeExito = Color(0xFF2E7D32)
+import androidx.compose.foundation.isSystemInDarkTheme
 
 data class DiaReporte(
     val nombre: String,
@@ -102,9 +95,7 @@ class ReporteSemanalViewModel(
         val metaGuardada = prefs.getFloat("meta_semanal_$userId", 70000f).toDouble()
         _uiState.update { it.copy(metaSemanal = metaGuardada) }
 
-        // 🔥 MOTOR REACTIVO BLINDADO (UTC PARA LA LÓGICA DE DATOS)
         _fechaFiltro.filterNotNull().flatMapLatest { fechaLunesUtc ->
-            // El picker y el filtro trabajan en UTC para evitar desfases de "Martes a Lunes"
             val inicioMs = fechaLunesUtc
             val finMs = inicioMs + (7L * 24 * 60 * 60 * 1000) - 1
 
@@ -112,7 +103,6 @@ class ReporteSemanalViewModel(
 
             viewModelScope.launch {
                 try {
-                    // 🔥 SINCRONIZACIÓN DE PERFIL (Asegura tener el nombre de ruta actualizado)
                     usuarioRepository.syncUsuario(userId)
                     val user = usuarioRepository.obtenerUsuarioLocal(userId)
                     
@@ -136,7 +126,6 @@ class ReporteSemanalViewModel(
             _uiState.update { nuevoEstado }
         }.launchIn(viewModelScope)
 
-        // Inicializar con el lunes de la semana actual en base a la hora local
         cambiarSemana(System.currentTimeMillis())
     }
 
@@ -188,12 +177,11 @@ class ReporteSemanalViewModel(
         }
 
         val currentState = _uiState.value
-        val efectivoNetoReal = totalSemanaBruta - totalGastosSemana
         return currentState.copy(
             isLoading = false,
             totalVentaBrutaSemana = totalSemanaBruta,
             totalGastosSemana = totalGastosSemana,
-            totalSemanaNeta = totalSemanaBruta, // ✅ VENTA BRUTA en la tarjeta de progreso
+            totalSemanaNeta = totalSemanaBruta,
             dias = diasReporte,
             todosLosGastosSemana = gastosMapeados,
             fechaInicioSemana = fechaLunes
@@ -209,23 +197,16 @@ class ReporteSemanalViewModel(
 
     fun cambiarSemana(nuevaFecha: Long) {
         viewModelScope.launch {
-            // El DatePicker de Material3 devuelve el tiempo en UTC.
-            // Para evitar desfases al convertir a hora local, extraemos los campos de fecha
-            // y los aplicamos a un calendario local.
             val calUtc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { 
                 timeInMillis = nuevaFecha 
             }
-            
             val calLocal = Calendar.getInstance().apply {
                 set(calUtc.get(Calendar.YEAR), calUtc.get(Calendar.MONTH), calUtc.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
                 set(Calendar.MILLISECOND, 0)
             }
-            
-            // Retrocedemos hasta encontrar el lunes de esa semana en hora local
             while (calLocal.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) {
                 calLocal.add(Calendar.DAY_OF_MONTH, -1)
             }
-            
             _fechaFiltro.value = calLocal.timeInMillis
         }
     }
@@ -253,9 +234,7 @@ fun PantallaReporteSemanal(
     val uiState by viewModel.uiState.collectAsState()
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
     
-    val dfRange = remember { 
-        SimpleDateFormat("dd MMM", Locale("es", "MX"))
-    }
+    val dfRange = remember { SimpleDateFormat("dd MMM", Locale("es", "MX")) }
     
     val rangoFechas = remember(uiState.fechaInicioSemana) {
         val calEnd = Calendar.getInstance().apply { 
@@ -273,111 +252,98 @@ fun PantallaReporteSemanal(
             initialSelectedStartDateMillis = uiState.fechaInicioSemana,
             initialSelectedEndDateMillis = uiState.fechaInicioSemana + (6L * 24 * 60 * 60 * 1000)
         )
+        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
 
-        LaunchedEffect(dateRangePickerState.selectedStartDateMillis, dateRangePickerState.selectedEndDateMillis) {
-            val selection = dateRangePickerState.selectedEndDateMillis ?: dateRangePickerState.selectedStartDateMillis
-            selection?.let { millis ->
-                val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { 
-                    timeInMillis = millis 
-                }
-                while (cal.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) {
-                    cal.add(Calendar.DAY_OF_MONTH, -1)
-                }
-                val lunesMs = cal.timeInMillis
-                cal.add(Calendar.DAY_OF_MONTH, 6)
-                val domingoMs = cal.timeInMillis
-                
-                if (dateRangePickerState.selectedStartDateMillis != lunesMs || 
-                    dateRangePickerState.selectedEndDateMillis != domingoMs) {
-                    dateRangePickerState.setSelection(lunesMs, domingoMs)
-                }
-            }
-        }
-
-        AlertDialog(
-            onDismissRequest = { showDatePicker = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-            modifier = Modifier.fillMaxWidth(0.95f),
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(
-                        onClick = { showDatePicker = false }
+        DeliveryTheme(darkTheme = isDark) {
+            AlertDialog(
+                onDismissRequest = { showDatePicker = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+                modifier = Modifier.fillMaxWidth(0.95f),
+                confirmButton = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
+                        TextButton(onClick = { showDatePicker = false }) {
+                            Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Button(
+                            onClick = {
+                                dateRangePickerState.selectedStartDateMillis?.let { viewModel.cambiarSemana(it) }
+                                showDatePicker = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("ACEPTAR", fontWeight = FontWeight.Black, color = Color.White)
+                        }
                     }
-                    Spacer(Modifier.width(12.dp))
-                    Button(
-                        onClick = {
-                            dateRangePickerState.selectedStartDateMillis?.let {
-                                viewModel.cambiarSemana(it)
-                            }
-                            showDatePicker = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("ACEPTAR", fontWeight = FontWeight.Black)
-                    }
-                }
-            },
-            dismissButton = null,
-            containerColor = Color.White,
-            text = {
-                Box(modifier = Modifier.fillMaxWidth().height(450.dp)) {
-                    DateRangePicker(
-                        state = dateRangePickerState,
-                        title = { Text("Selecciona la semana", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold) },
-                        showModeToggle = false,
-                        headline = {
-                            val start = dateRangePickerState.selectedStartDateMillis
-                            val end = dateRangePickerState.selectedEndDateMillis
-                            if (start != null && end != null) {
-                                val df = SimpleDateFormat("dd MMM", Locale("es", "MX")).apply { 
-                                    timeZone = TimeZone.getTimeZone("UTC") 
+                },
+                containerColor = MaterialTheme.colorScheme.surface,
+                text = {
+                    Box(modifier = Modifier.fillMaxWidth().height(450.dp)) {
+                        DateRangePicker(
+                            state = dateRangePickerState,
+                            title = { Text("Selecciona la semana", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) },
+                            showModeToggle = false,
+                            headline = {
+                                val start = dateRangePickerState.selectedStartDateMillis
+                                val end = dateRangePickerState.selectedEndDateMillis
+                                if (start != null && end != null) {
+                                    val df = SimpleDateFormat("dd MMM", Locale.forLanguageTag("es-MX")).apply { timeZone = TimeZone.getTimeZone("UTC") }
+                                    Text(
+                                        text = "${df.format(Date(start))} - ${df.format(Date(end))}".uppercase(),
+                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                        fontWeight = FontWeight.Black,
+                                        color = DelisaRed
+                                    )
                                 }
-                                Text(
-                                    text = "${df.format(Date(start))} - ${df.format(Date(end))}".uppercase(),
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                    fontWeight = FontWeight.Black,
-                                    color = RojoDelisa
-                                )
-                            }
-                        },
-                        colors = DatePickerDefaults.colors(
-                            selectedDayContainerColor = RojoDelisa,
-                            dayInSelectionRangeContainerColor = RojoDelisa.copy(alpha = 0.1f),
-                            selectedDayContentColor = Color.White,
-                            todayContentColor = RojoDelisa,
-                            todayDateBorderColor = RojoDelisa
+                            },
+                            colors = DatePickerDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                                headlineContentColor = DelisaRed,
+                                selectedDayContainerColor = DelisaRed,
+                                selectedDayContentColor = Color.White,
+                                dayInSelectionRangeContainerColor = DelisaRed.copy(alpha = 0.15f),
+                                dayInSelectionRangeContentColor = DelisaRed,
+                                todayContentColor = DelisaRed,
+                                todayDateBorderColor = DelisaRed,
+                                navigationContentColor = MaterialTheme.colorScheme.onSurface,
+                                weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                subheadContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                yearContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                currentYearContentColor = DelisaRed,
+                                selectedYearContainerColor = DelisaRed,
+                                selectedYearContentColor = Color.White
+                            )
                         )
-                    )
+                    }
                 }
-            }
-        )
+            )
+        }
     }
 
     Scaffold(
-        containerColor = GrisFondoPremium,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { 
                     Column {
-                        Text("ESTADÍSTICAS", fontWeight = FontWeight.Black, fontSize = 18.sp, color = NegroPremium)
-                        Text("${uiState.rutaNombre.uppercase()} | $rangoFechas", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray, letterSpacing = 1.sp)
+                        Text("ESTADÍSTICAS", fontWeight = FontWeight.Black, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                        Text("${uiState.rutaNombre.uppercase()} | $rangoFechas", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = 1.sp)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Rounded.ArrowBackIosNew, null, tint = RojoDelisa)
+                        Icon(Icons.Rounded.ArrowBackIosNew, null, tint = DelisaRed)
                     }
                 },
                 actions = {
                     IconButton(onClick = { showDatePicker = true }) {
-                        Icon(Icons.Rounded.CalendarMonth, null, tint = RojoDelisa)
+                        Icon(Icons.Rounded.CalendarMonth, null, tint = DelisaRed)
                     }
                     IconButton(onClick = {
                         scope.launch {
@@ -385,15 +351,15 @@ fun PantallaReporteSemanal(
                             abrirPdfCierre(context, file)
                         }
                     }) {
-                        Icon(Icons.Rounded.PictureAsPdf, null, tint = RojoDelisa)
+                        Icon(Icons.Rounded.PictureAsPdf, null, tint = DelisaRed)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
         if (uiState.isLoading && uiState.dias.isEmpty()) {
-            Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = RojoDelisa) }
+            Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
         } else {
             LazyColumn(
                 modifier = Modifier.padding(padding).fillMaxSize(),
@@ -421,7 +387,7 @@ fun PantallaReporteSemanal(
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Black,
-                        color = Color.Gray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         letterSpacing = 1.5.sp
                     )
                 }
@@ -475,10 +441,11 @@ fun PantallaReporteSemanal(
 
         AlertDialog(
             onDismissRequest = { showMetaDialog = false },
-            title = { Text("Ajustar Meta Semanal", fontWeight = FontWeight.Black) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = { Text("Ajustar Meta Semanal", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 Column {
-                    Text("Ingresa el nuevo objetivo de venta:", fontSize = 12.sp, color = Color.Gray)
+                    Text("Ingresa el nuevo objetivo de venta:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(16.dp))
                     OutlinedTextField(
                         value = formattedDisplay,
@@ -488,17 +455,22 @@ fun PantallaReporteSemanal(
                                 rawInput = if (digits.isEmpty()) "0" else digits.toLong().toString()
                             }
                         },
-                        prefix = { Text("$ ", fontWeight = FontWeight.Black, color = RojoDelisa) },
+                        prefix = { Text("$ ", fontWeight = FontWeight.Black, color = DelisaRed) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                         textStyle = TextStyle(
                             textAlign = TextAlign.End, 
                             fontWeight = FontWeight.Black, 
                             fontSize = 24.sp,
-                            color = NegroPremium
+                            color = MaterialTheme.colorScheme.onSurface
                         ),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-                        singleLine = true
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = DelisaRed,
+                            focusedLabelColor = DelisaRed,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        )
                     )
                 }
             },
@@ -509,19 +481,18 @@ fun PantallaReporteSemanal(
                         viewModel.actualizarMeta(metaDouble)
                         showMetaDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = RojoDelisa),
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("GUARDAR META", fontWeight = FontWeight.Black)
+                    Text("GUARDAR META", fontWeight = FontWeight.Black, color = Color.White)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showMetaDialog = false }) {
-                    Text("CANCELAR", color = Color.Gray, fontWeight = FontWeight.Bold)
+                    Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 }
             },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = Color.White
+            shape = RoundedCornerShape(28.dp)
         )
     }
 }
@@ -534,41 +505,43 @@ fun BalanceCardPremium(total: Double, meta: Double, formato: NumberFormat, onEdi
         modifier = Modifier
             .fillMaxWidth()
             .padding(20.dp)
-            .shadow(15.dp, RoundedCornerShape(32.dp), ambientColor = RojoDelisa.copy(0.4f)),
+            .shadow(15.dp, RoundedCornerShape(32.dp), ambientColor = DelisaRed.copy(0.4f)),
         shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.cardColors(containerColor = NegroPremium)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface)
     ) {
-        Column(Modifier.padding(28.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text("VENTA NETA SEMANAL", color = Color.White.copy(0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                    Text(formato.format(total), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Black)
+        Box(modifier = Modifier.background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark)))) {
+            Column(Modifier.padding(28.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("VENTA NETA SEMANAL", color = Color.White.copy(0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text(formato.format(total), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Black)
+                    }
+                    Surface(
+                        onClick = onEditMeta,
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(Icons.Rounded.Edit, null, tint = Color.White, modifier = Modifier.padding(12.dp))
+                    }
                 }
-                Surface(
-                    onClick = onEditMeta,
-                    color = RojoDelisa,
-                    shape = CircleShape,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(Icons.Rounded.Edit, null, tint = Color.White, modifier = Modifier.padding(12.dp))
+                
+                Spacer(Modifier.height(24.dp))
+                
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Meta: ${formato.format(meta)}", color = Color.White.copy(0.7f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("${(progreso * 100).toInt()}%", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
                 }
+                
+                Spacer(Modifier.height(8.dp))
+                
+                LinearProgressIndicator(
+                    progress = { progreso },
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
+                    color = Color.White,
+                    trackColor = Color.White.copy(0.1f)
+                )
             }
-            
-            Spacer(Modifier.height(24.dp))
-            
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Meta: ${formato.format(meta)}", color = Color.White.copy(0.7f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Text("${(progreso * 100).toInt()}%", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
-            }
-            
-            Spacer(Modifier.height(8.dp))
-            
-            LinearProgressIndicator(
-                progress = { progreso },
-                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
-                color = RojoDelisa,
-                trackColor = Color.White.copy(0.1f)
-            )
         }
     }
 }
@@ -578,13 +551,13 @@ fun PerformanceChartPremium(dias: List<DiaReporte>, maxVenta: Double) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 20.dp)
+            .shadow(2.dp, RoundedCornerShape(28.dp)),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(2.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(20.dp)) {
-            Text("RENDIMIENTO POR DÍA", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.LightGray, letterSpacing = 1.sp)
+            Text("RENDIMIENTO POR DÍA", fontSize = 10.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = 1.sp)
             Spacer(Modifier.height(28.dp))
             
             Row(
@@ -603,7 +576,7 @@ fun PerformanceChartPremium(dias: List<DiaReporte>, maxVenta: Double) {
                                 text = label,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Black,
-                                color = RojoDelisa,
+                                color = DelisaRed,
                                 maxLines = 1
                             )
                             Spacer(Modifier.height(4.dp))
@@ -616,12 +589,12 @@ fun PerformanceChartPremium(dias: List<DiaReporte>, maxVenta: Double) {
                                 .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
                                 .background(
                                     Brush.verticalGradient(
-                                        listOf(RojoDelisa, RojoDelisa.copy(0.6f))
+                                        listOf(DelisaRed, DelisaRed.copy(0.6f))
                                     )
                                 )
                         )
                         Spacer(Modifier.height(8.dp))
-                        Text(iniciales[i], fontSize = 10.sp, fontWeight = FontWeight.Black, color = if(dia.totalVenta > 0) NegroPremium else Color.LightGray)
+                        Text(iniciales[i], fontSize = 10.sp, fontWeight = FontWeight.Black, color = if(dia.totalVenta > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -637,10 +610,10 @@ fun TransactionItemPremium(dia: DiaReporte, formato: NumberFormat, onPdfClick: (
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 4.dp),
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .shadow(if(esHoy) 4.dp else 1.dp, RoundedCornerShape(20.dp)),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(if(esHoy) 4.dp else 1.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -649,12 +622,12 @@ fun TransactionItemPremium(dia: DiaReporte, formato: NumberFormat, onPdfClick: (
             Surface(
                 modifier = Modifier.size(44.dp),
                 shape = CircleShape,
-                color = if (dia.totalVenta > 0) VerdeExito.copy(0.1f) else Color(0xFFF5F5F5)
+                color = if (dia.totalVenta > 0) DelisaGreen.copy(0.1f) else MaterialTheme.colorScheme.surfaceVariant
             ) {
                 Icon(
                     imageVector = if (dia.totalVenta > 0) Icons.AutoMirrored.Rounded.TrendingUp else Icons.Rounded.Block,
                     contentDescription = null,
-                    tint = if (dia.totalVenta > 0) VerdeExito else Color.Gray,
+                    tint = if (dia.totalVenta > 0) DelisaGreenDark else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(12.dp)
                 )
             }
@@ -663,15 +636,15 @@ fun TransactionItemPremium(dia: DiaReporte, formato: NumberFormat, onPdfClick: (
             
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(dia.nombre.uppercase(), fontWeight = FontWeight.Black, fontSize = 15.sp, color = NegroPremium)
+                    Text(dia.nombre.uppercase(), fontWeight = FontWeight.Black, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
                     if (esHoy) {
                         Spacer(Modifier.width(8.dp))
-                        Box(Modifier.background(RojoDelisa, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp)) {
+                        Box(Modifier.background(DelisaRed, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp)) {
                             Text("HOY", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black)
                         }
                     }
                 }
-                Text("${dia.clientesAtendidos} ventas | ${dia.totalPiezas} pzas", fontSize = 12.sp, color = Color.DarkGray, fontWeight = FontWeight.Bold)
+                Text("${dia.clientesAtendidos} ventas | ${dia.totalPiezas} pzas", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
             }
             
             Column(horizontalAlignment = Alignment.End) {
@@ -679,12 +652,12 @@ fun TransactionItemPremium(dia: DiaReporte, formato: NumberFormat, onPdfClick: (
                     text = formato.format(dia.totalVenta),
                     fontWeight = FontWeight.Black,
                     fontSize = 18.sp,
-                    color = if (dia.totalVenta > 0) NegroPremium else Color.LightGray
+                    color = if (dia.totalVenta > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (dia.totalVenta > 0) {
                     Surface(
                         onClick = onPdfClick,
-                        color = RojoDelisa.copy(alpha = 0.1f),
+                        color = DelisaRed.copy(alpha = 0.1f),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.padding(top = 6.dp)
                     ) {
@@ -695,7 +668,7 @@ fun TransactionItemPremium(dia: DiaReporte, formato: NumberFormat, onPdfClick: (
                             Icon(
                                 imageVector = Icons.Rounded.PictureAsPdf,
                                 contentDescription = null,
-                                tint = RojoDelisa,
+                                tint = DelisaRed,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(Modifier.width(6.dp))
@@ -703,7 +676,7 @@ fun TransactionItemPremium(dia: DiaReporte, formato: NumberFormat, onPdfClick: (
                                 text = "VER PDF",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Black,
-                                color = RojoDelisa,
+                                color = DelisaRed,
                                 letterSpacing = 0.5.sp
                             )
                         }
@@ -845,7 +818,6 @@ fun generarPdfReporteSemanal(context: Context, state: ReporteSemanalUiState, esD
         if (index % 2 != 0) canvas.drawRect(40f, y - 5f, 572f, y + 18f, android.graphics.Paint().apply { color = android.graphics.Color.rgb(252, 252, 252) })
         val tPromDia = if (dia.ventas.isNotEmpty()) dia.totalVenta / dia.ventas.size else 0.0
         
-        // 🔥 ACTUALIZACIÓN DE PINCELES POR FILA (Evita el arrastre de color del día anterior)
         pText.color = if(dia.totalVenta > 0) android.graphics.Color.BLACK else android.graphics.Color.LTGRAY
         pBold.color = if(dia.totalVenta > 0) android.graphics.Color.rgb(227, 6, 19) else android.graphics.Color.LTGRAY
         
@@ -862,7 +834,6 @@ fun generarPdfReporteSemanal(context: Context, state: ReporteSemanalUiState, esD
         canvas.drawLine(40f, y - 5f, 572f, y - 5f, android.graphics.Paint().apply { color = android.graphics.Color.rgb(240, 240, 240); strokeWidth = 0.5f })
     }
 
-// 🔥 SALTO DE PÁGINA PREVENTIVO PARA GASTOS
 if (y > 600f) {
     pdfDocument.finishPage(page)
     currentPageNumber++
@@ -873,7 +844,6 @@ if (y > 600f) {
     y += 25f
 }
 
-// 🔥 PINCELES ULTRAS-INTENSOS PARA GASTOS (RE-INICIALIZACIÓN SEGURA)
 val pGastoTitle = android.graphics.Paint().apply { 
     color = android.graphics.Color.rgb(227, 6, 19)
     textSize = 10f
@@ -890,7 +860,6 @@ val pGastoHeaderRed = android.graphics.Paint().apply {
 canvas.drawRect(40f, y, 572f, y + 1.5f, pDelisaRed); y += 15f
 canvas.drawText("DESGLOSE DETALLADO DE GASTOS SEMANALES", 45f, y, pGastoTitle); y += 15f
 
-// Header Tabla Gastos
 fun drawGastoHeaderLocal(canv: android.graphics.Canvas, curY: Float) {
     val pHeaderBg = android.graphics.Paint().apply { color = android.graphics.Color.rgb(245, 245, 245); style = android.graphics.Paint.Style.FILL }
     canv.drawRect(40f, curY, 572f, curY + 25f, pHeaderBg)
@@ -921,24 +890,19 @@ if (state.todosLosGastosSemana.isEmpty()) {
             y = 40f
             drawGastoHeaderLocal(canvas, y); y += 30f
         }
-        
         if (index % 2 != 0) {
             canvas.drawRect(40f, y - 5f, 572f, y + 18f, android.graphics.Paint().apply { color = android.graphics.Color.rgb(252, 252, 252); style = android.graphics.Paint.Style.FILL })
         }
-        
         canvas.drawText(fmtGasto.format(Date(g.fecha)).uppercase(), 50f, y + 12f, pRowBlack)
         canvas.drawText(g.categoria.uppercase(), 165f, y + 12f, pCatBold)
         val dC = if (g.descripcion.length > 30) g.descripcion.take(30) + ".." else g.descripcion
         canvas.drawText(dC, 280f, y + 12f, pRowBlack)
         canvas.drawText("-${nf.format(g.monto)}", 510f, y + 12f, pAmtRed)
-        
         y += 23f
         canvas.drawLine(40f, y - 5f, 572f, y - 5f, android.graphics.Paint().apply { color = android.graphics.Color.rgb(240, 240, 240); strokeWidth = 0.5f })
     }
 }
 
-    // --- PIE DE PÁGINA ---
-    // 🔥 Salto de página si el footer va a encimar el contenido
     if (y > 730f) {
         pdfDocument.finishPage(page)
         currentPageNumber++
@@ -951,7 +915,6 @@ if (state.todosLosGastosSemana.isEmpty()) {
     pSub.textAlign = android.graphics.Paint.Align.LEFT
     pSub.color = android.graphics.Color.GRAY
     canvas.drawText("REPORTE GENERADO EL ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(Date())}", 50f, footerYPos + 15f, pSub)
-    
     pSub.textAlign = android.graphics.Paint.Align.CENTER
     canvas.drawText("INTELIGENCIA DE VENTAS DELISA", pageWidth / 2f, footerYPos + 35f, pSub)
 

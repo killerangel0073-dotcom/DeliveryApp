@@ -94,7 +94,7 @@ fun PantallaInventarioContent(
     val totalProductos = productosAMostrar.sumOf { it.cantidad }
     val valorTotal = productosAMostrar.sumOf { it.cantidad * it.precio }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -130,12 +130,12 @@ fun PantallaInventarioContent(
                         navController.navigate("LIQUIDACION_DIRECTA?origen=$origen&destino=$destino")
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), // Negro Elegante
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onSurface), // Adaptativo
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.Analytics, null, tint = Color.White)
+                    Icon(Icons.Default.Analytics, null, tint = MaterialTheme.colorScheme.surface)
                     Spacer(Modifier.width(8.dp))
-                    Text("REALIZAR ARQUEO / LIQUIDACIÓN", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                    Text("REALIZAR ARQUEO / LIQUIDACIÓN", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = MaterialTheme.colorScheme.surface)
                 }
             }
 
@@ -150,12 +150,12 @@ fun PantallaInventarioContent(
                         navController.navigate("LIQUIDACION_DIRECTA?origen=$almacen&destino=$almacen")
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)), // Negro Elegante
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onSurface), // Adaptativo
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.Analytics, null, tint = Color.White)
+                    Icon(Icons.Default.Analytics, null, tint = MaterialTheme.colorScheme.surface)
                     Spacer(Modifier.width(8.dp))
-                    Text("REALIZAR AJUSTE DE ALMACÉN", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                    Text("REALIZAR AJUSTE DE ALMACÉN", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = MaterialTheme.colorScheme.surface)
                 }
             }
 
@@ -176,10 +176,10 @@ fun PantallaInventarioContent(
                 if (uiState.isLoading) {
                     InventarioSkeleton()
                 } else if (uiState.rutaAsignada == null && !uiState.isAdmin) {
-                    Text("Usuario sin ruta asignada", color = Color.Gray, fontWeight = FontWeight.Bold)
+                    Text("Usuario sin ruta asignada", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 } else if (productosAMostrar.isEmpty()) {
                     val msg = if (verDanado) "Sin devoluciones registradas" else "Sin stock disponible"
-                    Text(msg, color = Color.Gray, fontWeight = FontWeight.Bold)
+                    Text(msg, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(), 
@@ -229,12 +229,12 @@ fun AdminInventoryHeader(
                 .shadow(if (isPressed) 2.dp else 4.dp, RoundedCornerShape(16.dp))
                 .clickable(
                     interactionSource = interactionSource,
-                    indication = androidx.compose.material.ripple.rememberRipple(color = Color.Red.copy(alpha = 0.1f)),
+                    indication = androidx.compose.material.ripple.rememberRipple(color = com.gruposanangel.delivery.ui.theme.DelisaRed.copy(alpha = 0.1f)),
                     onClick = { expanded = true }
                 ),
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            border = if (expanded) BorderStroke(1.5.dp, Color.Red) else null
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = if (expanded) BorderStroke(1.5.dp, com.gruposanangel.delivery.ui.theme.DelisaRed) else null
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -245,7 +245,7 @@ fun AdminInventoryHeader(
                     Icon(
                         Icons.Default.Store, 
                         null, 
-                        tint = if (expanded) Color.Red else Color.Gray,
+                        tint = if (expanded) com.gruposanangel.delivery.ui.theme.DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(Modifier.width(12.dp))
@@ -254,14 +254,14 @@ fun AdminInventoryHeader(
                             "FILTRAR POR UNIDAD", 
                             fontSize = 8.sp, 
                             fontWeight = FontWeight.Bold, 
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             letterSpacing = 0.5.sp
                         )
                         Text(
                             text = seleccionado ?: "Seleccionar...", 
                             fontSize = 14.sp, 
                             fontWeight = FontWeight.ExtraBold, 
-                            color = if (esVistaGlobal) Color.DarkGray else Color.Red, 
+                            color = if (esVistaGlobal) MaterialTheme.colorScheme.onSurface else com.gruposanangel.delivery.ui.theme.DelisaRed, 
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -270,13 +270,13 @@ fun AdminInventoryHeader(
                 Icon(
                     if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, 
                     null, 
-                    tint = Color.Red,
+                    tint = com.gruposanangel.delivery.ui.theme.DelisaRed,
                     modifier = Modifier.size(20.dp)
                 )
             }
             
             MaterialTheme(
-                colorScheme = MaterialTheme.colorScheme.copy(surface = Color.White),
+                colorScheme = MaterialTheme.colorScheme.copy(surface = MaterialTheme.colorScheme.surface),
                 shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(16.dp))
             ) {
                 DropdownMenu(
@@ -284,7 +284,7 @@ fun AdminInventoryHeader(
                     onDismissRequest = { expanded = false },
                     modifier = Modifier
                         .fillMaxWidth(0.7f)
-                        .background(Color.White)
+                        .background(MaterialTheme.colorScheme.surface)
                 ) {
                     almacenes.forEach { alm ->
                         val isSel = alm == seleccionado && !esVistaGlobal
@@ -293,14 +293,14 @@ fun AdminInventoryHeader(
                                 Text(
                                     alm, 
                                     fontWeight = if (isSel) FontWeight.ExtraBold else FontWeight.Medium,
-                                    color = if (isSel) Color.Red else Color.DarkGray
+                                    color = if (isSel) com.gruposanangel.delivery.ui.theme.DelisaRed else MaterialTheme.colorScheme.onSurface
                                 ) 
                             },
                             leadingIcon = {
                                 Icon(
                                     if (alm.startsWith("Vendedor")) Icons.Default.LocalShipping else Icons.Default.Warehouse,
                                     null,
-                                    tint = if (isSel) Color.Red else Color.Gray,
+                                    tint = if (isSel) com.gruposanangel.delivery.ui.theme.DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
                             },
@@ -308,7 +308,7 @@ fun AdminInventoryHeader(
                                 onSelect(alm)
                                 expanded = false 
                             },
-                            modifier = Modifier.background(if (isSel) Color.Red.copy(alpha = 0.05f) else Color.Transparent)
+                            modifier = Modifier.background(if (isSel) com.gruposanangel.delivery.ui.theme.DelisaRed.copy(alpha = 0.05f) else Color.Transparent)
                         )
                     }
                 }
@@ -318,17 +318,16 @@ fun AdminInventoryHeader(
         // Botón Vista Global Premium
         Surface(
             onClick = onGlobal,
-            modifier = Modifier.size(52.dp),
+            modifier = Modifier.size(52.dp).shadow(4.dp, RoundedCornerShape(16.dp)),
             shape = RoundedCornerShape(16.dp),
-            color = if (esVistaGlobal) Color.Red else Color.White,
-            shadowElevation = 4.dp,
-            border = if (!esVistaGlobal) BorderStroke(1.dp, Color(0xFFEEEEEE)) else null
+            color = if (esVistaGlobal) com.gruposanangel.delivery.ui.theme.DelisaRed else MaterialTheme.colorScheme.surface,
+            border = if (!esVistaGlobal) BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)) else null
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     Icons.Default.Public, 
                     contentDescription = "Global", 
-                    tint = if (esVistaGlobal) Color.White else Color.Gray,
+                    tint = if (esVistaGlobal) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -342,7 +341,7 @@ fun TabSelectorInventario(seleccionado: Boolean, label: String, onToggle: (Boole
         modifier = Modifier
             .fillMaxWidth()
             .height(44.dp)
-            .background(Color(0xFFF1F2F6), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
             .padding(4.dp)
     ) {
         val interactionSourceLeft = remember { MutableInteractionSource() }
@@ -353,10 +352,10 @@ fun TabSelectorInventario(seleccionado: Boolean, label: String, onToggle: (Boole
                 .weight(1f)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(10.dp))
-                .background(if (!seleccionado) Color.White else Color.Transparent)
+                .background(if (!seleccionado) MaterialTheme.colorScheme.surface else Color.Transparent)
                 .clickable(
                     interactionSource = interactionSourceLeft,
-                    indication = androidx.compose.material.ripple.rememberRipple(color = Color.Red.copy(alpha = 0.1f)),
+                    indication = androidx.compose.material.ripple.rememberRipple(color = com.gruposanangel.delivery.ui.theme.DelisaRed.copy(alpha = 0.1f)),
                     onClick = { onToggle(false) }
                 ),
             contentAlignment = Alignment.Center
@@ -365,7 +364,7 @@ fun TabSelectorInventario(seleccionado: Boolean, label: String, onToggle: (Boole
                 label,
                 fontSize = 12.sp, 
                 fontWeight = if (!seleccionado) FontWeight.ExtraBold else FontWeight.Bold, 
-                color = if (!seleccionado) Color.Red else Color.Gray
+                color = if (!seleccionado) com.gruposanangel.delivery.ui.theme.DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         
@@ -374,10 +373,10 @@ fun TabSelectorInventario(seleccionado: Boolean, label: String, onToggle: (Boole
                 .weight(1f)
                 .fillMaxHeight()
                 .clip(RoundedCornerShape(10.dp))
-                .background(if (seleccionado) Color.White else Color.Transparent)
+                .background(if (seleccionado) MaterialTheme.colorScheme.surface else Color.Transparent)
                 .clickable(
                     interactionSource = interactionSourceRight,
-                    indication = androidx.compose.material.ripple.rememberRipple(color = Color.Red.copy(alpha = 0.1f)),
+                    indication = androidx.compose.material.ripple.rememberRipple(color = com.gruposanangel.delivery.ui.theme.DelisaRed.copy(alpha = 0.1f)),
                     onClick = { onToggle(true) }
                 ),
             contentAlignment = Alignment.Center
@@ -386,7 +385,7 @@ fun TabSelectorInventario(seleccionado: Boolean, label: String, onToggle: (Boole
                 "DEVOLUCIONES", 
                 fontSize = 12.sp, 
                 fontWeight = if (seleccionado) FontWeight.ExtraBold else FontWeight.Bold, 
-                color = if (seleccionado) Color.Red else Color.Gray
+                color = if (seleccionado) com.gruposanangel.delivery.ui.theme.DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -403,11 +402,10 @@ fun ResumenInventario(
     val nf = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     Card(
         shape = RoundedCornerShape(24.dp), 
-        colors = CardDefaults.cardColors(containerColor = Color.Red), 
-        elevation = CardDefaults.cardElevation(4.dp), 
-        modifier = Modifier.fillMaxWidth()
+        colors = CardDefaults.cardColors(containerColor = com.gruposanangel.delivery.ui.theme.DelisaRed), 
+        modifier = Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(24.dp))
     ) {
-        Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Red, Color(0xFFB71C1C)))).padding(16.dp)) {
+        Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(com.gruposanangel.delivery.ui.theme.DelisaRed, com.gruposanangel.delivery.ui.theme.DelisaRedDark))).padding(16.dp)) {
             Column {
                 Text(titulo.uppercase(), color = Color.White.copy(0.8f), fontSize = 10.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.height(12.dp))
@@ -430,7 +428,7 @@ fun ResumenInventario(
                         FloatingActionButton(
                             onClick = onNotificacionClick, 
                             containerColor = Color.White, 
-                            contentColor = Color.Red, 
+                            contentColor = com.gruposanangel.delivery.ui.theme.DelisaRed, 
                             shape = CircleShape, 
                             modifier = Modifier.size(46.dp),
                             elevation = FloatingActionButtonDefaults.elevation(4.dp)
@@ -439,13 +437,13 @@ fun ResumenInventario(
                         }
                         if (notificacionesCount > 0) {
                             Surface(
-                                color = Color(0xFF00AAFF),
+                                color = com.gruposanangel.delivery.ui.theme.DelisaBlue,
                                 shape = CircleShape,
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .offset(x = 2.dp, y = (-2).dp)
                                     .size(20.dp),
-                                border = BorderStroke(2.dp, Color.Red)
+                                border = BorderStroke(2.dp, com.gruposanangel.delivery.ui.theme.DelisaRed)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
@@ -485,30 +483,29 @@ fun ItemProductoInventario(producto: Plantilla_Producto, esDanado: Boolean = fal
     val nf = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     Card(
         shape = RoundedCornerShape(20.dp), 
-        colors = CardDefaults.cardColors(containerColor = Color.White), 
-        elevation = CardDefaults.cardElevation(if (esDanado) 1.dp else 2.dp), 
-        modifier = Modifier.fillMaxWidth(),
-        border = if (esDanado) BorderStroke(1.dp, Color.Red.copy(0.2f)) else null
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
+        modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(20.dp)),
+        border = if (esDanado) BorderStroke(1.dp, com.gruposanangel.delivery.ui.theme.DelisaRed.copy(alpha = 0.2f)) else null
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(contentAlignment = Alignment.BottomEnd) {
                 AsyncImage(model = producto.imagenUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = producto.nombre, contentScale = ContentScale.Crop, modifier = Modifier.size(75.dp).clip(RoundedCornerShape(16.dp)))
                 if (esDanado) {
-                    Box(Modifier.background(Color.Red, CircleShape).padding(4.dp)) {
+                    Box(Modifier.background(com.gruposanangel.delivery.ui.theme.DelisaRed, CircleShape).padding(4.dp)) {
                         Icon(Icons.Default.Warning, null, tint = Color.White, modifier = Modifier.size(12.dp))
                     }
                 }
             }
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = producto.nombre, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = if (esDanado) Color.Red else Color.DarkGray)
+                Text(text = producto.nombre, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = if (esDanado) com.gruposanangel.delivery.ui.theme.DelisaRed else MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(4.dp))
-                Text(text = "Unitario: ${nf.format(producto.precio)}", fontSize = 13.sp, color = Color.Gray)
+                Text(text = "Unitario: ${nf.format(producto.precio)}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(text = "${producto.cantidad} pzas", fontWeight = FontWeight.Black, fontSize = 15.sp, color = Color.Red)
+                Text(text = "${producto.cantidad} pzas", fontWeight = FontWeight.Black, fontSize = 15.sp, color = com.gruposanangel.delivery.ui.theme.DelisaRed)
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(text = nf.format(totalProducto), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.DarkGray)
+                Text(text = nf.format(totalProducto), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
             }
         }
     }
@@ -517,9 +514,10 @@ fun ItemProductoInventario(producto: Plantilla_Producto, esDanado: Boolean = fal
 @Composable
 fun InventarioSkeleton() {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Box(Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(24.dp)).background(Color.LightGray.copy(0.3f)))
-        Box(Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(24.dp)).background(Color.LightGray.copy(0.3f)))
-        repeat(4) { Box(Modifier.fillMaxWidth().height(85.dp).clip(RoundedCornerShape(20.dp)).background(Color.LightGray.copy(0.3f))) }
+        val skeletonColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+        Box(Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(24.dp)).background(skeletonColor))
+        Box(Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(24.dp)).background(skeletonColor))
+        repeat(4) { Box(Modifier.fillMaxWidth().height(85.dp).clip(RoundedCornerShape(20.dp)).background(skeletonColor)) }
     }
 }
 

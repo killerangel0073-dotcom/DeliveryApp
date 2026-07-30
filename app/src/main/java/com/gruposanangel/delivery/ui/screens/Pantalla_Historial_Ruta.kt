@@ -24,6 +24,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -44,10 +45,10 @@ import com.gruposanangel.delivery.R
 import coil.compose.AsyncImage
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryRuta
+import com.gruposanangel.delivery.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
-
-private val RojoDelisa = Color(0xFFE53935)
+import androidx.compose.foundation.isSystemInDarkTheme
 
 @Composable
 fun Pantalla_Historial_Ruta(navController: NavController) {
@@ -56,6 +57,8 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
     val repoRuta = RepositoryRuta(db.rutaDao(), db.clienteDao())
     val viewModel: HistorialRutaViewModel = viewModel(factory = HistorialRutaViewModelFactory(repoRuta))
     val uiState by viewModel.uiState.collectAsState()
+
+    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
 
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(19.4768, -96.5897), 12f)
@@ -71,181 +74,180 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Historial de Ruta", fontWeight = FontWeight.Bold) },
-                navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White),
-                actions = {
-                    RouteAndDatePicker(
-                        selectedRuta = uiState.selectedRuta ?: "Seleccionar",
-                        selectedDate = uiState.selectedDate,
-                        rutas = uiState.rutas.map { it.nombre },
-                        onRutaSelect = { viewModel.seleccionarRuta(it) },
-                        onDateSelect = { viewModel.seleccionarFecha(it) }
-                    )
-                }
-            )
-        }
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            GoogleMap(
-                modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                properties = MapProperties(mapType = MapType.NORMAL),
-                uiSettings = MapUiSettings(zoomControlsEnabled = false)
-            ) {
-                // 🛣️ DIBUJO DE RUTA OPTIMIZADO (Contiguous Segment Grouping)
-                if (uiState.puntos.size > 1) {
-                    val polylines = remember(uiState.puntos) {
-                        val result = mutableListOf<Pair<List<LatLng>, Color>>()
-                        var currentPoints = mutableListOf<LatLng>()
-                        var lastColor: Color? = null
-
-                        for (i in 0 until uiState.puntos.size - 1) {
-                            val p1 = uiState.puntos[i]
-                            val p2 = uiState.puntos[i+1]
-                            
-                            val segmentColor = when {
-                                p1.vel > 80.0 -> Color(0xFFFF1744)
-                                p1.vel > 50.0 -> Color(0xFFFFD600)
-                                p1.vel < 5.0 -> Color(0xFF9E9E9E)
-                                else -> Color(0xFF00E676)
-                            }
-
-                            if (lastColor == null) {
-                                lastColor = segmentColor
-                                currentPoints.add(LatLng(p1.lat, p1.lng))
-                            }
-
-                            if (segmentColor == lastColor) {
-                                currentPoints.add(LatLng(p2.lat, p2.lng))
-                            } else {
-                                result.add(currentPoints to lastColor)
-                                currentPoints = mutableListOf(LatLng(p1.lat, p1.lng), LatLng(p2.lat, p2.lng))
-                                lastColor = segmentColor
-                            }
-                        }
-                        if (currentPoints.isNotEmpty() && lastColor != null) {
-                            result.add(currentPoints to lastColor)
-                        }
-                        result
-                    }
-
-                    polylines.forEach { (points, color) ->
-                        Polyline(
-                            points = points,
-                            color = color,
-                            width = 10f,
-                            jointType = JointType.ROUND,
-                            startCap = RoundCap(),
-                            endCap = RoundCap(),
-                            geodesic = true
+    DeliveryTheme(darkTheme = isDark) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Historial de Ruta", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) },
+                    navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) } },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                    actions = {
+                        RouteAndDatePicker(
+                            selectedRuta = uiState.selectedRuta ?: "Seleccionar",
+                            selectedDate = uiState.selectedDate,
+                            rutas = uiState.rutas.map { it.nombre },
+                            onRutaSelect = { viewModel.seleccionarRuta(it) },
+                            onDateSelect = { viewModel.seleccionarFecha(it) }
                         )
                     }
-                }
+                )
+            },
+            containerColor = MaterialTheme.colorScheme.background
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                GoogleMap(
+                    modifier = Modifier.fillMaxSize(),
+                    cameraPositionState = cameraPositionState,
+                    properties = MapProperties(mapType = MapType.NORMAL),
+                    uiSettings = MapUiSettings(zoomControlsEnabled = false)
+                ) {
+                    // 🛣️ DIBUJO DE RUTA OPTIMIZADO
+                    if (uiState.puntos.size > 1) {
+                        val polylines = remember(uiState.puntos) {
+                            val result = mutableListOf<Pair<List<LatLng>, Color>>()
+                            var currentPoints = mutableListOf<LatLng>()
+                            var lastColor: Color? = null
 
-                // 🏁 MARCADORES DE INICIO Y FIN
-                if (uiState.puntos.isNotEmpty()) {
-                    val start = uiState.puntos.first()
-                    val end = uiState.puntos.last()
-                    
-                    Marker(
-                        state = rememberMarkerState(position = LatLng(start.lat, start.lng)),
-                        title = "Punto de Partida",
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
-                    )
-                    Marker(
-                        state = rememberMarkerState(position = LatLng(end.lat, end.lng)),
-                        title = "Última Posición",
-                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
-                    )
-                }
+                            for (i in 0 until uiState.puntos.size - 1) {
+                                val p1 = uiState.puntos[i]
+                                val p2 = uiState.puntos[i+1]
+                                
+                                val segmentColor = when {
+                                    p1.vel > 80.0 -> Color(0xFFFF1744)
+                                    p1.vel > 50.0 -> Color(0xFFFFD600)
+                                    p1.vel < 5.0 -> Color(0xFF9E9E9E)
+                                    else -> Color(0xFF00E676)
+                                }
 
-                // 🚨 MARCADORES DE INCIDENCIAS ESTILIZADOS
-                uiState.incidencias.forEach { incidencia ->
-                    val markerIcon = if (incidencia.tipo == "EXCESO_VELOCIDAD") {
-                         BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
-                    } else {
-                         BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE)
-                    }
-                    
-                    Marker(
-                        state = rememberMarkerState(position = incidencia.latLng),
-                        title = if (incidencia.tipo == "EXCESO_VELOCIDAD") "🚀 Exceso de Velocidad" else "⏳ Parada Prolongada",
-                        snippet = incidencia.descripcion,
-                        icon = markerIcon,
-                        alpha = 0.9f
-                    )
-                }
+                                if (lastColor == null) {
+                                    lastColor = segmentColor
+                                    currentPoints.add(LatLng(p1.lat, p1.lng))
+                                }
 
-                // 📸 MARCADORES DE VENTAS (Thumbnail del Cliente - CARGA BASADA EN PANTALLA RUTA)
-                uiState.ventas.forEach { venta ->
-                    key(venta.id, venta.fotoUrl) {
-                        val markerState = rememberMarkerState(position = venta.latLng)
-                        
-                        MarkerComposable(
-                            state = markerState,
-                            title = venta.clienteNombre,
-                            snippet = "Venta Total: $${venta.total}"
-                        ) {
-                            // 🚩 Variable de estado para detectar el cambio y forzar redibujado
-                            var isImageLoaded by remember { mutableStateOf(false) }
-
-                            Box(
-                                modifier = Modifier
-                                    .size(if (isImageLoaded) 48.dp else 47.9.dp) // Oscilamos el tamaño para que Google Maps tome una nueva foto del marcador
-                                    .shadow(8.dp, CircleShape)
-                                    .background(if (venta.fueraDeRango) Color.Red else RojoDelisa, CircleShape)
-                                    .padding(2.5.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (!venta.fotoUrl.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = venta.fotoUrl,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop,
-                                        onSuccess = { 
-                                            isImageLoaded = true // ✨ Aquí es donde ocurre la magia: al cargar, cambiamos el estado
-                                        },
-                                        // 🏥 Si la imagen falla o mientras carga, usamos al repartidor de la misma forma que Pantalla Ruta
-                                        placeholder = painterResource(R.drawable.repartidor),
-                                        error = painterResource(R.drawable.repartidor)
-                                    )
+                                if (segmentColor == lastColor) {
+                                    currentPoints.add(LatLng(p2.lat, p2.lng))
                                 } else {
-                                    Icon(
-                                        imageVector = Icons.Default.Storefront,
-                                        contentDescription = null,
-                                        tint = Color.DarkGray,
-                                        modifier = Modifier.size(24.dp)
-                                    )
+                                    result.add(currentPoints to lastColor)
+                                    currentPoints = mutableListOf(LatLng(p1.lat, p1.lng), LatLng(p2.lat, p2.lng))
+                                    lastColor = segmentColor
+                                }
+                            }
+                            if (currentPoints.isNotEmpty() && lastColor != null) {
+                                result.add(currentPoints to lastColor)
+                            }
+                            result
+                        }
+
+                        polylines.forEach { (points, color) ->
+                            Polyline(
+                                points = points,
+                                color = color,
+                                width = 10f,
+                                jointType = JointType.ROUND,
+                                startCap = RoundCap(),
+                                endCap = RoundCap(),
+                                geodesic = true
+                            )
+                        }
+                    }
+
+                    // 🏁 MARCADORES DE INICIO Y FIN
+                    if (uiState.puntos.isNotEmpty()) {
+                        val start = uiState.puntos.first()
+                        val end = uiState.puntos.last()
+                        
+                        Marker(
+                            state = rememberMarkerState(position = LatLng(start.lat, start.lng)),
+                            title = "Punto de Partida",
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+                        )
+                        Marker(
+                            state = rememberMarkerState(position = LatLng(end.lat, end.lng)),
+                            title = "Última Posición",
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
+                        )
+                    }
+
+                    // 🚨 MARCADORES DE INCIDENCIAS
+                    uiState.incidencias.forEach { incidencia ->
+                        val markerIcon = if (incidencia.tipo == "EXCESO_VELOCIDAD") {
+                             BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+                        } else {
+                             BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE)
+                        }
+                        
+                        Marker(
+                            state = rememberMarkerState(position = incidencia.latLng),
+                            title = if (incidencia.tipo == "EXCESO_VELOCIDAD") "🚀 Exceso de Velocidad" else "⏳ Parada Prolongada",
+                            snippet = incidencia.descripcion,
+                            icon = markerIcon,
+                            alpha = 0.9f
+                        )
+                    }
+
+                    // 📸 MARCADORES DE VENTAS (Thumbnail del Cliente)
+                    uiState.ventas.forEach { venta ->
+                        key(venta.id, venta.fotoUrl) {
+                            val markerState = rememberMarkerState(position = venta.latLng)
+                            
+                            MarkerComposable(
+                                state = markerState,
+                                title = venta.clienteNombre,
+                                snippet = "Venta Total: $${venta.total}"
+                            ) {
+                                var isImageLoaded by remember { mutableStateOf(false) }
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(if (isImageLoaded) 48.dp else 47.9.dp)
+                                        .shadow(8.dp, CircleShape)
+                                        .background(if (venta.fueraDeRango) DelisaRed else DelisaRedDark, CircleShape)
+                                        .padding(2.5.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surface),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (!venta.fotoUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = venta.fotoUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop,
+                                            onSuccess = { isImageLoaded = true },
+                                            placeholder = painterResource(R.drawable.repartidor),
+                                            error = painterResource(R.drawable.repartidor)
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Storefront,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            // Panel de Métricas Inferior (Tesla Style)
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-                    .zIndex(10f)
-            ) {
-                HistorialMetricsCard(
-                    uiState = uiState,
-                    onDemoClick = { viewModel.cargarDemoData() }
-                )
-            }
+                // Panel de Métricas Inferior
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(16.dp)
+                        .zIndex(10f)
+                ) {
+                    HistorialMetricsCard(
+                        uiState = uiState,
+                        onDemoClick = { viewModel.cargarDemoData() }
+                    )
+                }
 
-            if (uiState.isLoading) {
-                Box(Modifier.fillMaxSize().background(Color.White.copy(0.4f)), Alignment.Center) {
-                    CircularProgressIndicator(color = Color.Red)
+                if (uiState.isLoading) {
+                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(0.4f)), Alignment.Center) {
+                        CircularProgressIndicator(color = DelisaRed)
+                    }
                 }
             }
         }
@@ -262,7 +264,7 @@ fun RouteAndDatePicker(
 ) {
     var showRutaMenu by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
-    val sdf = SimpleDateFormat("dd MMM", Locale.getDefault())
+    val sdf = SimpleDateFormat("dd MMM", Locale.forLanguageTag("es-MX"))
 
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 8.dp)) {
         // Selector de Ruta
@@ -270,29 +272,29 @@ fun RouteAndDatePicker(
             Surface(
                 onClick = { showRutaMenu = true },
                 shape = RoundedCornerShape(12.dp),
-                color = Color.Red.copy(0.1f),
+                color = DelisaRed.copy(0.1f),
                 modifier = Modifier.height(36.dp)
             ) {
                 Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(selectedRuta.take(10), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Red)
-                    Icon(Icons.Default.ArrowDropDown, null, tint = Color.Red, modifier = Modifier.size(16.dp))
+                    Text(selectedRuta.take(10), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DelisaRed)
+                    Icon(Icons.Default.ArrowDropDown, null, tint = DelisaRed, modifier = Modifier.size(16.dp))
                 }
             }
             DropdownMenu(
                 expanded = showRutaMenu, 
                 onDismissRequest = { showRutaMenu = false },
-                modifier = Modifier.background(Color.White)
+                modifier = Modifier.background(MaterialTheme.colorScheme.surface)
             ) {
                 if (rutas.isEmpty()) {
                     DropdownMenuItem(
-                        text = { Text("Cargando rutas...", fontSize = 12.sp, color = Color.Gray) },
+                        text = { Text("Cargando rutas...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                         onClick = { },
                         enabled = false
                     )
                 } else {
                     rutas.forEach { ruta ->
                         DropdownMenuItem(
-                            text = { Text(ruta, fontWeight = FontWeight.Medium) }, 
+                            text = { Text(ruta, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface) }, 
                             onClick = { 
                                 onRutaSelect(ruta)
                                 showRutaMenu = false 
@@ -309,18 +311,17 @@ fun RouteAndDatePicker(
         Surface(
             onClick = { showDatePicker = true },
             shape = RoundedCornerShape(12.dp),
-            color = Color.DarkGray.copy(0.1f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.1f),
             modifier = Modifier.height(36.dp)
         ) {
             Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(sdf.format(selectedDate), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
-                Icon(Icons.Default.CalendarToday, null, tint = Color.DarkGray, modifier = Modifier.size(14.dp))
+                Text(sdf.format(selectedDate), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Default.CalendarToday, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
             }
         }
     }
 
     if (showDatePicker) {
-        // Convertimos la fecha seleccionada actual a UTC para que el Picker la muestre correctamente
         val calendar = Calendar.getInstance().apply { time = selectedDate }
         val utcMillisForPicker = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
             set(calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
@@ -328,41 +329,43 @@ fun RouteAndDatePicker(
         }.timeInMillis
 
         val datePickerState = rememberDatePickerState(initialSelectedDateMillis = utcMillisForPicker)
-        
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { utcMillis ->
-                        // 🔥 CORRECCIÓN DE DESFASE (UTC a Local)
-                        // El DatePicker siempre devuelve el inicio del día en UTC.
-                        val calUtc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
-                            timeInMillis = utcMillis
+        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+
+        DeliveryTheme(darkTheme = isDark) {
+            DatePickerDialog(
+                onDismissRequest = { showDatePicker = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        datePickerState.selectedDateMillis?.let { utcMillis ->
+                            val calUtc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+                            val localDate = Calendar.getInstance().apply {
+                                set(calUtc.get(Calendar.YEAR), calUtc.get(Calendar.MONTH), calUtc.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }.time
+                            onDateSelect(localDate)
                         }
-                        
-                        // Creamos una fecha local con el mismo día/mes/año
-                        val localDate = Calendar.getInstance().apply {
-                            set(calUtc.get(Calendar.YEAR), calUtc.get(Calendar.MONTH), calUtc.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
-                            set(Calendar.MILLISECOND, 0)
-                        }.time
-                        
-                        onDateSelect(localDate)
-                    }
-                    showDatePicker = false
-                }) { Text("ACEPTAR", fontWeight = FontWeight.Bold, color = Color.Red) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text("CANCELAR", color = Color.Gray) }
-            }
-        ) {
-            DatePicker(
-                state = datePickerState,
-                colors = DatePickerDefaults.colors(
-                    selectedDayContainerColor = Color.Red,
-                    todayDateBorderColor = Color.Red,
-                    todayContentColor = Color.Red
+                        showDatePicker = false
+                    }) { Text("ACEPTAR", fontWeight = FontWeight.Bold, color = DelisaRed) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDatePicker = false }) { Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+            ) {
+                DatePicker(
+                    state = datePickerState,
+                    colors = DatePickerDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        headlineContentColor = DelisaRed,
+                        selectedDayContainerColor = DelisaRed,
+                        selectedDayContentColor = Color.White,
+                        todayDateBorderColor = DelisaRed,
+                        todayContentColor = DelisaRed,
+                        navigationContentColor = MaterialTheme.colorScheme.onSurface,
+                        weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 )
-            )
+            }
         }
     }
 }
@@ -370,10 +373,9 @@ fun RouteAndDatePicker(
 @Composable
 fun HistorialMetricsCard(uiState: HistorialUiState, onDemoClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(28.dp)),
         shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(12.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -389,26 +391,26 @@ fun HistorialMetricsCard(uiState: HistorialUiState, onDemoClick: () -> Unit) {
             
             if (uiState.incidencias.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
-                HorizontalDivider(color = Color.Gray.copy(0.1f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
                 Spacer(Modifier.height(12.dp))
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Warning, null, tint = Color.Red, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Warning, null, tint = DelisaRed, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "${uiState.incidencias.size} Incidencias detectadas (Excesos y paradas)",
+                        "${uiState.incidencias.size} Incidencias detectadas",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.DarkGray
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             } else if (uiState.puntos.isEmpty()) {
                  Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                     Text(uiState.error ?: "Selecciona una ruta y fecha para ver el historial.", color = Color.Gray, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                     Text(uiState.error ?: "Selecciona una ruta y fecha para ver el historial.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, textAlign = TextAlign.Center)
                      Spacer(Modifier.height(12.dp))
                      Button(
                          onClick = onDemoClick,
-                         colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(0.1f), contentColor = Color.Red),
+                         colors = ButtonDefaults.buttonColors(containerColor = DelisaRed.copy(0.1f), contentColor = DelisaRed),
                          shape = RoundedCornerShape(12.dp),
                          modifier = Modifier.height(36.dp)
                      ) {
@@ -423,8 +425,8 @@ fun HistorialMetricsCard(uiState: HistorialUiState, onDemoClick: () -> Unit) {
 @Composable
 fun MetricTeslaItem(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, tint = Color.Gray, modifier = Modifier.size(18.dp))
-        Text(value, fontWeight = FontWeight.Black, fontSize = 18.sp, color = Color.Black)
-        Text(label, fontSize = 10.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        Text(value, fontWeight = FontWeight.Black, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
     }
 }

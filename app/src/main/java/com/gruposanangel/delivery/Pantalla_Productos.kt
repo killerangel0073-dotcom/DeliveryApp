@@ -28,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -45,6 +46,7 @@ import androidx.navigation.compose.rememberNavController
 import coil.compose.AsyncImage
 import com.google.firebase.firestore.FirebaseFirestore
 import com.gruposanangel.delivery.R
+import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.DialogoConfirmacion
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -119,7 +121,7 @@ fun ListaProductosScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFFF8F9FA)
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Box(
             Modifier
@@ -132,10 +134,10 @@ fun ListaProductosScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+                        .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)
+                        .shadow(2.dp, RoundedCornerShape(24.dp)),
                     shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(3.dp)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
                         modifier = Modifier
@@ -148,7 +150,7 @@ fun ListaProductosScreen(
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
                                 contentDescription = "Volver",
-                                tint = Color.Red
+                                tint = DelisaRed
                             )
                         }
 
@@ -159,7 +161,7 @@ fun ListaProductosScreen(
                             placeholder = {
                                 Text(
                                     "Buscar producto o marca...",
-                                    color = Color.Gray,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 14.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -169,7 +171,7 @@ fun ListaProductosScreen(
                                 Icon(
                                     imageVector = Icons.Default.Search, 
                                     contentDescription = null, 
-                                    tint = Color.LightGray,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                     modifier = Modifier.size(20.dp)
                                 )
                             },
@@ -179,18 +181,19 @@ fun ListaProductosScreen(
                                         onClick = { textoBusqueda = "" },
                                         modifier = Modifier.size(24.dp)
                                     ) {
-                                        Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                     }
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            textStyle = TextStyle(fontSize = 14.sp),
+                            textStyle = TextStyle(fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface),
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
                                 unfocusedContainerColor = Color.Transparent,
                                 disabledContainerColor = Color.Transparent,
                                 focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent
+                                unfocusedIndicatorColor = Color.Transparent,
+                                cursorColor = DelisaRed
                             ),
                             singleLine = true
                         )
@@ -200,13 +203,13 @@ fun ListaProductosScreen(
                 // LISTADO DE PRODUCTOS FILTRADOS
                 if (isLoading) {
                     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = Color.Red)
+                        CircularProgressIndicator(color = DelisaRed)
                     }
                 } else if (productosFiltrados.isEmpty()) {
                     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text(
                             text = if (textoBusqueda.isEmpty()) "No hay productos registrados" else "No se encontraron resultados",
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp
                         )
@@ -220,9 +223,8 @@ fun ListaProductosScreen(
                         items(productosFiltrados, key = { it.id }) { producto ->
                             Card(
                                 shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color.White),
-                                elevation = CardDefaults.cardElevation(2.dp),
-                                modifier = Modifier.fillMaxWidth()
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(20.dp))
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -239,6 +241,7 @@ fun ListaProductosScreen(
                                         modifier = Modifier
                                             .size(75.dp)
                                             .clip(RoundedCornerShape(14.dp))
+                                            .background(MaterialTheme.colorScheme.background)
                                     )
                                     Spacer(modifier = Modifier.width(16.dp))
                                     Column(
@@ -248,12 +251,12 @@ fun ListaProductosScreen(
                                             text = producto.nombre,
                                             fontWeight = FontWeight.Black,
                                             fontSize = 16.sp,
-                                            color = Color.Black
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
                                             text = "${producto.marca} • ${producto.categoria}",
                                             fontSize = 12.sp,
-                                            color = Color.Gray,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             fontWeight = FontWeight.Medium
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
@@ -261,28 +264,28 @@ fun ListaProductosScreen(
                                             text = formatoMoneda.format(producto.precio),
                                             fontWeight = FontWeight.Black,
                                             fontSize = 16.sp,
-                                            color = Color.Red
+                                            color = DelisaRed
                                         )
                                     }
 
-                                    // 🔹 REEMPLAZA EL BLOQUE DE ICONOS ANTIGUO POR ESTE NUEVO:
+                                    // 🔹 BLOQUE DE ICONOS ADAPTATIVO:
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp) // Un poco más de espacio entre ellos
+                                        verticalArrangement = Arrangement.spacedBy(8.dp) 
                                     ) {
                                         // 🖊️ BOTÓN EDITAR MODERNO
                                         Surface(
                                             onClick = { navController.navigate("EDITAR_PRODUCTOS/${producto.id}") },
                                             shape = CircleShape,
-                                            color = Color(0xFF00AAFF).copy(alpha = 0.1f), // Fondo azul ultra suave
-                                            modifier = Modifier.size(36.dp) // Tamaño perfecto
+                                            color = DelisaBlue.copy(alpha = 0.1f), 
+                                            modifier = Modifier.size(36.dp) 
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Icon(
-                                                    imageVector = Icons.Outlined.Edit, // 👈 Versión Outlined (ligera)
+                                                    imageVector = Icons.Outlined.Edit,
                                                     contentDescription = "Editar",
-                                                    tint = Color(0xFF00AAFF), // Azul vibrante
-                                                    modifier = Modifier.size(18.dp) // Icono estilizado
+                                                    tint = DelisaBlue,
+                                                    modifier = Modifier.size(18.dp)
                                                 )
                                             }
                                         }
@@ -291,14 +294,14 @@ fun ListaProductosScreen(
                                         Surface(
                                             onClick = { showDialogEliminar = producto.id },
                                             shape = CircleShape,
-                                            color = Color.Red.copy(alpha = 0.1f), // Fondo rojo suave corporativo
+                                            color = DelisaRed.copy(alpha = 0.1f),
                                             modifier = Modifier.size(36.dp)
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Icon(
-                                                    imageVector = Icons.Outlined.Delete, // 👈 Versión Outlined (ligera)
+                                                    imageVector = Icons.Outlined.Delete,
                                                     contentDescription = "Eliminar",
-                                                    tint = Color.Red, // Rojo Delisa
+                                                    tint = DelisaRed,
                                                     modifier = Modifier.size(18.dp)
                                                 )
                                             }
@@ -318,7 +321,8 @@ fun ListaProductosScreen(
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioMediumBouncy,
                     stiffness = Spring.StiffnessMedium
-                )
+                ),
+                label = "fabScale"
             )
 
             ExtendedFloatingActionButton(
@@ -330,7 +334,7 @@ fun ListaProductosScreen(
                         navController.navigate("CREAR_PRODUCTO")
                     }
                 },
-                containerColor = Color.Red,
+                containerColor = DelisaRed,
                 contentColor = Color.White,
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
@@ -357,7 +361,7 @@ fun ListaProductosScreen(
                 mensaje = "¿Estás seguro de que deseas eliminar este producto del sistema? Esta acción no se puede deshacer y borrará el artículo de Firebase permanentemente.",
                 textoConfirmar = "Eliminar",
                 textoCancelar = "Cancelar",
-                colorConfirmar = Color.Red,
+                colorConfirmar = DelisaRed,
                 onConfirmar = {
                     val id = showDialogEliminar!!
                     if (!isPreview) {

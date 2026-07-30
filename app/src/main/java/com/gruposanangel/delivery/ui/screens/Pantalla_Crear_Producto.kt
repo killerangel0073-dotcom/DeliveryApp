@@ -25,6 +25,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -44,7 +45,8 @@ import androidx.compose.ui.text.style.TextAlign
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.gruposanangel.delivery.R
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
+import com.gruposanangel.delivery.utilidades.DialogoSeleccionImagen
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 import java.io.File
@@ -104,22 +106,42 @@ fun CrearProductoContent(isLoading: Boolean, errorMessage: String?, imageBitmap:
     var gramosVenta by remember { mutableStateOf(TextFieldValue("")) }
     var precioCompra by remember { mutableStateOf(TextFieldValue("")) }
     var marca by rememberSaveable { mutableStateOf("") }; var categoria by rememberSaveable { mutableStateOf("") }; var subcategoria by rememberSaveable { mutableStateOf("") }; var showDialog by remember { mutableStateOf(false) }
-    Scaffold(containerColor = Color(0xFFF8F9FA)) { padding ->
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Card(Modifier.fillMaxWidth().padding(vertical = 8.dp), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(3.dp)) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .shadow(2.dp, RoundedCornerShape(24.dp)), 
+                shape = RoundedCornerShape(24.dp), 
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red) }
-                    Text("NUEVO PRODUCTO", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color.DarkGray)
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) }
+                    Text("NUEVO PRODUCTO", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
                 }
             }
             Spacer(Modifier.height(16.dp)); Box(Modifier.size(150.dp).padding(8.dp), contentAlignment = Alignment.BottomEnd) {
-                Card(Modifier.fillMaxSize().clickable { showDialog = true }, shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(4.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .shadow(4.dp, RoundedCornerShape(24.dp))
+                        .clickable { showDialog = true }, 
+                    shape = RoundedCornerShape(24.dp), 
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
                     if (imageBitmap != null) { Image(bitmap = imageBitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-                    else { Box(Modifier.fillMaxSize().background(Color.Red.copy(alpha = 0.05f)), contentAlignment = Alignment.Center) { Image(painter = painterResource(R.drawable.repartidor), contentDescription = null, modifier = Modifier.size(70.dp)) } }
+                    else { Box(Modifier.fillMaxSize().background(DelisaRed.copy(alpha = 0.05f)), contentAlignment = Alignment.Center) { Image(painter = painterResource(R.drawable.repartidor), contentDescription = null, modifier = Modifier.size(70.dp)) } }
                 }
-                Surface(shape = CircleShape, color = Color.Red, shadowElevation = 4.dp, modifier = Modifier.size(36.dp).clickable { showDialog = true }) { Icon(Icons.Outlined.PhotoCamera, null, tint = Color.White, modifier = Modifier.padding(8.dp)) }
+                Surface(shape = CircleShape, color = DelisaRed, shadowElevation = 4.dp, modifier = Modifier.size(36.dp).clickable { showDialog = true }) { Icon(Icons.Outlined.PhotoCamera, null, tint = Color.White, modifier = Modifier.padding(8.dp)) }
             }
-            Spacer(Modifier.height(24.dp)); Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp)) {
+            Spacer(Modifier.height(24.dp)); Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(2.dp, RoundedCornerShape(24.dp)), 
+                shape = RoundedCornerShape(24.dp), 
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ModernField("Nombre", nombre, Icons.Outlined.Label) { nombre = it }
                     DropdownField("Marca", marca, listOf("Delisa", "El Cazador"), Icons.Outlined.Bookmark) { marca = it; categoria = ""; subcategoria = "" }
@@ -131,7 +153,7 @@ fun CrearProductoContent(isLoading: Boolean, errorMessage: String?, imageBitmap:
                         "CONFIGURACIÓN DE COMPRA",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Black,
-                        color = Color.Red,
+                        color = DelisaRed,
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         textAlign = TextAlign.Center
                     )
@@ -165,12 +187,18 @@ fun CrearProductoContent(isLoading: Boolean, errorMessage: String?, imageBitmap:
                     ModernField("Precio", precio, Icons.Outlined.AttachMoney, keyboardType = KeyboardType.Number, prefix = "$") { if (it.text.all { c -> c.isDigit() || c == '.' }) precio = it }
                 }
             }
-            if (errorMessage != null) { Text(errorMessage, color = Color.Red, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp)) }
-            Spacer(Modifier.height(24.dp)); if (isLoading) { CircularProgressIndicator(color = Color.Red) }
-            else { Button(onClick = { onGuardar(nombre.text, marca, categoria, subcategoria, descripcion.text, precio.text.toDoubleOrNull() ?: 0.0, cantidadUnitario.text, unidadesPorDisplay.text, gramosVenta.text, precioCompra.text.toDoubleOrNull() ?: 0.0) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("CREAR PRODUCTO", fontWeight = FontWeight.ExtraBold) } }
+            if (errorMessage != null) { Text(errorMessage, color = DelisaRed, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp)) }
+            Spacer(Modifier.height(24.dp)); if (isLoading) { CircularProgressIndicator(color = DelisaRed) }
+            else { Button(onClick = { onGuardar(nombre.text, marca, categoria, subcategoria, descripcion.text, precio.text.toDoubleOrNull() ?: 0.0, cantidadUnitario.text, unidadesPorDisplay.text, gramosVenta.text, precioCompra.text.toDoubleOrNull() ?: 0.0) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)) { Text("CREAR PRODUCTO", fontWeight = FontWeight.ExtraBold, color = Color.White) } }
         }
     }
-    if (showDialog) { AlertDialog(onDismissRequest = { showDialog = false }, containerColor = Color.White, title = { Text("Imagen") }, confirmButton = { Row { TextButton(onClick = { onImageSourceSelected(true); showDialog = false }) { Text("CÁMARA", color = Color.Red) }; TextButton(onClick = { onImageSourceSelected(false); showDialog = false }) { Text("GALERÍA", color = Color.Red) } } }) }
+    if (showDialog) {
+        DialogoSeleccionImagen(
+            onDismiss = { showDialog = false },
+            onCameraSelected = { onImageSourceSelected(true); showDialog = false },
+            onGallerySelected = { onImageSourceSelected(false); showDialog = false }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -178,8 +206,31 @@ fun CrearProductoContent(isLoading: Boolean, errorMessage: String?, imageBitmap:
 fun DropdownField(label: String, value: String, options: List<String>, icon: ImageVector, enabled: Boolean = true, modifier: Modifier = Modifier, onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded && enabled, onExpandedChange = { if (enabled) expanded = !expanded }, modifier = modifier.fillMaxWidth()) {
-        OutlinedTextField(value = value, onValueChange = {}, readOnly = true, enabled = enabled, label = { Text(label) }, leadingIcon = { Icon(icon, null, tint = if (enabled) Color.Red else Color.Gray) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red))
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) { options.forEach { opt -> DropdownMenuItem(text = { Text(opt) }, onClick = { expanded = false; onSelect(opt) }) } }
+        OutlinedTextField(
+            value = value, 
+            onValueChange = {}, 
+            readOnly = true, 
+            enabled = enabled, 
+            label = { Text(label) }, 
+            leadingIcon = { Icon(icon, null, tint = if (enabled) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant) }, 
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, 
+            modifier = Modifier.menuAnchor().fillMaxWidth(), 
+            shape = RoundedCornerShape(16.dp), 
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = DelisaRed, 
+                focusedLabelColor = DelisaRed,
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
+                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            )
+        )
+        ExposedDropdownMenu(
+            expanded = expanded, 
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+        ) { options.forEach { opt -> DropdownMenuItem(text = { Text(opt, color = MaterialTheme.colorScheme.onSurface) }, onClick = { expanded = false; onSelect(opt) }) } }
     }
 }
 
@@ -189,14 +240,20 @@ fun ModernField(label: String, value: TextFieldValue, icon: ImageVector, maxLine
         value = value, 
         onValueChange = onChange, 
         label = { Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }, 
-        leadingIcon = { Icon(icon, null, tint = Color.Red) }, 
-        prefix = if (prefix != null) { { Text(prefix) } } else null,
+        leadingIcon = { Icon(icon, null, tint = DelisaRed) }, 
+        prefix = if (prefix != null) { { Text(prefix, color = MaterialTheme.colorScheme.onSurface) } } else null,
         maxLines = maxLines,
         singleLine = maxLines == 1,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType), 
         modifier = Modifier.fillMaxWidth(), 
         shape = RoundedCornerShape(16.dp), 
-        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Red, focusedLabelColor = Color.Red)
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = DelisaRed, 
+            focusedLabelColor = DelisaRed,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+        )
     )
 }
 
