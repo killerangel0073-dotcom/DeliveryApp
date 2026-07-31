@@ -75,7 +75,7 @@ fun PantallaDetalleArqueo(
     val totalDiferenciaPiezas = uiState.productos.sumOf { it.diferencia }
     val totalDiferenciaDinero = uiState.productos.sumOf { it.diferencia * it.precio }
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     DeliveryTheme(darkTheme = isDark) {
         Scaffold(

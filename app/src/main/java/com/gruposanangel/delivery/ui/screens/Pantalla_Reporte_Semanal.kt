@@ -39,6 +39,7 @@ import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.RepositoryGasto
 import com.gruposanangel.delivery.data.VentaEntity
+import com.gruposanangel.delivery.utilidades.ReporteAnaliticasPdf
 import com.gruposanangel.delivery.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -68,12 +69,17 @@ data class ReporteSemanalUiState(
     val totalVentaBrutaSemana: Double = 0.0,
     val totalGastosSemana: Double = 0.0,
     val totalSemanaNeta: Double = 0.0,
+    val totalPiezasSemana: Int = 0,
     val dias: List<DiaReporte> = emptyList(),
     val todosLosGastosSemana: List<Gasto> = emptyList(),
     val nombreVendedor: String = "",
     val rutaNombre: String = "",
     val metaSemanal: Double = 70000.0,
-    val fechaInicioSemana: Long = 0L
+    val fechaInicioSemana: Long = 0L,
+
+    // 🔥 FILTROS DE PERFIL
+    val perfilesDisponibles: List<com.gruposanangel.delivery.data.PerfilVenta> = emptyList(),
+    val perfilSeleccionado: com.gruposanangel.delivery.data.PerfilVenta? = null
 )
 
 class ReporteSemanalViewModel(
@@ -89,17 +95,20 @@ class ReporteSemanalViewModel(
     val uiState: StateFlow<ReporteSemanalUiState> = _uiState.asStateFlow()
 
     private val _fechaFiltro = MutableStateFlow<Long?>(null)
+    private val _perfilFiltro = MutableStateFlow<com.gruposanangel.delivery.data.PerfilVenta?>(null)
     private val prefs = context.getSharedPreferences("reporte_semanal_prefs", Context.MODE_PRIVATE)
 
     init {
         val metaGuardada = prefs.getFloat("meta_semanal_$userId", 70000f).toDouble()
         _uiState.update { it.copy(metaSemanal = metaGuardada) }
 
-        _fechaFiltro.filterNotNull().flatMapLatest { fechaLunesUtc ->
+        combine(_fechaFiltro.filterNotNull(), _perfilFiltro) { fechaLunesUtc, perfilActivo ->
+            fechaLunesUtc to perfilActivo
+        }.flatMapLatest { (fechaLunesUtc, perfilActivo) ->
             val inicioMs = fechaLunesUtc
             val finMs = inicioMs + (7L * 24 * 60 * 60 * 1000) - 1
 
-            _uiState.update { it.copy(isLoading = true, fechaInicioSemana = fechaLunesUtc) }
+            _uiState.update { it.copy(isLoading = true, fechaInicioSemana = fechaLunesUtc, perfilSeleccionado = perfilActivo) }
 
             viewModelScope.launch {
                 try {
@@ -109,7 +118,33 @@ class ReporteSemanalViewModel(
                     val nombre = user?.nombre ?: "Vendedor"
                     val ruta = user?.ultimaRutaNombre ?: user?.ultimoAlmacenNombre ?: "Sin Ruta"
 
-                    _uiState.update { it.copy(nombreVendedor = nombre, rutaNombre = ruta) }
+                    // Parsear perfiles disponibles
+                    val perfiles = mutableListOf<com.gruposanangel.delivery.data.PerfilVenta>()
+                    perfiles.add(com.gruposanangel.delivery.data.PerfilVenta("ALL", "CONSOLIDADO", emptyList()))
+                    try {
+                        val json = user?.perfilesVentaJson
+                        if (!json.isNullOrBlank()) {
+                            val array = org.json.JSONArray(json)
+                            for (i in 0 until array.length()) {
+                                val obj = array.getJSONObject(i)
+                                val filtrosArr = obj.getJSONArray("filtros")
+                                val filtros = (0 until filtrosArr.length()).map { j ->
+                                    val fObj = filtrosArr.getJSONObject(j)
+                                    val catsArr = fObj.optJSONArray("categorias")
+                                    val cats = if (catsArr != null) (0 until catsArr.length()).map { catsArr.getString(it) } else emptyList()
+                                    com.gruposanangel.delivery.data.FiltroPerfil(fObj.getString("marca"), cats)
+                                }
+                                perfiles.add(com.gruposanangel.delivery.data.PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros))
+                            }
+                        }
+                    } catch (e: Exception) { }
+
+                    _uiState.update { it.copy(
+                        nombreVendedor = nombre, 
+                        rutaNombre = ruta,
+                        perfilesDisponibles = perfiles,
+                        perfilSeleccionado = perfilActivo ?: perfiles.first()
+                    ) }
 
                     ventaRepository.sincronizarVentasPeriodo(userId, inicioMs, finMs)
                     gastoRepository.descargarGastosPeriodo(userId, inicioMs, finMs)
@@ -118,9 +153,11 @@ class ReporteSemanalViewModel(
 
             combine(
                 ventaRepository.obtenerVentasPorPeriodoFlow(userId, inicioMs, finMs),
-                gastoRepository.obtenerGastosPorPeriodoFlow(userId, inicioMs, finMs)
-            ) { ventas, gastos ->
-                procesarDatosFinal(inicioMs, ventas, gastos)
+                gastoRepository.obtenerGastosPorPeriodoFlow(userId, inicioMs, finMs),
+                inventarioRepository.obtenerProductosLocal() // Para recuperación de marca/cat
+            ) { ventas, gastos, catalog ->
+                val catalogMap = catalog.associate { it.productoId to (it.marca to it.categoria) }
+                procesarDatosFinal(inicioMs, ventas, gastos, perfilActivo, catalogMap)
             }
         }.onEach { nuevoEstado ->
             _uiState.update { nuevoEstado }
@@ -132,12 +169,15 @@ class ReporteSemanalViewModel(
     private suspend fun procesarDatosFinal(
         fechaLunes: Long,
         todasLasVentas: List<VentaEntity>,
-        todosLosGastosLocal: List<com.gruposanangel.delivery.data.GastoEntity>
+        todosLosGastosLocal: List<com.gruposanangel.delivery.data.GastoEntity>,
+        perfilActivo: com.gruposanangel.delivery.data.PerfilVenta?,
+        catalogMap: Map<String, Pair<String, String>>
     ): ReporteSemanalUiState {
         val nombresDias = listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
         val diasReporte = mutableListOf<DiaReporte>()
         var totalSemanaBruta = 0.0
         var totalGastosSemana = 0.0
+        var totalPiezasSemana = 0
 
         val cal = Calendar.getInstance().apply { 
             timeInMillis = fechaLunes
@@ -152,12 +192,37 @@ class ReporteSemanalViewModel(
             cal.add(Calendar.DAY_OF_MONTH, 1)
             val finDia = cal.timeInMillis - 1
 
-            val ventasDia = todasLasVentas.filter { it.fecha in inicioDia..finDia && it.estado != "CANCELADA" }
-            val totalDia = ventasDia.sumOf { it.total }
+            val ventasDiaRaw = todasLasVentas.filter { it.fecha in inicioDia..finDia && it.estado != "CANCELADA" }
+            var totalDiaFiltrado = 0.0
+            var totalPiezasDiaFiltrado = 0
             
-            var totalPiezasDia = 0
-            ventasDia.forEach { v ->
-                totalPiezasDia += ventaRepository.obtenerDetallesDeVenta(v.id).sumOf { it.cantidad }
+            val ventasDiaFiltradas = mutableListOf<VentaEntity>()
+
+            for (v in ventasDiaRaw) {
+                val detalles = ventaRepository.obtenerDetallesDeVenta(v.id)
+                val detallesFiltrados = detalles.filter { d ->
+                    if (perfilActivo == null || perfilActivo.id == "ALL") true
+                    else {
+                        val info = catalogMap[d.productoId]
+                        val realM = if (d.marca == "Delisa" && d.categoria == "General") (info?.first ?: d.marca) else d.marca
+                        val realC = if (d.marca == "Delisa" && d.categoria == "General") (info?.second ?: d.categoria) else d.categoria
+                        
+                        perfilActivo.filtros.any { f ->
+                            val mMatch = realM.trim().equals(f.marca.trim(), ignoreCase = true)
+                            val cMatch = if (f.categorias.isNotEmpty()) f.categorias.any { it.trim().equals(realC.trim(), ignoreCase = true) } else true
+                            mMatch && cMatch
+                        }
+                    }
+                }
+
+                if (detallesFiltrados.isNotEmpty() || (perfilActivo?.id == "ALL" || perfilActivo == null)) {
+                    val montoTicket = if (perfilActivo == null || perfilActivo.id == "ALL") v.total else detallesFiltrados.sumOf { it.precio * it.cantidad }
+                    val piezasTicket = detallesFiltrados.sumOf { it.cantidad }
+                    
+                    totalDiaFiltrado += montoTicket
+                    totalPiezasDiaFiltrado += piezasTicket
+                    ventasDiaFiltradas.add(v)
+                }
             }
 
             val gastosDia = gastosMapeados.filter { it.fecha in inicioDia..finDia }
@@ -166,14 +231,15 @@ class ReporteSemanalViewModel(
             diasReporte.add(DiaReporte(
                 nombre = nombresDias[i],
                 fecha = inicioDia,
-                totalVenta = totalDia,
-                totalPiezas = totalPiezasDia,
-                clientesAtendidos = ventasDia.map { it.clienteId }.distinct().size,
+                totalVenta = totalDiaFiltrado,
+                totalPiezas = totalPiezasDiaFiltrado,
+                clientesAtendidos = ventasDiaFiltradas.map { it.clienteId }.distinct().size,
                 totalGastos = totalGastosDia,
-                ventas = ventasDia
+                ventas = ventasDiaFiltradas
             ))
-            totalSemanaBruta += totalDia
+            totalSemanaBruta += totalDiaFiltrado
             totalGastosSemana += totalGastosDia
+            totalPiezasSemana += totalPiezasDiaFiltrado
         }
 
         val currentState = _uiState.value
@@ -181,11 +247,16 @@ class ReporteSemanalViewModel(
             isLoading = false,
             totalVentaBrutaSemana = totalSemanaBruta,
             totalGastosSemana = totalGastosSemana,
-            totalSemanaNeta = totalSemanaBruta,
+            totalSemanaNeta = totalSemanaBruta - totalGastosSemana,
+            totalPiezasSemana = totalPiezasSemana,
             dias = diasReporte,
             todosLosGastosSemana = gastosMapeados,
             fechaInicioSemana = fechaLunes
         )
+    }
+
+    fun seleccionarPerfil(perfil: com.gruposanangel.delivery.data.PerfilVenta) {
+        _perfilFiltro.value = perfil
     }
 
     fun actualizarMeta(nuevaMeta: Double) {
@@ -252,7 +323,7 @@ fun PantallaReporteSemanal(
             initialSelectedStartDateMillis = uiState.fechaInicioSemana,
             initialSelectedEndDateMillis = uiState.fechaInicioSemana + (6L * 24 * 60 * 60 * 1000)
         )
-        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+        val isDark = ThemeConfig.isActuallyDark
 
         DeliveryTheme(darkTheme = isDark) {
             AlertDialog(
@@ -347,7 +418,21 @@ fun PantallaReporteSemanal(
                     }
                     IconButton(onClick = {
                         scope.launch {
-                            val file = generarPdfReporteSemanal(context, uiState)
+                            val file = ReporteAnaliticasPdf.generarPDF(
+                                context = context,
+                                uiState = AnalyticsUiState(
+                                    totalVentaBruta = uiState.totalVentaBrutaSemana,
+                                    totalGastos = uiState.totalGastosSemana,
+                                    utilidadOperativa = uiState.totalSemanaNeta,
+                                    topProductos = emptyList(), // No tenemos top prods en esta vista
+                                    rankingVendedores = emptyList(),
+                                    desgloseGastos = uiState.todosLosGastosSemana.groupBy { it.categoria }
+                                        .map { ExpenseStat(it.key, it.value.sumOf { g -> g.monto }) }
+                                ),
+                                fechaInicio = Date(uiState.fechaInicioSemana),
+                                fechaFin = Date(uiState.fechaInicioSemana + (6L * 24 * 60 * 60 * 1000)),
+                                perfilNombre = uiState.perfilSeleccionado?.nombre ?: "CONSOLIDADO"
+                            )
                             abrirPdfCierre(context, file)
                         }
                     }) {
@@ -365,6 +450,14 @@ fun PantallaReporteSemanal(
                 modifier = Modifier.padding(padding).fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
+                item {
+                    PerfilVentaSelector(
+                        perfiles = uiState.perfilesDisponibles,
+                        seleccionado = uiState.perfilSeleccionado,
+                        onSeleccionar = { viewModel.seleccionarPerfil(it) }
+                    )
+                }
+
                 item {
                     BalanceCardPremium(
                         total = uiState.totalSemanaNeta,

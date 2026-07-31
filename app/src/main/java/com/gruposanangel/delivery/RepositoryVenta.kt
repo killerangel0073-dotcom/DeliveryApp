@@ -47,6 +47,10 @@ class VentaRepository(
         return ventaDao.obtenerVentasPorAlmacenPeriodoFlow(almacenId, inicio, fin)
     }
 
+    fun obtenerDetallesPorPeriodoFlow(vendedorId: String, inicio: Long, fin: Long): kotlinx.coroutines.flow.Flow<List<VentaDetalleEntity>> {
+        return ventaDao.obtenerDetallesPorPeriodoFlow(vendedorId, inicio, fin)
+    }
+
     suspend fun obtenerTicketCompleto(ticketId: String): TicketVentaCompleto? {
         val ventaLocal = ventaDao.obtenerVentaPorId(ticketId)
         val detalles = ventaDao.obtenerDetallesPorVenta(ticketId)
@@ -360,13 +364,18 @@ class VentaRepository(
             
             val detalles = prodsSnap.documents.map { pDoc ->
                 val pId = pDoc.id
+                val baseId = pId.split("_")[0]
+                val prodLocal = productoDao.getProductoById(baseId) ?: productoDao.getProductoById(pId)
+                
                 VentaDetalleEntity(
                     ventaId = localId,
-                    productoId = pId,
-                    stockId = if (almacenIdVenta.isNotEmpty()) "${pId}_$almacenIdVenta" else null,
-                    nombre = pDoc.getString("nombre") ?: "Producto",
-                    precio = (pDoc.get("precio") as? Number)?.toDouble() ?: 0.0,
-                    cantidad = (pDoc.getLong("cantidad") ?: 0L).toInt()
+                    productoId = baseId,
+                    stockId = if (almacenIdVenta.isNotEmpty()) "${baseId}_$almacenIdVenta" else pId,
+                    nombre = pDoc.getString("nombre") ?: prodLocal?.nombre ?: "Producto",
+                    precio = (pDoc.get("precio") as? Number)?.toDouble() ?: prodLocal?.precio ?: 0.0,
+                    cantidad = (pDoc.getLong("cantidad") ?: 0L).toInt(),
+                    marca = pDoc.getString("marca") ?: prodLocal?.marca ?: "Delisa",
+                    categoria = pDoc.getString("categoria") ?: prodLocal?.categoria ?: "General"
                 )
             }
             ventaDao.refrescarVentaCompleta(venta, detalles)
@@ -396,17 +405,13 @@ class VentaRepository(
         motivoVisita: String? = null
     ): String = withContext(Dispatchers.IO) {
         val idLocal = UUID.randomUUID().toString()
-        
-        // 🔥 Auditoría de Tiempo Blindada
         val horaDispositivo = System.currentTimeMillis()
         val horaRealVerificada = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
-        val alertaTiempo = Math.abs(horaRealVerificada - horaDispositivo) > 300_000 // Discrepancia > 5 min
+        val alertaTiempo = Math.abs(horaRealVerificada - horaDispositivo) > 300_000
 
-        // 🛡️ BLINDAJE FINANCIERO: Mapeo de detalles con recuperación de PRECIO MAESTRO desde DB Local
         val detalles = productos.map { p ->
             val productoDB = productoDao.getProductoById(p.id)
-            val precioReal = productoDB?.precio ?: 0.0 // 🛡️ Si no existe, precio 0 (Error de seguridad)
-            
+            val precioReal = productoDB?.precio ?: 0.0
             val idLimpio = p.id.split("_")[0] 
             
             VentaDetalleEntity(
@@ -414,12 +419,13 @@ class VentaRepository(
                 productoId = idLimpio,
                 stockId = p.id,
                 nombre = productoDB?.nombre ?: p.nombre,
-                precio = precioReal, // 🛡️ Asignación exclusiva desde DB Local (Inmutable)
-                cantidad = p.cantidad
+                precio = precioReal,
+                cantidad = p.cantidad,
+                marca = productoDB?.marca ?: p.marca,
+                categoria = productoDB?.categoria ?: p.categoria
             )
         }
 
-        // Recalcular total real basado en precios de DB
         val totalReal = detalles.sumOf { it.precio * it.cantidad }
 
         val venta = VentaEntity(
@@ -427,7 +433,7 @@ class VentaRepository(
             clienteId = clienteId,
             clienteNombre = clienteNombre,
             clienteImagenUrl = clienteImagenUrl,
-            total = totalReal, // 🛡️ Total blindado
+            total = totalReal,
             metodoPago = metodoPago,
             vendedorId = vendedorId,
             vendedorNombre = vendedorNombre,
@@ -555,6 +561,8 @@ class VentaRepository(
                                 put("precio", p.precio)
                                 put("cantidad", p.cantidad)
                                 put("imagenUrl", p.imagenUrl)
+                                put("marca", p.marca)
+                                put("categoria", p.categoria)
                             }
                         )
                     }

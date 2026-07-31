@@ -58,7 +58,7 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
     val viewModel: HistorialRutaViewModel = viewModel(factory = HistorialRutaViewModelFactory(repoRuta))
     val uiState by viewModel.uiState.collectAsState()
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(19.4768, -96.5897), 12f)
@@ -329,7 +329,7 @@ fun RouteAndDatePicker(
         }.timeInMillis
 
         val datePickerState = rememberDatePickerState(initialSelectedDateMillis = utcMillisForPicker)
-        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+        val isDark = ThemeConfig.isActuallyDark
 
         DeliveryTheme(darkTheme = isDark) {
             DatePickerDialog(

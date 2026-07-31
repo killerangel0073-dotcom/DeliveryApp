@@ -15,5 +15,9 @@ data class ProductoEntity(
     val cantidadUnitario: Long? = null,
     val unidadesPorDisplay: Long? = null,
     val gramosVenta: Long? = null,
-    val precioCompra: Double = 0.0
+    val precioCompra: Double = 0.0,
+
+    // --- CLASIFICACIÓN MULTIMARCA (Campos exactos de Firestore) ---
+    val marca: String = "Delisa",
+    val categoria: String = "General"
 )

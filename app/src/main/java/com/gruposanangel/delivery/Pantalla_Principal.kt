@@ -46,6 +46,7 @@ import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.ThemeConfig
 import com.gruposanangel.delivery.ui.screens.*
 
 // ------------------------------------------------------------
@@ -226,7 +227,7 @@ fun ModernProfileHeader(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(targetValue = if (isPressed) 0.94f else 1f, animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow), label = "")
-    val isDark = isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).shadow(8.dp, RoundedCornerShape(24.dp)),

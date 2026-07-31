@@ -29,6 +29,14 @@ data class UsuarioEntity(
     val ultimoAlmacenId: String? = null,
     val ultimoAlmacenNombre: String? = null,
 
+    // --- CONFIGURACIÓN DE COBERTURA Y MULTI-ALMACÉN ---
+    val almacenesConfig: String? = null,      // Lista separada por comas de almacenes permitidos
+    val enCobertura: Boolean = false,         // Indica si el usuario está operando bajo relevo
+    val expiracionCobertura: Long? = null,    // Timestamp de cuándo termina la asignación temporal
+
+    // --- CONFIGURACIÓN DE VENTA DINÁMICA ---
+    val perfilesVentaJson: String? = null,    // Perfiles de venta (JSON: Marca + Categorías)
+
     // --- AUDITORÍA DE LICENCIA (IA VALIDATION) ---
     val licenciaFotoUrl: String? = null,
     val licenciaVencimiento: Long? = null,

@@ -24,10 +24,53 @@ class RepositoryInventario(
 
     private val firestore = FirebaseFirestore.getInstance()
     private var listenerRegistration: ListenerRegistration? = null
+    private var catalogListener: ListenerRegistration? = null // 🔥 Nuevo listener para catálogo
     private val TAG = "InventarioRepository"
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun obtenerProductosLocal(): Flow<List<ProductoEntity>> = productoDao.getAllProductosFlow()
+
+    fun escucharCatalogoFirebase() {
+        catalogListener?.remove()
+        catalogListener = firestore.collection("producto")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                repositoryScope.launch {
+                    try {
+                        val entities = snapshot.documents.map { doc ->
+                            val id = doc.id
+                            val prev = productoDao.getProductoById(id)
+                            val remoteUrl = doc.getString("imagenUrl") ?: doc.getString("fotoUrl") ?: ""
+                            
+                            // Si la URL remota cambió respecto a lo que sabíamos (o si no tenemos foto local),
+                            // marcamos para re-descargar.
+                            // Nota: prev?.imagenUrl podría ser un path local.
+                            
+                            ProductoEntity(
+                                id = id,
+                                productoId = id,
+                                nombre = doc.getString("nombre") ?: "",
+                                precio = (doc.get("precio") as? Number)?.toDouble() ?: 0.0,
+                                cantidadDisponible = prev?.cantidadDisponible ?: 0,
+                                imagenUrl = remoteUrl, // Guardamos la URL remota temporalmente
+                                syncStatus = true,
+                                cantidadUnitario = doc.getLong("cantidadUnitario"),
+                                unidadesPorDisplay = doc.getLong("unidadesPorDisplay"),
+                                gramosVenta = doc.getLong("gramosVenta"),
+                                precioCompra = (doc.get("precioCompra") as? Number)?.toDouble() ?: 0.0,
+                                marca = doc.getString("marca") ?: "Delisa",
+                                categoria = doc.getString("categoria") ?: "General"
+                            )
+                        }
+                        productoDao.insertAll(entities)
+                        
+                        // Disparamos la descarga de fotos para los que tengan URL remota
+                        val context = com.google.firebase.FirebaseApp.getInstance().applicationContext
+                        procesarDescargaFotos(context, entities)
+                    } catch (e: Exception) { Log.e(TAG, "Error sync catálogo", e) }
+                }
+            }
+    }
 
     suspend fun descargarCatalogoProductos() {
         try {
@@ -35,7 +78,7 @@ class RepositoryInventario(
             val entities = data.map { map ->
                 val id = map["id"] as String
                 val prev = productoDao.getProductoById(id)
-                val img = (map["imagenUrl"] as? String) ?: (map["fotoUrl"] as? String) ?: prev?.imagenUrl ?: ""
+                val remoteUrl = (map["imagenUrl"] as? String) ?: (map["fotoUrl"] as? String) ?: ""
 
                 ProductoEntity(
                     id = id,
@@ -43,16 +86,54 @@ class RepositoryInventario(
                     nombre = map["nombre"] as? String ?: "",
                     precio = map["precio"] as? Double ?: 0.0,
                     cantidadDisponible = prev?.cantidadDisponible ?: 0,
-                    imagenUrl = img,
+                    imagenUrl = remoteUrl,
                     syncStatus = true,
                     cantidadUnitario = (map["cantidadUnitario"] as? Number)?.toLong(),
                     unidadesPorDisplay = (map["unidadesPorDisplay"] as? Number)?.toLong(),
                     gramosVenta = (map["gramosVenta"] as? Number)?.toLong(),
-                    precioCompra = (map["precioCompra"] as? Number)?.toDouble() ?: 0.0
+                    precioCompra = (map["precioCompra"] as? Number)?.toDouble() ?: 0.0,
+                    marca = map["marca"] as? String ?: "Delisa",
+                    categoria = map["categoria"] as? String ?: "General"
                 )
             }
             productoDao.insertAll(entities)
+
+            val context = com.google.firebase.FirebaseApp.getInstance().applicationContext
+            procesarDescargaFotos(context, entities)
         } catch (e: Exception) { Log.e(TAG, "Error catálogo", e) }
+    }
+
+    private suspend fun procesarDescargaFotos(context: android.content.Context, productos: List<ProductoEntity>) {
+        val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
+        productos.forEach { producto ->
+            val url = producto.imagenUrl
+            // Solo procesamos si la URL es remota (http o gs)
+            if (!url.isNullOrBlank() && (url.startsWith("http") || url.startsWith("gs://"))) {
+                try {
+                    val photosDir = java.io.File(context.filesDir, "productos_photos")
+                    if (!photosDir.exists()) photosDir.mkdirs()
+
+                    // Usamos una huella digital de la URL para el nombre del archivo
+                    // Esto fuerza la re-descarga si la URL cambia (aunque el ID del producto sea el mismo)
+                    val urlHash = url.hashCode().toString()
+                    val fileName = "prod_${producto.productoId}_$urlHash.jpg"
+                    val file = java.io.File(photosDir, fileName)
+                    
+                    if (!file.exists()) {
+                        // Borrar versiones viejas de este producto para no llenar el disco
+                        photosDir.listFiles { _, name -> name.startsWith("prod_${producto.productoId}_") }
+                            ?.forEach { it.delete() }
+                            
+                        storage.getReferenceFromUrl(url).getFile(file).await()
+                    }
+                    
+                    // Actualizamos Room con el PATH LOCAL
+                    productoDao.actualizarFotoPorProductoId(producto.productoId, file.absolutePath)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error bajando foto producto ${producto.id}", e)
+                }
+            }
+        }
     }
 
     suspend fun obtenerStockAlmacen(almacen: String): Map<String, Int> = firebaseDataSource.obtenerStockAlmacen(almacen)
@@ -138,9 +219,44 @@ class RepositoryInventario(
             descargarCatalogoProductos()
             var userDoc = firestore.collection("users").document(uid).get().await()
             if (!userDoc.exists()) userDoc = firestore.collection("users").whereEqualTo("uid", uid).get().await().documents.firstOrNull() ?: return
-            val rutaRef = userDoc.getDocumentReference("rutaAsignada"); val rutaDoc = rutaRef?.get()?.await()
-            val nombreAlmacen = rutaDoc?.getString("almacenNombre") ?: rutaDoc?.getDocumentReference("almacenAsignado")?.id ?: userDoc.getString("ultimoAlmacenNombre") ?: return
-            val snapshot = firestore.collection("inventarioStock").whereEqualTo("almacenNombre", nombreAlmacen).get().await()
+            
+            // --- LÓGICA MULTI-ALMACÉN (Sincronizada con RepositoryUsuario) ---
+            val listaAlmacenes = mutableListOf<String>()
+            
+            // 1. Obtener Almacén Base
+            val rutaRef = userDoc.getDocumentReference("rutaAsignada")
+            var almacenBase: String? = null
+            if (rutaRef != null) {
+                val rutaSnap = rutaRef.get().await()
+                almacenBase = rutaSnap.getString("almacenNombre") ?: rutaSnap.getDocumentReference("almacenAsignado")?.id
+            }
+            if (almacenBase == null) almacenBase = userDoc.getString("ultimoAlmacenNombre")
+
+            // 2. Revisar Cobertura Activa
+            val cobertura = userDoc.get("coberturaActiva") as? Map<String, Any>
+            val expiracion = (cobertura?.get("expiracion") as? com.google.firebase.Timestamp)?.toDate()?.time ?: 0L
+            val esCoberturaValida = cobertura != null && System.currentTimeMillis() < expiracion
+
+            if (esCoberturaValida) {
+                val almacenesCobertura = cobertura!!["almacenes"] as? List<String> ?: emptyList()
+                listaAlmacenes.addAll(almacenesCobertura)
+                
+                val modo = cobertura["modo"] as? String ?: "RELEVO"
+                if (modo == "RESPALDO" && almacenBase != null) {
+                    if (!listaAlmacenes.contains(almacenBase)) listaAlmacenes.add(almacenBase)
+                }
+            } else {
+                if (almacenBase != null) listaAlmacenes.add(almacenBase)
+                // Soporte multi-línea (Delisa + Frituras)
+                val adicionales = userDoc.get("almacenesAdicionales") as? List<String>
+                adicionales?.forEach { if (!listaAlmacenes.contains(it)) listaAlmacenes.add(it) }
+            }
+
+            if (listaAlmacenes.isEmpty()) return
+
+            val snapshot = firestore.collection("inventarioStock")
+                .whereIn("almacenNombre", listaAlmacenes)
+                .get().await()
             
             // 🔥 Extraemos los timestamps de última actualización de la nube
             val cloudTimestamps = snapshot.documents.associate { 
@@ -175,10 +291,20 @@ class RepositoryInventario(
                     cantidadUnitario = cat?.cantidadUnitario ?: doc.getLong("cantidadUnitario"),
                     unidadesPorDisplay = cat?.unidadesPorDisplay ?: doc.getLong("unidadesPorDisplay"),
                     gramosVenta = cat?.gramosVenta ?: doc.getLong("gramosVenta"),
-                    precioCompra = cat?.precioCompra ?: doc.getDouble("precioCompra") ?: 0.0
+                    precioCompra = cat?.precioCompra ?: doc.getDouble("precioCompra") ?: 0.0,
+                    marca = cat?.marca ?: doc.getString("marca") ?: "Delisa",
+                    categoria = cat?.categoria ?: doc.getString("categoria") ?: "General"
                 )
             }
-            if (entities.isNotEmpty()) productoDao.insertAll(entities)
+            if (entities.isNotEmpty()) {
+                productoDao.insertAll(entities)
+                
+                // 🔥 DESCARGA DE FOTOS PARA STOCK (Segundo Plano)
+                CoroutineScope(Dispatchers.IO).launch {
+                    val context = com.google.firebase.FirebaseApp.getInstance().applicationContext
+                    procesarDescargaFotos(context, entities)
+                }
+            }
         } catch (e: Exception) { Log.e(TAG, "Error descargar stock", e) }
     }
 
@@ -191,11 +317,40 @@ class RepositoryInventario(
                     userDoc = firestore.collection("users").whereEqualTo("uid", uid).get().await().documents.firstOrNull() ?: return@launch
                 }
                 
-                val nombreAlmacen = userDoc.getString("ultimoAlmacenNombre") ?: return@launch
-                Log.d(TAG, "Escuchando inventario para almacén: $nombreAlmacen")
+                // --- DETERMINAR LISTA DE ALMACENES PARA ESCUCHA ACTIVA ---
+                val listaAlmacenes = mutableListOf<String>()
+                
+                val rutaRef = userDoc.getDocumentReference("rutaAsignada")
+                var almacenBase: String? = null
+                if (rutaRef != null) {
+                    val rutaSnap = rutaRef.get().await()
+                    almacenBase = rutaSnap.getString("almacenNombre") ?: rutaSnap.getDocumentReference("almacenAsignado")?.id
+                }
+                if (almacenBase == null) almacenBase = userDoc.getString("ultimoAlmacenNombre")
+
+                val cobertura = userDoc.get("coberturaActiva") as? Map<String, Any>
+                val expiracion = (cobertura?.get("expiracion") as? com.google.firebase.Timestamp)?.toDate()?.time ?: 0L
+                val esCoberturaValida = cobertura != null && System.currentTimeMillis() < expiracion
+
+                if (esCoberturaValida) {
+                    val almacenesCobertura = cobertura!!["almacenes"] as? List<String> ?: emptyList()
+                    listaAlmacenes.addAll(almacenesCobertura)
+                    if ((cobertura["modo"] as? String) == "RESPALDO" && almacenBase != null) {
+                        if (!listaAlmacenes.contains(almacenBase)) listaAlmacenes.add(almacenBase)
+                    }
+                } else {
+                    if (almacenBase != null) listaAlmacenes.add(almacenBase)
+                    val adicionales = userDoc.get("almacenesAdicionales") as? List<String>
+                    adicionales?.forEach { if (!listaAlmacenes.contains(it)) listaAlmacenes.add(it) }
+                }
+
+                if (listaAlmacenes.isEmpty()) return@launch
+                
+                Log.d(TAG, "Escuchando inventario para almacenes: $listaAlmacenes")
+                escucharCatalogoFirebase() // 🔥 Escuchar cambios en fotos/precios del catálogo
 
                 listenerRegistration = firestore.collection("inventarioStock")
-                    .whereEqualTo("almacenNombre", nombreAlmacen)
+                    .whereIn("almacenNombre", listaAlmacenes)
                     .addSnapshotListener { snap, error ->
                         if (error != null || snap == null) return@addSnapshotListener
 
@@ -231,12 +386,18 @@ class RepositoryInventario(
                                         cantidadUnitario = cat?.cantidadUnitario ?: prev?.cantidadUnitario ?: d.getLong("cantidadUnitario"),
                                         unidadesPorDisplay = cat?.unidadesPorDisplay ?: prev?.unidadesPorDisplay ?: d.getLong("unidadesPorDisplay"),
                                         gramosVenta = cat?.gramosVenta ?: prev?.gramosVenta ?: d.getLong("gramosVenta"),
-                                        precioCompra = cat?.precioCompra ?: prev?.precioCompra ?: d.getDouble("precioCompra") ?: 0.0
+                                        precioCompra = cat?.precioCompra ?: prev?.precioCompra ?: d.getDouble("precioCompra") ?: 0.0,
+                                        marca = cat?.marca ?: prev?.marca ?: d.getString("marca") ?: "Delisa",
+                                        categoria = cat?.categoria ?: prev?.categoria ?: d.getString("categoria") ?: "General"
                                     )
                                 }
                                 
                                 if (entities.isNotEmpty()) {
                                     productoDao.insertAll(entities)
+                                    
+                                    // 🔥 DESCARGA DE FOTOS REACTIVA (Segundo Plano)
+                                    val context = com.google.firebase.FirebaseApp.getInstance().applicationContext
+                                    procesarDescargaFotos(context, entities)
                                 }
                             } catch (e: Exception) { Log.e(TAG, "Error sync reactivo", e) }
                         }
@@ -288,7 +449,10 @@ class RepositoryInventario(
 
     suspend fun obtenerStockGlobal(): Map<String, Int> = firebaseDataSource.obtenerStockGlobal()
 
-    fun stopEscuchaFirebase() { listenerRegistration?.remove(); listenerRegistration = null }
+    fun stopEscuchaFirebase() { 
+        listenerRegistration?.remove(); listenerRegistration = null 
+        catalogListener?.remove(); catalogListener = null
+    }
 
     // --- LÓGICA DE AJUSTES Y ARQUEO (CORREGIDA: SIEMPRE ACTUALIZAR ALMACÉN DEL VENDEDOR) ---
 

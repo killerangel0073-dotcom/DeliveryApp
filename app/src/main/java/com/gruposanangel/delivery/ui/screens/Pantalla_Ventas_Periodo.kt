@@ -306,7 +306,7 @@ fun PantallaVentaPeriodo(
         )
     }
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     DeliveryTheme(darkTheme = isDark) {
         PantallaVentaPeriodoContent(
@@ -328,7 +328,7 @@ fun DatePickerDialogMaterial3(
     onDismiss: () -> Unit
 ) {
     val pickerState = rememberDatePickerState(initialSelectedDateMillis = initialDate.time)
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     DeliveryTheme(darkTheme = isDark) {
         DatePickerDialog(

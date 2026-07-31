@@ -124,9 +124,27 @@ class RepositoryCliente(private val dao: ClienteDao) {
             if (clientesParaGuardar.isNotEmpty()) {
                 dao.insertAll(clientesParaGuardar)
                 Log.d(TAG, "Sync exitosa: ${clientesParaGuardar.size} clientes guardados.")
+                
+                // 🔥 DESCARGA DE FOTOS EN SEGUNDO PLANO (Quirúrgico)
+                CoroutineScope(Dispatchers.IO).launch {
+                    procesarDescargaFotos(context, clientesParaGuardar)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error en descarga de clientes", e)
+        }
+    }
+
+    private suspend fun procesarDescargaFotos(context: Context, clientes: List<ClienteEntity>) {
+        clientes.forEach { cliente ->
+            val url = cliente.fotografiaUrl
+            if (!url.isNullOrBlank() && (url.startsWith("http") || url.startsWith("gs://"))) {
+                val localPath = descargarFotoCliente(url, cliente.id, context)
+                if (localPath != null) {
+                    dao.actualizarFotoLocal(cliente.id, localPath)
+                    Log.d(TAG, "Foto actualizada a local para cliente: ${cliente.id}")
+                }
+            }
         }
     }
 
@@ -290,6 +308,10 @@ class RepositoryCliente(private val dao: ClienteDao) {
 
                             if (local == null || (local.syncStatus && remoteLastModified > local.lastModified)) {
                                 dao.insert(remoteEntity)
+                                // 🔥 Si es nuevo o cambió, descargar foto
+                                if (!remoteEntity.fotografiaUrl.isNullOrBlank()) {
+                                    procesarDescargaFotos(context, listOf(remoteEntity))
+                                }
                             }
                         }
                     }

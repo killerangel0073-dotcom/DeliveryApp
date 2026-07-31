@@ -105,7 +105,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     val ventaId = extras?.getString("ventaId")
                     if (tipo != null || ventaId != null || (i?.action != null && i.action != Intent.ACTION_MAIN)) {
                         navAction = when {
-                            tipo == "VENTA_NUEVA" || ventaId != null -> "OPEN_VENTA_DETALLE"
+                            tipo == "JORNADA" -> "OPEN_DASHBOARD_ADMIN"
+                            tipo == "VENTA_NUEVA" || (!ventaId.isNullOrEmpty() && ventaId != "0") -> "OPEN_VENTA_DETALLE"
                             tipo == "CARGA_NUEVA" -> "OPEN_NOTIFICACIONES"
                             else -> i?.action
                         }
@@ -148,6 +149,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                         statusListener = FirebaseFirestore.getInstance().collection("users").document(uid)
                             .addSnapshotListener { snapshot, _ ->
                                 if (snapshot != null && snapshot.exists()) {
+                                    // 1. Sincronización proactiva del perfil en Room
+                                    lifecycleScope.launch(Dispatchers.IO) {
+                                        try { repositoryUsuario.syncUsuario(uid) } catch (_: Exception) {}
+                                    }
+
+                                    // 2. Lógica de seguridad y bloqueos
                                     val activo = snapshot.getBoolean("activo") ?: true
                                     val status = snapshot.getString("status") ?: "ACTIVO"
                                     val estadoLicencia = snapshot.getString("licenciaEstado") ?: "VIGENTE"

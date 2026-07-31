@@ -1,7 +1,13 @@
 package com.gruposanangel.delivery.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,6 +26,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
@@ -97,43 +104,153 @@ fun PerfilDeUsuarioContent(user: UsuarioEntity?, onBack: () -> Unit) {
                     InfoFieldCard("Email", user?.email ?: "---", Icons.Default.Email)
 
                     Text("Personalización", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
-                    Card(
+                    
+                    ThemeSelectorCard(
+                        currentSelection = ThemeConfig.isDarkTheme.value,
+                        onSelectionChange = { ThemeConfig.saveTheme(context, it) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ThemeSelectorCard(
+    currentSelection: Boolean?,
+    onSelectionChange: (Boolean?) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(24.dp)),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Red.copy(alpha = 0.1f),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.Palette, null, tint = Color.Red, modifier = Modifier.padding(8.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "APARIENCIA VISUAL",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    letterSpacing = 1.sp
+                )
+            }
+            
+            Spacer(Modifier.height(16.dp))
+
+            // Selector de 3 estados: [ Claro | Auto | Oscuro ]
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .background(MaterialTheme.colorScheme.background, CircleShape)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), CircleShape)
+                    .padding(4.dp)
+            ) {
+                val density = androidx.compose.ui.platform.LocalDensity.current
+                var width by remember { mutableStateOf(0.dp) }
+                
+                Box(Modifier.fillMaxSize().onGloballyPositioned { width = with(density) { it.size.width.toDp() } }) {
+                    // Fondo animado que se desliza
+                    val segmentWidth = width / 3
+                    val targetOffset = when (currentSelection) {
+                        false -> 0.dp
+                        null -> segmentWidth
+                        true -> segmentWidth * 2
+                    }
+                    val animatedOffset by animateDpAsState(targetValue = targetOffset, animationSpec = spring(stiffness = 500f), label = "")
+
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .shadow(2.dp, RoundedCornerShape(16.dp)),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                    ) {
-                        Column {
-                            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Surface(shape = RoundedCornerShape(12.dp), color = Color.Red.copy(alpha = 0.08f), modifier = Modifier.size(40.dp)) { Icon(if (isDarkState) Icons.Default.DarkMode else Icons.Default.LightMode, null, tint = Color.Red, modifier = Modifier.padding(8.dp)) }
-                                Spacer(Modifier.width(16.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("MODO OSCURO", fontSize = 10.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = 0.5.sp)
-                                    Text(if (isDarkState) "Activado" else "Desactivado", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                }
-                                Switch(
-                                    checked = isDarkState,
-                                    onCheckedChange = { ThemeConfig.saveTheme(context, it) },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color.Red)
-                                )
-                            }
-                            
-                            if (isManual) {
-                                HorizontalDivider(Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                                TextButton(
-                                    onClick = { ThemeConfig.saveTheme(context, null) },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.BrightnessAuto, null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("VOLVER A MODO AUTOMÁTICO (SENSOR)")
-                                }
-                            }
-                        }
+                            .offset(x = animatedOffset)
+                            .width(segmentWidth)
+                            .fillMaxHeight()
+                            .background(Color.Red, CircleShape)
+                            .shadow(4.dp, CircleShape)
+                    )
+
+                    // Iconos y Etiquetas
+                    Row(Modifier.fillMaxSize()) {
+                        ThemeOption(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Default.LightMode,
+                            label = "CLARO",
+                            isSelected = currentSelection == false,
+                            onClick = { onSelectionChange(false) }
+                        )
+                        ThemeOption(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Default.BrightnessAuto,
+                            label = "AUTO",
+                            isSelected = currentSelection == null,
+                            onClick = { onSelectionChange(null) }
+                        )
+                        ThemeOption(
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Default.DarkMode,
+                            label = "OSCURO",
+                            isSelected = currentSelection == true,
+                            onClick = { onSelectionChange(true) }
+                        )
                     }
                 }
             }
+            
+            val description = when(currentSelection) {
+                false -> "Modo claro forzado."
+                true -> "Modo oscuro forzado."
+                null -> "Cambia según el sensor de luz."
+            }
+            Text(
+                text = description,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp, start = 8.dp),
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+fun ThemeOption(
+    modifier: Modifier,
+    icon: ImageVector,
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val contentColor by animateColorAsState(
+        targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+        label = ""
+    )
+
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, modifier = Modifier.size(16.dp), tint = contentColor)
+            Spacer(Modifier.width(4.dp))
+            Text(label, fontSize = 9.sp, fontWeight = FontWeight.Black, color = contentColor)
         }
     }
 }

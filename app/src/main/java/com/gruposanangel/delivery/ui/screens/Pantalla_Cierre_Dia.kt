@@ -92,7 +92,7 @@ fun PantallaCierreDia(
     val diferencia = totalContado - efectivoNetoAEntregar
 
     var showConfirmLiquidation by remember { mutableStateOf(false) }
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     DeliveryTheme(darkTheme = isDark) {
         Scaffold(

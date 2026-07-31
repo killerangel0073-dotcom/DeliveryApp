@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.ui.text.style.TextAlign
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.gruposanangel.delivery.R
@@ -59,18 +60,6 @@ import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.io.FileOutputStream
 import java.util.*
-
-private val categoriasPorMarca = mapOf(
-    "Delisa" to listOf("Botanas", "Dulces"),
-    "El Cazador" to listOf("Carnes frías", "Chiles secos")
-)
-
-private val subcategoriasPorCategoria = mapOf(
-    "Carnes frías" to listOf("Jamón", "Salchicha"),
-    "Chiles secos" to listOf("Guajillo", "Pasilla"),
-    "Botanas" to listOf("Cacahuates", "Semillas", "Mix"),
-    "Dulces" to listOf("Caramelos", "Chocolates", "Gomitas", "Enchilados")
-)
 
 // 🔹 MODELO UNIFICADO EXCLUSIVO PARA ESTA PANTALLA
 data class ProductoEditarModelo(
@@ -200,6 +189,8 @@ fun EditarProductoScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isPreview = LocalInspectionMode.current
+    val configViewModel: ProductoFormViewModel = viewModel()
+    val configState by configViewModel.uiState.collectAsState()
 
     // Campos de texto dinámicos vinculados
     var nombre by remember { mutableStateOf(TextFieldValue(previewProducto?.nombre ?: "")) }
@@ -445,7 +436,7 @@ fun EditarProductoScreen(
                     DropdownFieldEditar(
                         label = "Marca",
                         value = marca.ifEmpty { "Selecciona marca" },
-                        options = listOf("Delisa", "El Cazador"),
+                        options = configState.marcas.ifEmpty { listOf("Delisa", "El Cazador") },
                         icon = Icons.Outlined.Bookmark
                     ) {
                         marca = it
@@ -453,11 +444,11 @@ fun EditarProductoScreen(
                         subcategoria = ""
                     }
 
-                    val categoriasSafe = categoriasPorMarca[marca].orEmpty()
+                    val categoriasSafe = configState.categoriasPorMarca[marca].orEmpty()
                     DropdownFieldEditar(
                         label = "Categoría",
                         value = if (categoria.isEmpty()) "Selecciona categoría" else categoria,
-                        options = if (categoriasSafe.isEmpty()) listOf("Sin categorías") else java.util.ArrayList(categoriasSafe),
+                        options = if (categoriasSafe.isEmpty()) listOf("Sin categorías") else categoriasSafe,
                         enabled = marca.isNotEmpty(),
                         icon = Icons.Outlined.Category
                     ) {
@@ -465,12 +456,11 @@ fun EditarProductoScreen(
                         subcategoria = ""
                     }
 
-                    val subcategoriasSafe = subcategoriasPorCategoria[categoria].orEmpty()
                     DropdownFieldEditar(
                         label = "Subcategoría",
                         value = if (subcategoria.isEmpty()) "Selecciona subcategoría" else subcategoria,
-                        options = if (subcategoriasSafe.isEmpty()) listOf("Sin subcategoría") else java.util.ArrayList(subcategoriasSafe),
-                        enabled = categoria.isNotEmpty(),
+                        options = listOf("Sin subcategoría"),
+                        enabled = false,
                         icon = Icons.Outlined.Layers
                     ) {
                         subcategoria = it

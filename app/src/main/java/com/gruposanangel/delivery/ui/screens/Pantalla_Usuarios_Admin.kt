@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -58,6 +59,8 @@ import coil.compose.AsyncImage
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.RutaEntity
 import com.gruposanangel.delivery.data.UsuarioEntity
+import com.gruposanangel.delivery.data.PerfilVenta
+import com.gruposanangel.delivery.data.FiltroPerfil
 import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.DialogoSeleccionImagen
 import kotlinx.coroutines.launch
@@ -98,7 +101,10 @@ fun Pantalla_Usuarios_Admin(navController: NavController) {
         onRutaClear = { vm.proponerRuta(null) },
         onConfirmRuta = { vm.confirmarPropuestaRuta() },
         onCancelRuta = { vm.cancelarConfirmacionRuta() },
-        onClearNombreIA = { vm.clearNombreExtraido() }
+        onClearNombreIA = { vm.clearNombreExtraido() },
+        onAgregarPerfil = { vm.agregarPerfil(it) },
+        onEliminarPerfil = { vm.eliminarPerfil(it) },
+        onActualizarPerfil = { vm.actualizarPerfil(it) }
     )
 
     // Mostrar mensajes de éxito o error
@@ -126,7 +132,10 @@ fun PantallaUsuariosAdminContent(
     onRutaClear: () -> Unit,
     onConfirmRuta: () -> Unit,
     onCancelRuta: () -> Unit,
-    onClearNombreIA: () -> Unit
+    onClearNombreIA: () -> Unit,
+    onAgregarPerfil: (PerfilVenta) -> Unit,
+    onEliminarPerfil: (String) -> Unit,
+    onActualizarPerfil: (PerfilVenta) -> Unit
 ) {
     val context = LocalContext.current
     var nombre by remember(uiState.usuarioSeleccionado) { mutableStateOf(uiState.usuarioSeleccionado?.nombre ?: "") }
@@ -144,6 +153,10 @@ fun PantallaUsuariosAdminContent(
     var showLicensePhotoDialog by remember { mutableStateOf(false) }
     var showINEPhotoDialog by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
+    
+    // 🔥 ESTADOS PARA PERFILES DE VENTA
+    var showPerfilDialog by remember { mutableStateOf(false) }
+    var perfilAEditar by remember { mutableStateOf<PerfilVenta?>(null) }
 
     // 🎭 Animación para la Foto de Perfil Principal
     val profileInteractionSource = remember { MutableInteractionSource() }
@@ -510,6 +523,64 @@ fun PantallaUsuariosAdminContent(
 
                     Spacer(Modifier.height(16.dp))
 
+                    // 🔥 SECCIÓN: PERFILES DE VENTA (Configuración Multimarca)
+                    if (!uiState.isNewUserMode) {
+                        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                            Text("PERFILES DE VENTA", fontWeight = FontWeight.Black, fontSize = 12.sp, color = DelisaRed)
+                            TextButton(onClick = { perfilAEditar = null; showPerfilDialog = true }) {
+                                Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("AGREGAR", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                        
+                        if (uiState.perfilesVentaEdit.isEmpty()) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    "Sin perfiles. Se venderá todo Delisa por defecto.",
+                                    modifier = Modifier.padding(16.dp),
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+
+                        uiState.perfilesVentaEdit.forEach { perfil ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                            ) {
+                                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(perfil.nombre, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        perfil.filtros.forEach { f ->
+                                            Text(
+                                                "${f.marca}: ${if (f.categorias.isEmpty()) "Toda la marca" else f.categorias.joinToString(", ")}",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    IconButton(onClick = { perfilAEditar = perfil; showPerfilDialog = true }) {
+                                        Icon(Icons.Default.Edit, null, tint = DelisaGreen, modifier = Modifier.size(20.dp))
+                                    }
+                                    IconButton(onClick = { onEliminarPerfil(perfil.id) }) {
+                                        Icon(Icons.Default.Delete, null, tint = DelisaRed, modifier = Modifier.size(20.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) { 
                         Text("Acceso a la App (Suspendido/Activo)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         Switch(
@@ -761,7 +832,7 @@ fun PantallaUsuariosAdminContent(
                     "Confirmar Cambio de Puesto", 
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.fillMaxWidth(),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             },
@@ -773,7 +844,7 @@ fun PantallaUsuariosAdminContent(
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "¿Estás seguro de cambiar el puesto de ${uiState.usuarioSeleccionado?.nombre} a '$pendingPuestoChange'?",
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     
@@ -789,7 +860,7 @@ fun PantallaUsuariosAdminContent(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(12.dp),
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
@@ -813,6 +884,149 @@ fun PantallaUsuariosAdminContent(
                 }
             }
         )
+    }
+
+    if (showPerfilDialog) {
+        DialogPerfilVenta(
+            perfilInicial = perfilAEditar,
+            marcas = uiState.marcasDisponibles,
+            categoriasMap = uiState.categoriasDisponibles,
+            onDismiss = { showPerfilDialog = false },
+            onSave = {
+                if (perfilAEditar == null) onAgregarPerfil(it)
+                else onActualizarPerfil(it)
+                showPerfilDialog = false
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DialogPerfilVenta(
+    perfilInicial: PerfilVenta?,
+    marcas: List<String>,
+    categoriasMap: Map<String, List<String>>,
+    onDismiss: () -> Unit,
+    onSave: (PerfilVenta) -> Unit
+) {
+    var nombre by remember { mutableStateOf(perfilInicial?.nombre ?: "") }
+    var marcaSeleccionada by remember { mutableStateOf(perfilInicial?.filtros?.firstOrNull()?.marca ?: marcas.firstOrNull() ?: "Delisa") }
+    val categoriasIniciales = perfilInicial?.filtros?.firstOrNull()?.categorias ?: emptyList()
+    val categoriasSeleccionadas = remember { mutableStateListOf<String>().apply { addAll(categoriasIniciales) } }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text(if (perfilInicial == null) "Nuevo Perfil" else "Editar Perfil", fontWeight = FontWeight.Black) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = nombre,
+                    onValueChange = { nombre = it },
+                    label = { Text("Nombre (Ej: Botanas Delisa)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Text("Marca Principal", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DelisaRed)
+                
+                var expandedMarcas by remember { mutableStateOf(false) }
+                Box {
+                    OutlinedCard(onClick = { expandedMarcas = true }, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(12.dp).fillMaxWidth(), Arrangement.SpaceBetween) {
+                            Text(marcaSeleccionada)
+                            Icon(Icons.Default.ArrowDropDown, null)
+                        }
+                    }
+                    DropdownMenu(expanded = expandedMarcas, onDismissRequest = { expandedMarcas = false }) {
+                        marcas.forEach { m ->
+                            DropdownMenuItem(text = { Text(m) }, onClick = { marcaSeleccionada = m; expandedMarcas = false; categoriasSeleccionadas.clear() })
+                        }
+                    }
+                }
+
+                Text("Categorías (Si no eliges, entra toda la marca)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DelisaRed)
+                
+                val categoriasDisponibles = categoriasMap[marcaSeleccionada] ?: emptyList()
+                
+                if (categoriasDisponibles.isEmpty()) {
+                    Text("No hay categorías registradas para esta marca.", fontSize = 11.sp, color = Color.Gray)
+                } else {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        mainAxisSpacing = 8.dp,
+                        crossAxisSpacing = 4.dp
+                    ) {
+                        categoriasDisponibles.forEach { cat ->
+                            val isSelected = categoriasSeleccionadas.contains(cat)
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { if (isSelected) categoriasSeleccionadas.remove(cat) else categoriasSeleccionadas.add(cat) },
+                                label = { Text(cat, fontSize = 10.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = DelisaRed,
+                                    selectedLabelColor = Color.White
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (nombre.isNotBlank()) {
+                        val filtro = FiltroPerfil(marcaSeleccionada, categoriasSeleccionadas.toList())
+                        onSave(PerfilVenta(perfilInicial?.id ?: "", nombre, listOf(filtro)))
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
+            ) { Text("GUARDAR") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCELAR") } }
+    )
+}
+
+@Composable
+fun FlowRow(
+    modifier: Modifier = Modifier,
+    mainAxisSpacing: androidx.compose.ui.unit.Dp = 0.dp,
+    crossAxisSpacing: androidx.compose.ui.unit.Dp = 0.dp,
+    content: @Composable () -> Unit
+) {
+    androidx.compose.ui.layout.Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val placeholders = measurables.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
+        val rows = mutableListOf<MutableList<androidx.compose.ui.layout.Placeable>>()
+        var currentRow = mutableListOf<androidx.compose.ui.layout.Placeable>()
+        var rowWidth = 0
+        
+        placeholders.forEach { placeable ->
+            if (rowWidth + placeable.width + mainAxisSpacing.roundToPx() > constraints.maxWidth && currentRow.isNotEmpty()) {
+                rows.add(currentRow)
+                currentRow = mutableListOf()
+                rowWidth = 0
+            }
+            currentRow.add(placeable)
+            rowWidth += placeable.width + mainAxisSpacing.roundToPx()
+        }
+        if (currentRow.isNotEmpty()) rows.add(currentRow)
+        
+        val totalHeight = rows.sumOf { row -> row.maxOf { it.height } } + (rows.size - 1) * crossAxisSpacing.roundToPx()
+        
+        layout(constraints.maxWidth, totalHeight) {
+            var y = 0
+            rows.forEach { row ->
+                var x = 0
+                val rowHeight = row.maxOf { it.height }
+                row.forEach { placeable ->
+                    placeable.placeRelative(x, y)
+                    x += placeable.width + mainAxisSpacing.roundToPx()
+                }
+                y += rowHeight + crossAxisSpacing.roundToPx()
+            }
+        }
     }
 }
 
@@ -984,5 +1198,5 @@ fun createImageFile3(context: android.content.Context): File { val dir = File(co
 @Composable
 fun UsuariosAdminPreview() {
     val users = listOf(UsuarioEntity("1", "Lizeth Flores", "Gerente", "Si", ""), UsuarioEntity("2", "Juan Perez", "Vendedor", "Si", ""))
-    DeliveryTheme { PantallaUsuariosAdminContent(UsuariosAdminUiState(usuarios = users), null, {}, {}, {}, {}, {}, {_,_,_,_,_,_,_ ->}, {_,_ ->}, {}, {}, {}, {}, {}) }
+    DeliveryTheme { PantallaUsuariosAdminContent(UsuariosAdminUiState(usuarios = users), null, {}, {}, {}, {}, {}, {_,_,_,_,_,_,_ ->}, {_,_ ->}, {}, {}, {}, {}, {}, {}, {}, {}) }
 }

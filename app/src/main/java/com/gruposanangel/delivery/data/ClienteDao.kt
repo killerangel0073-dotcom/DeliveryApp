@@ -54,4 +54,7 @@ interface ClienteDao {
         lastModified: Long
     )
 
+    @Query("UPDATE clientes SET fotografiaUrl = :url WHERE id = :id")
+    suspend fun actualizarFotoLocal(id: String, url: String)
+
 }

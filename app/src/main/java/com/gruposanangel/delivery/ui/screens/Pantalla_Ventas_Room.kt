@@ -125,7 +125,7 @@ fun VentasRoomScreen(
             vm.cargarVentas(ini, fin, clienteId)
         }
         
-        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+        val isDark = ThemeConfig.isActuallyDark
         DeliveryTheme(darkTheme = isDark) {
             PantallaVentasRoomContent(
                 uiState = uiState, 

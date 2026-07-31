@@ -148,7 +148,7 @@ fun Pantalla_Detalle_Venta_Admin(
         }
     }
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     DeliveryTheme(darkTheme = isDark) {
         Scaffold(

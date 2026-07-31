@@ -55,7 +55,7 @@ fun Pantalla_Gestion_Rutas(navController: NavController) {
     val viewModel: GestionRutasViewModel = viewModel(factory = GestionRutasViewModelFactory(repoRuta, RepositoryCliente(db.clienteDao())))
     val uiState by viewModel.uiState.collectAsState()
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     LaunchedEffect(uiState.successMessage) {
         uiState.successMessage?.let {

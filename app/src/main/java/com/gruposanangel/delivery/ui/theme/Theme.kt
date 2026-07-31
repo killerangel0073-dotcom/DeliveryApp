@@ -20,6 +20,11 @@ object ThemeConfig {
     var isDarkTheme = mutableStateOf<Boolean?>(null) // null = automático (sensor o sistema)
     var isSensorDark = mutableStateOf(false) // Estado controlado por el sensor de luz
 
+    // Helper para obtener el estado actual considerando sensor y manual
+    val isActuallyDark: Boolean
+        @Composable
+        get() = isDarkTheme.value ?: isSensorDark.value
+
     fun loadTheme(context: Context) {
         val prefs = context.getSharedPreferences("theme_prefs", Context.MODE_PRIVATE)
         if (prefs.contains("is_dark")) {
@@ -98,9 +103,7 @@ val LightColorScheme = lightColorScheme(
 
 @Composable
 fun DeliveryTheme(
-    // Si isDarkTheme es null (modo auto), usamos el sensor. 
-    // Si el sensor no ha detectado nada, podemos usar isSystemInDarkTheme() como respaldo.
-    darkTheme: Boolean = ThemeConfig.isDarkTheme.value ?: ThemeConfig.isSensorDark.value,
+    darkTheme: Boolean = ThemeConfig.isActuallyDark,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {

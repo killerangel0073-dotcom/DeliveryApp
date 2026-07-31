@@ -59,5 +59,9 @@ data class VentaDetalleEntity(
     val stockId: String? = null, // ID compuesto (IdProducto_IdAlmacen) para Room
     val nombre: String,
     val precio: Double, // 🛡️ SNAPSHOT INMUTABLE: Precio unitario cobrado (No Nulo)
-    val cantidad: Int
+    val cantidad: Int,
+
+    // --- CLASIFICACIÓN PARA REPORTE DINÁMICO ---
+    val marca: String = "Delisa",
+    val categoria: String = "General"
 )

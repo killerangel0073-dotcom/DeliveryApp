@@ -75,7 +75,7 @@ fun PantallaArqueo(navController: NavController) {
     var tabIndex by remember { mutableIntStateOf(0) }
     var showAuthDialog by remember { mutableStateOf(false) }
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     LaunchedEffect(uiState.reporteGuardado) {
         if (uiState.reporteGuardado) {

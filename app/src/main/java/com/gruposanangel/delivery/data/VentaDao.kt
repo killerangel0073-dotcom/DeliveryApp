@@ -91,4 +91,7 @@ interface VentaDao {
 
     @Query("SELECT MAX(fecha) FROM ventas WHERE almacenId = :almacenId")
     suspend fun obtenerFechaUltimaVentaLocal(almacenId: String): Long?
+
+    @Query("SELECT * FROM detalle_ventas WHERE ventaId IN (SELECT id FROM ventas WHERE vendedorId = :vendedorId AND fecha BETWEEN :inicio AND :fin AND estado != 'CANCELADA')")
+    fun obtenerDetallesPorPeriodoFlow(vendedorId: String, inicio: Long, fin: Long): Flow<List<VentaDetalleEntity>>
 }

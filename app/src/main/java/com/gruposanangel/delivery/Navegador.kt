@@ -168,6 +168,10 @@ fun Navegador(
             Pantalla_Usuarios_Admin(navController)
         }
 
+        composable("ADMIN_ALMACENES") {
+            Pantalla_Gestion_Almacenes(navController)
+        }
+
         composable(
             "analytics_admin/{start}/{end}",
             arguments = listOf(
@@ -461,6 +465,12 @@ fun Navegador(
                         popUpTo(navController.graph.startDestinationId) { inclusive = false }
                         launchSingleTop = true
                     }
+                }
+            }
+            "OPEN_DASHBOARD_ADMIN" -> {
+                navController.navigate("delivery?screen=Inicio") {
+                    popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                    launchSingleTop = true
                 }
             }
         }

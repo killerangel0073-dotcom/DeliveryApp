@@ -202,7 +202,7 @@ fun PantallaVentas(
         }
     }
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     DeliveryTheme(darkTheme = isDark) {
         PantallaVentasContent(
@@ -241,6 +241,7 @@ fun PantallaVentas(
                     finalizarVentaProceso(motivo = motivo)
                 }
             },
+            onSeleccionarPerfil = { ventaViewModel.seleccionarPerfil(it) },
             onVerImagenFull = { showImageFull = true },
             onVerHistorial = { 
                 if (cliente != null) navController.navigate("historial_cliente/${cliente!!.id}") 
@@ -323,6 +324,7 @@ fun PantallaVentasContent(
     onRestar: (Plantilla_Producto) -> Unit, 
     onLimpiarCarrito: () -> Unit,
     onVerImagenFull: () -> Unit,
+    onSeleccionarPerfil: (PerfilVenta) -> Unit,
     onFinalizar: (String?) -> Unit, 
     snackbarHostState: SnackbarHostState,
     onVerHistorial: () -> Unit
@@ -333,6 +335,13 @@ fun PantallaVentasContent(
     val motivos = listOf("Tienda cerrada", "Tiene producto", "No tiene dinero", "No estaba el de compras")
     
     val listState = rememberLazyListState()
+
+    // 🔥 AUTO-SCROLL AL CAMBIAR DE PERFIL O BÚSQUEDA
+    LaunchedEffect(uiState.perfilSeleccionado) {
+        if (uiState.productosEnCarrito.isNotEmpty()) {
+            listState.animateScrollToItem(0)
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -366,6 +375,11 @@ fun PantallaVentasContent(
                 )
 
                 if (uiState.enRuta) {
+                    PerfilVentaSelector(
+                        perfiles = uiState.perfilesDisponibles,
+                        seleccionado = uiState.perfilSeleccionado,
+                        onSeleccionar = onSeleccionarPerfil
+                    )
                     SearchBarVentas(query = uiState.searchQuery, onQueryChange = onSearchQueryChanged)
                 }
 

@@ -44,7 +44,7 @@ const enviarNotificacionUniversal = functions.https.onRequest(async (req, res) =
             android: {
                 priority: "high",
                 notification: {
-                    channelId: "default_channel",
+                    channelId: "default_v3",
                     priority: "high",
                     ...(imagen ? { imageUrl: imagen } : {}),
                 },

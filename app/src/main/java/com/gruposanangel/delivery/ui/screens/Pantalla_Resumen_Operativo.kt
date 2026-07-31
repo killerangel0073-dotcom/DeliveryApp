@@ -382,7 +382,7 @@ fun PantallaResumenOperativo(navController: NavController) {
 
     if (showDatePicker) {
         val dateRangePickerState = rememberDateRangePickerState(initialSelectedStartDateMillis = startDate.time, initialSelectedEndDateMillis = endDate.time)
-        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+        val isDark = ThemeConfig.isActuallyDark
         
         DeliveryTheme(darkTheme = isDark) {
             DatePickerDialog(

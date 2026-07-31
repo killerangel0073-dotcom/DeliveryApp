@@ -32,6 +32,10 @@ data class VentaUiState(
     val estadoRuta: EstadoRuta = EstadoRuta.Cargando,
     val isLoadingInventario: Boolean = true,
     
+    // 🔥 PERFILES DE VENTA DINÁMICOS
+    val perfilesDisponibles: List<PerfilVenta> = emptyList(),
+    val perfilSeleccionado: PerfilVenta? = null,
+
     // 🔥 BÚSQUEDA Y CARRITO
     val searchQuery: String = "",
     val cantidades: Map<String, Int> = emptyMap(),
@@ -109,7 +113,24 @@ class VentaViewModel(
     init {
         observarInventario()
         escucharVentasNube()
+        observarEstadoRutaReactivo()
         observarEstadoJornada()
+    }
+
+    private fun observarEstadoRutaReactivo() {
+        repositoryUsuario.getUsuarioActual()
+            .onEach { usuario ->
+                val nuevoEstado = if (usuario?.ultimaRutaId != null && usuario.ultimoAlmacenId != null) {
+                    EstadoRuta.ConRuta(
+                        nombreAlmacen = usuario.ultimoAlmacenNombre ?: "Almacén",
+                        almacenId = usuario.ultimoAlmacenId
+                    )
+                } else {
+                    EstadoRuta.SinRuta
+                }
+                _uiState.update { it.copy(estadoRuta = nuevoEstado) }
+            }
+            .launchIn(viewModelScope)
     }
 
     fun precargarUltimaVenta(clienteId: String) {
@@ -129,7 +150,8 @@ class VentaViewModel(
                     Log.e("VentaDebug", "❌ ABORTO: No se pudo determinar la ruta del vendedor tras 6 segundos.")
                     return@launch
                 }
-                Log.d("VentaDebug", "📍 RUTA DETECTADA: ${rutaEstado.nombreAlmacen}")
+                val nombreAlmacenActual = rutaEstado.nombreAlmacen
+                Log.d("VentaDebug", "📍 RUTA DETECTADA: $nombreAlmacenActual")
 
                 // 🔄 2. OBTENER LA ÚLTIMA VENTA
                 val ultimaVenta = ventaRepository.obtenerUltimaVentaConProductosPorCliente(clienteId)
@@ -139,57 +161,52 @@ class VentaViewModel(
                 }
                 Log.d("VentaDebug", "📄 VENTA ENCONTRADA: ID=${ultimaVenta.id} | Fecha=${ultimaVenta.fecha}")
 
-                // 🔄 3. ESPERAR A QUE EL CATÁLOGO ESTÉ CARGADO
-                var retryCatalog = 0
-                while (uiState.value.catalogoCompleto.isEmpty() && retryCatalog < 40) {
-                    delay(150)
-                    retryCatalog++
+                // 🔄 3. OBTENER TODO EL STOCK DISPONIBLE DEL ALMACÉN (Sin filtrar por perfil aún para cruzar todo el historial)
+                val stockLocal = repositoryInventario.obtenerProductosLocal().first().filter { entidad ->
+                    entidad.id.endsWith("_$nombreAlmacenActual") || (rutaEstado.almacenId.isNotEmpty() && entidad.id.endsWith("_" + rutaEstado.almacenId))
                 }
                 
-                val stockLocal = uiState.value.catalogoCompleto
                 if (stockLocal.isEmpty()) {
-                    Log.e("VentaDebug", "❌ ABORTO: El catálogo de productos está vacío.")
+                    Log.e("VentaDebug", "❌ ABORTO: El inventario local del almacén está vacío.")
                     return@launch
                 }
-                Log.d("VentaDebug", "📦 CATÁLOGO LISTO: ${stockLocal.size} productos en inventario.")
+                Log.d("VentaDebug", "📦 STOCK TOTAL ALMACÉN: ${stockLocal.size} productos.")
 
                 // 🔄 4. PROCESAR DETALLES Y CRUZAR CON STOCK
                 val detalles = ventaRepository.obtenerDetallesDeVenta(ultimaVenta.id)
                 Log.d("VentaDebug", "🛒 DETALLES VENTA ANTERIOR: ${detalles.size} items.")
 
                 val nuevasCantidades = mutableMapOf<String, Int>()
-                val nombreAlmacenActual = rutaEstado.nombreAlmacen
 
-                    detalles.forEach { detalle ->
-                        val pIdLimpio = detalle.productoId.trim()
-                        val idConstruido = "${pIdLimpio}_$nombreAlmacenActual"
-                        
-                        Log.d("VentaDebug", "🔍 BUSCANDO: ${detalle.nombre} | ID Sugerido: $idConstruido")
+                detalles.forEach { detalle ->
+                    val pIdLimpio = detalle.productoId.trim()
+                    val idConstruido = "${pIdLimpio}_$nombreAlmacenActual"
+                    
+                    Log.d("VentaDebug", "🔍 BUSCANDO: ${detalle.nombre} | ID Sugerido: $idConstruido")
 
-                        // Búsqueda profunda
-                        val productoMatch = stockLocal.find { 
-                            it.id.trim() == idConstruido || 
-                            it.id.trim() == detalle.stockId?.trim() || 
-                            it.id.trim() == pIdLimpio ||
-                            it.nombre.lowercase().trim() == detalle.nombre.lowercase().trim()
-                        }
-
-                        if (productoMatch != null) {
-                            // 🔥 TOPE ESTRICTO AL STOCK ACTUAL:
-                            // Si pidió 10 y traemos 5, ponemos 5. Si traemos 0, ponemos 0.
-                            val stockDisponible = productoMatch.cantidadDisponible
-                            val cantidadSugerida = Math.min(detalle.cantidad, stockDisponible)
-                            
-                            if (cantidadSugerida > 0) {
-                                nuevasCantidades[productoMatch.id] = cantidadSugerida
-                                Log.d("VentaDebug", "   ✅ MATCH: ${productoMatch.nombre} | Sugerido (Topado): $cantidadSugerida")
-                            } else {
-                                Log.w("VentaDebug", "   ⚠️ MATCH SIN STOCK: ${productoMatch.nombre} (No se añade)")
-                            }
-                        } else {
-                            Log.w("VentaDebug", "   ❓ NO ENCONTRADO: ${detalle.nombre}")
-                        }
+                    // Búsqueda profunda
+                    val productoMatch = stockLocal.find { 
+                        it.id.trim() == idConstruido || 
+                        it.id.trim() == detalle.stockId?.trim() || 
+                        it.id.trim() == pIdLimpio ||
+                        it.nombre.lowercase().trim() == detalle.nombre.lowercase().trim()
                     }
+
+                    if (productoMatch != null) {
+                        // 🔥 TOPE ESTRICTO AL STOCK ACTUAL:
+                        val stockDisponible = productoMatch.cantidadDisponible
+                        val cantidadSugerida = Math.min(detalle.cantidad, stockDisponible)
+                        
+                        if (cantidadSugerida > 0) {
+                            nuevasCantidades[productoMatch.id] = cantidadSugerida
+                            Log.d("VentaDebug", "   ✅ MATCH: ${productoMatch.nombre} | Sugerido (Topado): $cantidadSugerida")
+                        } else {
+                            Log.w("VentaDebug", "   ⚠️ MATCH SIN STOCK: ${productoMatch.nombre} (No se añade)")
+                        }
+                    } else {
+                        Log.w("VentaDebug", "   ❓ NO ENCONTRADO: ${detalle.nombre}")
+                    }
+                }
                 
                 if (nuevasCantidades.isNotEmpty()) {
                     _uiState.update { it.copy(cantidades = nuevasCantidades) }
@@ -285,18 +302,67 @@ class VentaViewModel(
             repositoryInventario.obtenerProductosLocal(),
             _uiState.map { it.searchQuery }.distinctUntilChanged(),
             _uiState.map { it.cantidades }.distinctUntilChanged(),
-            _uiState.map { it.estadoRuta }.distinctUntilChanged() // 🔥 Nuevo: Observar ruta actual
-        ) { entidades, query, mapaCantidades, estadoRuta ->
+            _uiState.map { it.perfilSeleccionado }.distinctUntilChanged(), // 🔥 Perfil activo
+            repositoryUsuario.getUsuarioActual()
+        ) { entidades, query, mapaCantidades, perfilActivo, usuario ->
             
-            // 🔍 Obtener el nombre del almacén que el vendedor tiene activo hoy
-            val nombreAlmacenActual = (estadoRuta as? EstadoRuta.ConRuta)?.nombreAlmacen ?: ""
+            // 1. Parsear Perfiles desde el JSON del usuario
+            val perfiles = try {
+                val json = usuario?.perfilesVentaJson
+                if (!json.isNullOrBlank()) {
+                    val array = org.json.JSONArray(json)
+                    (0 until array.length()).map { i ->
+                        val obj = array.getJSONObject(i)
+                        val filtrosArr = obj.getJSONArray("filtros")
+                        val filtros = (0 until filtrosArr.length()).map { j ->
+                            val fObj = filtrosArr.getJSONObject(j)
+                            val catsArr = fObj.optJSONArray("categorias")
+                            val cats = if (catsArr != null) {
+                                (0 until catsArr.length()).map { k -> catsArr.getString(k) }
+                            } else emptyList<String>()
+                            FiltroPerfil(fObj.getString("marca"), cats)
+                        }
+                        PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros)
+                    }
+                } else emptyList()
+            } catch (e: Exception) {
+                Log.e("VentaViewModel", "Error parseando perfiles", e)
+                emptyList()
+            }
 
-            // 1. Catálogo Filtrado: Solo productos del almacén actual
-            // Esto evita que productos de rutas viejas se mezclen en el total o la lista
-            val entidadesFiltradas = if (nombreAlmacenActual.isNotEmpty()) {
-                entidades.filter { it.id.endsWith("_$nombreAlmacenActual") }
-            } else {
-                entidades.filter { !it.id.contains("_") } // Catálogo base si no hay ruta
+            // 2. Determinar Almacenes Permitidos
+            val almacenesPermitidos = usuario?.almacenesConfig?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
+
+            // 3. Filtrado por Almacén + Perfil Operativo
+            val entidadesFiltradas = entidades.filter { entidad ->
+                // Filtro de Almacén (Físico)
+                val perteneceAlmacen = if (almacenesPermitidos.isNotEmpty()) {
+                    almacenesPermitidos.any { almacen -> entidad.id.endsWith("_$almacen") }
+                } else {
+                    val principal = usuario?.ultimoAlmacenNombre
+                    principal != null && entidad.id.endsWith("_$principal")
+                }
+
+                // Filtro de Perfil (Marca/Categoría)
+                val cumplePerfil = if (perfilActivo != null) {
+                    perfilActivo.filtros.any { filtro ->
+                        // 1. Comparación de Marca robusta
+                        val marcaMatch = entidad.marca.trim().equals(filtro.marca.trim(), ignoreCase = true)
+                        
+                        // 2. Comparación de Categoría (Si el perfil no tiene categorías, pasan TODAS las de la marca)
+                        val categoriaMatch = if (filtro.categorias.isNotEmpty()) {
+                            filtro.categorias.any { it.trim().equals(entidad.categoria.trim(), ignoreCase = true) }
+                        } else {
+                            true // 🛡️ LIBERACIÓN: Si no hay categorías en el filtro, entra toda la marca
+                        }
+                        
+                        marcaMatch && categoriaMatch
+                    }
+                } else {
+                    true // 🛡️ MODO LIBRE: Si no hay perfiles configurados, muestra todo lo del almacén
+                }
+
+                perteneceAlmacen && cumplePerfil
             }
 
             val catalogo = entidadesFiltradas.map { e ->
@@ -306,11 +372,13 @@ class VentaViewModel(
                     precio = e.precio,
                     cantidad = mapaCantidades[e.id] ?: 0,
                     cantidadDisponible = e.cantidadDisponible,
-                    imagenUrl = e.imagenUrl ?: ""
+                    imagenUrl = e.imagenUrl ?: "",
+                    marca = e.marca,
+                    categoria = e.categoria
                 )
             }
 
-            // 2. Productos visibles (Filtrados por búsqueda y con stock/selección)
+            // 4. Productos visibles (Filtrados por búsqueda y con stock/selección)
             val productosMapeados = catalogo.asSequence()
                 .filter { it.cantidadDisponible > 0 || it.cantidad > 0 }
                 .filter { query.isBlank() || it.nombre.contains(query, ignoreCase = true) }
@@ -324,18 +392,33 @@ class VentaViewModel(
                 )
                 .toList()
             
-            Pair(catalogo, productosMapeados)
-        }.onEach { (catalogo, productos) ->
+            Triple(catalogo, productosMapeados, perfiles)
+        }.onEach { (catalogo, productos, perfiles) ->
             _uiState.update { state ->
                 val total = catalogo.sumOf { it.precio * it.cantidad }
+                
+                // 🔥 Sincronizar el perfil seleccionado con la nueva lista de perfiles
+                val perfilActualizado = if (state.perfilSeleccionado != null) {
+                    perfiles.find { it.id == state.perfilSeleccionado.id } ?: perfiles.firstOrNull()
+                } else {
+                    perfiles.firstOrNull()
+                }
+
                 state.copy(
                     productosEnCarrito = productos,
                     catalogoCompleto = catalogo,
                     isLoadingInventario = false,
-                    totalVenta = total
+                    totalVenta = total,
+                    perfilesDisponibles = perfiles,
+                    perfilSeleccionado = perfilActualizado
                 )
             }
         }.launchIn(viewModelScope)
+    }
+
+    fun seleccionarPerfil(perfil: PerfilVenta) {
+        _uiState.update { it.copy(perfilSeleccionado = perfil) }
+        // Se elimina limpiarCarrito() para preservar la precarga e items seleccionados al navegar entre perfiles
     }
 
     fun onSearchQueryChanged(query: String) {
@@ -481,19 +564,18 @@ class VentaViewModel(
                 val usuarioActual = repositoryUsuario.obtenerUsuarioActual()
                 val uidVendedor = usuarioActual?.uid ?: FirebaseAuth.getInstance().currentUser?.uid ?: ""
                 val nombreVendedor = usuarioActual?.nombre ?: FirebaseAuth.getInstance().currentUser?.displayName ?: "Vendedor"
-                
+
                 val almacenId = (_uiState.value.estadoRuta as? EstadoRuta.ConRuta)?.almacenId
                 val miUbicacion = LocationState.ultimaUbicacion.value
                 
                 val productosVenta = _uiState.value.catalogoCompleto.filter { it.cantidad > 0 }
-                val totalVenta = productosVenta.sumOf { it.precio * it.cantidad }
 
-                val ventaLocalId = ventaRepository.guardarVentaLocal(
+                val ventaId = ventaRepository.guardarVentaLocal(
                     clienteId = clienteId,
                     clienteNombre = clienteNombre,
                     clienteImagenUrl = clienteFotoUrl,
                     productos = productosVenta,
-                    total = totalVenta,
+                    total = 0.0, // El total se recalcula internamente
                     metodoPago = metodoPago,
                     vendedorId = uidVendedor,
                     vendedorNombre = nombreVendedor,
@@ -506,11 +588,8 @@ class VentaViewModel(
                 )
 
                 withContext(Dispatchers.Main) {
-                    // 🔔 NOTIFICACIÓN: Se ha eliminado la llamada manual aquí para evitar duplicados.
-                    // Ahora la notificación la gestiona automáticamente la Cloud Function 'notificarNuevaVenta'
-                    // al detectar el registro en Firestore, asegurando que llegue una sola vez y con todos los datos.
                     _uiState.update { it.copy(estaProcesando = false) }
-                    onResultado(true, "Venta registrada con éxito", ventaLocalId)
+                    onResultado(true, "Venta registrada con éxito", ventaId)
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {

@@ -14,5 +14,7 @@ data class Plantilla_Producto(
     val cantidadUnitario: Long? = null,
     val unidadesPorDisplay: Long? = null,
     val gramosVenta: Long? = null,
-    val precioCompra: Double = 0.0
+    val precioCompra: Double = 0.0,
+    val marca: String = "Delisa",
+    val categoria: String = "General"
 ) : Parcelable

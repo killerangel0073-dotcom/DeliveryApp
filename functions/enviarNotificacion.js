@@ -41,14 +41,20 @@ const enviarNotificacion = functions.https.onRequest(async (req, res) => {
       imagen: imagen || "",
       ventaId: ventaId ? String(ventaId) : "",
       tipo: tipo || "",
-      click_action: tipo === "CARGA_NUEVA" ? "OPEN_NOTIFICACIONES" : (tipo === "VENTA_NUEVA" ? "OPEN_VENTA_DETALLE" : "OPEN_TICKET_DETAIL")
+      click_action: tipo === "CARGA_NUEVA" ? "OPEN_NOTIFICACIONES" :
+                    (tipo === "VENTA_NUEVA" ? "OPEN_VENTA_DETALLE" :
+                    (tipo === "JORNADA" ? "OPEN_DASHBOARD_ADMIN" : "OPEN_TICKET_DETAIL"))
     };
 
     // 4. Opciones específicas de Android para que se vea Premium
+    let channelId = "default_v3";
+    if (tipo === "VENTA_NUEVA") channelId = "ventas_v3";
+    if (tipo === "JORNADA") channelId = "jornada_v3";
+
     const android = {
       priority: "high",
       notification: {
-        channelId: "default_channel",
+        channelId: channelId,
         priority: "high",
         ...(imagen ? { imageUrl: imagen } : {})
       }

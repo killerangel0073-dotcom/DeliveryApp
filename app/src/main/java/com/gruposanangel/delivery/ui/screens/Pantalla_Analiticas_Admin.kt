@@ -23,11 +23,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.util.Log
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -45,8 +47,18 @@ fun Pantalla_Analiticas_Admin(
 ) {
     val viewModel: AnalyticsViewModel = viewModel()
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
     val sdf = SimpleDateFormat("d MMM yyyy", Locale("es", "MX"))
+
+    // 🏗️ Obtener Perfiles desde el ViewModel
+    val perfilesFiltro = remember(uiState.perfilesDisponibles) {
+        val list = mutableListOf(com.gruposanangel.delivery.data.PerfilVenta("ALL", "CONSOLIDADO", emptyList()))
+        list.addAll(uiState.perfilesDisponibles)
+        list
+    }
+    
+    val perfilSeleccionado = uiState.perfilSeleccionado ?: perfilesFiltro.first()
 
     LaunchedEffect(startTime, endTime) {
         viewModel.cargarAnaliticas(Date(startTime), Date(endTime))
@@ -69,6 +81,31 @@ fun Pantalla_Analiticas_Admin(
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed)
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {
+                        try {
+                            val file = com.gruposanangel.delivery.utilidades.ReporteAnaliticasPdf.generarPDF(
+                                context = context,
+                                uiState = uiState,
+                                fechaInicio = Date(startTime),
+                                fechaFin = Date(endTime),
+                                perfilNombre = perfilSeleccionado?.nombre ?: "CONSOLIDADO"
+                            )
+                            val authority = "${context.packageName}.provider"
+                            val uri = androidx.core.content.FileProvider.getUriForFile(context, authority, file)
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, "application/pdf")
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            android.widget.Toast.makeText(context, "Error al generar reporte: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                            Log.e("PDF_ERROR", "Error generando PDF", e)
+                        }
+                    }) {
+                        Icon(Icons.Default.PictureAsPdf, null, tint = DelisaRed)
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -101,71 +138,81 @@ fun Pantalla_Analiticas_Admin(
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // 1. BALANCE FINANCIERO
-                item {
-                    BalanceCard(
-                        bruta = uiState.totalVentaBruta,
-                        gastos = uiState.totalGastos,
-                        neto = uiState.utilidadOperativa,
-                        formato = formatoMoneda
-                    )
-                }
-
-                // 1.1 GRÁFICA DE TENDENCIA (Si hay más de 1 día)
-                if (uiState.ventasPorDia.size > 1) {
-                    item { SectionHeader("Tendencia de Ventas", Icons.AutoMirrored.Filled.ShowChart) }
-                    item {
-                        TrendChart(uiState.ventasPorDia)
+            Column(modifier = Modifier.padding(padding)) {
+                // 🔹 SELECTOR DE LÍNEA DE NEGOCIO
+                PerfilVentaSelector(
+                    perfiles = perfilesFiltro,
+                    seleccionado = perfilSeleccionado,
+                    onSeleccionar = { perfil ->
+                        if (perfil.id == "ALL") viewModel.seleccionarPerfil(null)
+                        else viewModel.seleccionarPerfil(perfil)
                     }
-                }
+                )
 
-                // 2. DESGLOSE DE GASTOS
-                if (uiState.desgloseGastos.isNotEmpty()) {
-                    item { SectionHeader("Distribución de Gastos", Icons.Default.PieChart) }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // 1. BALANCE FINANCIERO
                     item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(24.dp)),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            shape = RoundedCornerShape(24.dp)
-                        ) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                uiState.desgloseGastos.forEach { gasto ->
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(Modifier.size(8.dp).background(DelisaRed, CircleShape))
-                                        Spacer(Modifier.width(12.dp))
-                                        Text(gasto.categoria, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
-                                        Text(formatoMoneda.format(gasto.total), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                        BalanceCard(
+                            bruta = uiState.totalVentaBruta,
+                            gastos = uiState.totalGastos,
+                            neto = uiState.utilidadOperativa,
+                            formato = formatoMoneda
+                        )
+                    }
+
+                    // 1.1 GRÁFICA DE TENDENCIA (Si hay más de 1 día)
+                    if (uiState.ventasPorDia.size > 1) {
+                        item { SectionHeader("Tendencia de Ventas", Icons.AutoMirrored.Filled.ShowChart) }
+                        item {
+                            TrendChart(uiState.ventasPorDia)
+                        }
+                    }
+
+                    // 2. DESGLOSE DE GASTOS
+                    if (uiState.desgloseGastos.isNotEmpty() && uiState.perfilSeleccionado == null) {
+                        item { SectionHeader("Distribución de Gastos", Icons.Default.PieChart) }
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(24.dp)),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                shape = RoundedCornerShape(24.dp)
+                            ) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    uiState.desgloseGastos.forEach { gasto ->
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(Modifier.size(8.dp).background(DelisaRed, CircleShape))
+                                            Spacer(Modifier.width(12.dp))
+                                            Text(gasto.categoria, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+                                            Text(formatoMoneda.format(gasto.total), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                // 3. TOP PRODUCTOS
-                if (uiState.topProductos.isNotEmpty()) {
-                    item { SectionHeader("Top 5 Productos", Icons.Default.Star) }
-                    items(uiState.topProductos) { prod ->
-                        ProductStatItem(prod, formatoMoneda)
+                    // 3. TOP PRODUCTOS
+                    if (uiState.topProductos.isNotEmpty()) {
+                        item { SectionHeader("Top 5 Productos", Icons.Default.Star) }
+                        items(uiState.topProductos) { prod ->
+                            ProductStatItem(prod, formatoMoneda)
+                        }
                     }
-                }
 
-                // 4. RANKING VENDEDORES
-                if (uiState.rankingVendedores.isNotEmpty()) {
-                    item { SectionHeader("Ranking de Vendedores", Icons.Default.Leaderboard) }
-                    items(uiState.rankingVendedores) { seller ->
-                        SellerStatItem(seller, formatoMoneda)
+                    // 4. RANKING VENDEDORES
+                    if (uiState.rankingVendedores.isNotEmpty()) {
+                        item { SectionHeader("Ranking de Vendedores", Icons.Default.Leaderboard) }
+                        items(uiState.rankingVendedores) { seller ->
+                            SellerStatItem(seller, formatoMoneda)
+                        }
                     }
+                    
+                    item { Spacer(Modifier.height(40.dp)) }
                 }
-                
-                item { Spacer(Modifier.height(40.dp)) }
             }
         }
     }

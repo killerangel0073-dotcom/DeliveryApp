@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,6 +24,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -46,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -120,7 +123,7 @@ fun PantallaDashboardVendedor(
         }
     }
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     DeliveryTheme(darkTheme = isDark) {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -134,6 +137,7 @@ fun PantallaDashboardVendedor(
                 onArqueoClick = { navController.navigate("PANTALLA_ARQUEO") },
                 onNavigate = { navController.navigate(it) },
                 onGastoRegistrado = { m, c, d, cb -> viewModel.registrarGasto(m, c, d, cb) },
+                onMetaFriturasChange = { viewModel.actualizarMetaFrituras(it) },
                 onConfigurarImpresora = {
                     val hasPermission = bluetoothPermissions.all {
                         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -180,11 +184,13 @@ fun DashboardVendedorView(
     onArqueoClick: () -> Unit,
     onNavigate: (String) -> Unit,
     onGastoRegistrado: (Double, String, String, () -> Unit) -> Unit,
+    onMetaFriturasChange: (Int) -> Unit,
     onConfigurarImpresora: () -> Unit
 ) {
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showGastoSheet by remember { mutableStateOf(false) }
+    var showMetaDialog by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         // 🔝 FILA DE ESTADO SUPERIOR
@@ -370,6 +376,18 @@ fun DashboardVendedorView(
             onCierreClick = { onNavigate("CIERRE_DIA") },
             onGastoClick = { showGastoSheet = true }
         )
+
+        // 🔥 NUEVA SECCIÓN: DESGLOSE POR PERFIL (Siempre visible si hay múltiples perfiles)
+        if (uiState.perfilesVenta.size > 1) {
+            Spacer(Modifier.height(16.dp))
+            BreakdownPerfiles(
+                breakdown = uiState.ventasPorPerfil,
+                formato = formatoMoneda,
+                metaFrituras = uiState.metaPiezasFrituras,
+                onMetaClick = { showMetaDialog = true }
+            )
+        }
+
         Spacer(Modifier.height(16.dp))
         WeeklyMiniChart(uiState.ventasPorDiaSemana, uiState.metaDia, formatoMoneda)
 
@@ -389,6 +407,41 @@ fun DashboardVendedorView(
             onConfigurar = onConfigurarImpresora
         )
         Spacer(Modifier.height(40.dp))
+    }
+
+    if (showMetaDialog) {
+        var tempMeta by remember { mutableStateOf(uiState.metaPiezasFrituras.toString()) }
+        AlertDialog(
+            onDismissRequest = { showMetaDialog = false },
+            title = { Text("Ajustar Meta Frituras", fontWeight = FontWeight.Black) },
+            text = {
+                OutlinedTextField(
+                    value = tempMeta,
+                    onValueChange = { if (it.all { c -> c.isDigit() }) tempMeta = it },
+                    label = { Text("Meta en piezas") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                    shape = RoundedCornerShape(12.dp)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val m = tempMeta.toIntOrNull() ?: 200
+                        onMetaFriturasChange(m)
+                        showMetaDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
+                ) {
+                    Text("GUARDAR")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMetaDialog = false }) {
+                    Text("CANCELAR")
+                }
+            }
+        )
     }
 
     if (showConfirmDialog) {
@@ -1231,5 +1284,5 @@ fun DashboardVendedorActivePreview() {
         ventaBloque = 60000.0,
         ventasPorDiaSemana = sampleVentas
     )
-    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}, {}, {_,_,_,_ -> }, {}) }
+    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}, {}, {_,_,_,_ -> }, {}, {}) }
 }

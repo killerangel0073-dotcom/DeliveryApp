@@ -67,7 +67,7 @@ fun MapaScreen(
     val scope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     // 🔥 SINCRONIZACIÓN EN TIEMPO REAL Y AUTO-TEMA DE MAPA
     LaunchedEffect(Unit) {

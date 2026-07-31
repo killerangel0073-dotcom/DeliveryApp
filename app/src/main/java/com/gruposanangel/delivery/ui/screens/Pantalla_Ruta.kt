@@ -65,7 +65,7 @@ fun PaginaVentaScreen(navController: NavController, ventaRepository: VentaReposi
     var ticketsHoy by remember { mutableStateOf<List<TicketVenta>>(emptyList()) }
     var isRefreshing by remember { mutableStateOf(false) }
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     LaunchedEffect(Unit) { 
         if (!isPreview) { 

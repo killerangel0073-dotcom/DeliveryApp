@@ -37,4 +37,10 @@ interface ProductoDao {
     suspend fun updateCantidadDisponible(id: String, cantidad: Int)
 
 
+    @Query("UPDATE productos SET imagenUrl = :url WHERE id = :id")
+    suspend fun actualizarFotoLocal(id: String, url: String)
+
+    @Query("UPDATE productos SET imagenUrl = :url WHERE productoId = :productoId")
+    suspend fun actualizarFotoPorProductoId(productoId: String, url: String)
+
 }

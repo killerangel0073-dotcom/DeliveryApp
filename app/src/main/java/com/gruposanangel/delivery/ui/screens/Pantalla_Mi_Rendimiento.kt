@@ -214,7 +214,7 @@ fun Pantalla_Mi_Rendimiento(
         "${dfRange.format(Date(uiState.fechaInicioSemana))} - ${dfRange.format(calEnd.time)}".uppercase()
     }
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     DeliveryTheme(darkTheme = isDark) {
         if (showDatePicker) {

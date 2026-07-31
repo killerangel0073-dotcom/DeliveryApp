@@ -37,6 +37,7 @@ data class DashboardVendedorUiState(
     val ventaBloque: Double = 0.0,
     val ventasPorDiaSemana: List<Double> = listOf(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // L, M, M, J, V, S
     val metaDia: Double = 11666.0,
+    val metaPiezasFrituras: Int = 200, // 🔥 Nueva: Meta de piezas para Frituras
     val nombreVendedor: String = "",
     val photoUrl: String = "",
     val puestoTrabajo: String? = null,
@@ -47,7 +48,16 @@ data class DashboardVendedorUiState(
     val totalGastosHoy: Double = 0.0,
     val sueldoBaseConfig: Double = 300.0,
     val comisionPctConfig: Double = 3.0,
+    val perfilesVenta: List<com.gruposanangel.delivery.data.PerfilVenta> = emptyList(),
+    val ventasPorPerfil: List<PerfilBreakdown> = emptyList(),
     val error: String? = null
+)
+
+data class PerfilBreakdown(
+    val id: String,
+    val nombre: String,
+    val total: Double,
+    val totalPiezas: Int = 0 // 🔥 Nuevo: Conteo de unidades físicas
 )
 
 data class Gasto(
@@ -75,6 +85,7 @@ class DashboardVendedorViewModel(
     private var salesListener: ListenerRegistration? = null
     private var expensesListener: ListenerRegistration? = null
     private var configPagosListener: ListenerRegistration? = null
+    private var metaFriturasListener: ListenerRegistration? = null
 
     init {
         cargarEstadoJornada()
@@ -85,6 +96,7 @@ class DashboardVendedorViewModel(
         cargarDatosPerfil()
         observarInventario()
         escucharConfigPagos()
+        escucharMetaFrituras()
         
         // 🔥 Sincronización proactiva del historial de ruta (90 días / 3 meses)
         viewModelScope.launch {
@@ -121,6 +133,29 @@ class DashboardVendedorViewModel(
                     ) }
                 }
             }
+    }
+
+    private fun escucharMetaFrituras() {
+        metaFriturasListener?.remove()
+        metaFriturasListener = db.collection("config").document("metas")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    val meta = snapshot.getLong("frituras_piezas")?.toInt() ?: 200
+                    _uiState.update { it.copy(metaPiezasFrituras = meta) }
+                }
+            }
+    }
+
+    fun actualizarMetaFrituras(nuevaMeta: Int) {
+        viewModelScope.launch {
+            try {
+                db.collection("config").document("metas")
+                    .set(mapOf("frituras_piezas" to nuevaMeta), com.google.firebase.firestore.SetOptions.merge())
+                    .await()
+            } catch (e: Exception) {
+                Log.e("DashboardVM", "Error actualizando meta frituras", e)
+            }
+        }
     }
 
     private fun cargarDatosPerfil() {
@@ -289,7 +324,8 @@ class DashboardVendedorViewModel(
                     put("titulo", titulo)
                     put("mensaje", mensaje)
                     put("imagen", fotoVendedor)
-                    put("ventaId", "JORNADA")
+                    put("tipo", "JORNADA")
+                    put("ventaId", "")
                 }
 
                 val request = Request.Builder()
@@ -334,23 +370,79 @@ class DashboardVendedorViewModel(
             calSem.set(Calendar.HOUR_OF_DAY, 0); calSem.set(Calendar.MINUTE, 0); calSem.set(Calendar.SECOND, 0); calSem.set(Calendar.MILLISECOND, 0)
             val iniSemana = calSem.timeInMillis
 
-            // 🔥 OBSERVACIÓN COMBINADA: Ventas + Gastos de Room
+            // 🔥 OBSERVACIÓN COMBINADA: Ventas + Gastos + Usuario (para perfiles) + Detalles (para desglose)
+            val calHoy = Calendar.getInstance().apply { timeInMillis = ahoraReal }
+            calHoy.set(Calendar.HOUR_OF_DAY, 0); calHoy.set(Calendar.MINUTE, 0); calHoy.set(Calendar.SECOND, 0); calHoy.set(Calendar.MILLISECOND, 0)
+            val iniHoy = calHoy.timeInMillis
+
+            // 🔥 OBSERVACIÓN COMBINADA: Ventas + Gastos + Usuario (para perfiles) + Detalles + Catálogo
+            val calCalculo = Calendar.getInstance().apply { timeInMillis = ahoraReal }
+            calCalculo.set(Calendar.HOUR_OF_DAY, 0); calCalculo.set(Calendar.MINUTE, 0); calCalculo.set(Calendar.SECOND, 0); calCalculo.set(Calendar.MILLISECOND, 0)
+            val iniDiaMillis = calCalculo.timeInMillis
+
             combine(
                 ventaRepository.obtenerVentasPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000),
-                gastoRepository.obtenerGastosPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000)
-            ) { todasLasVentas, todosLosGastos ->
+                gastoRepository.obtenerGastosPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000),
+                usuarioRepository.getUsuarioActual(),
+                ventaRepository.obtenerDetallesPorPeriodoFlow(userId, iniDiaMillis, ahoraReal + 86400000),
+                inventarioRepository.obtenerProductosLocal()
+            ) { todasLasVentas, todosLosGastos, usuario, detallesHoy, catalog ->
                 
                 val calCalc = Calendar.getInstance().apply { timeInMillis = ahoraReal }
                 calCalc.set(Calendar.HOUR_OF_DAY, 0); calCalc.set(Calendar.MINUTE, 0); calCalc.set(Calendar.SECOND, 0); calCalc.set(Calendar.MILLISECOND, 0)
-                val iniHoy = calCalc.timeInMillis
+                val iniHoyCalc = calCalc.timeInMillis
+
+                val catalogMap = catalog.associate { it.productoId to (it.marca to it.categoria) }
+
+                // Parsear perfiles
+                val perfiles = mutableListOf<com.gruposanangel.delivery.data.PerfilVenta>()
+                try {
+                    val json = usuario?.perfilesVentaJson
+                    if (!json.isNullOrBlank()) {
+                        val array = org.json.JSONArray(json)
+                        for (i in 0 until array.length()) {
+                            val obj = array.getJSONObject(i)
+                            val filtrosArr = obj.getJSONArray("filtros")
+                            val filtros = (0 until filtrosArr.length()).map { j ->
+                                val fObj = filtrosArr.getJSONObject(j)
+                                val catsArr = fObj.optJSONArray("categorias")
+                                val cats = if (catsArr != null) (0 until catsArr.length()).map { catsArr.getString(it) } else emptyList()
+                                com.gruposanangel.delivery.data.FiltroPerfil(fObj.getString("marca"), cats)
+                            }
+                            perfiles.add(com.gruposanangel.delivery.data.PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros))
+                        }
+                    }
+                } catch (e: Exception) { }
+
+                // Calcular Desglose por Perfil
+                val breakdown = perfiles.map { perfil ->
+                    val detallesPerfil = detallesHoy.filter { detalle ->
+                        val info = catalogMap[detalle.productoId]
+                        val realMarca = if (detalle.marca == "Delisa" && detalle.categoria == "General") (info?.first ?: detalle.marca) else detalle.marca
+                        val realCat = if (detalle.marca == "Delisa" && detalle.categoria == "General") (info?.second ?: detalle.categoria) else detalle.categoria
+
+                        perfil.filtros.any { filtro ->
+                            val marcaMatch = realMarca.trim().equals(filtro.marca.trim(), ignoreCase = true)
+                            val catMatch = if (filtro.categorias.isNotEmpty()) {
+                                filtro.categorias.any { it.trim().equals(realCat.trim(), ignoreCase = true) }
+                            } else true
+                            
+                            marcaMatch && catMatch
+                        }
+                    }
+                    val totalVenta = detallesPerfil.sumOf { it.precio * it.cantidad }
+                    val totalUnidades = detallesPerfil.sumOf { it.cantidad }
+                    
+                    PerfilBreakdown(perfil.id, perfil.nombre, totalVenta, totalUnidades)
+                }
 
                 // Filtrado de Ventas
-                val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoy && it.estado != "CANCELADA" }
+                val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoyCalc && it.estado != "CANCELADA" }
                 val ventasSemana = todasLasVentas.filter { it.fecha >= iniSemana && it.estado != "CANCELADA" }
                 val totalVentaBloque = todasLasVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total }
 
                 // Filtrado de Gastos
-                val gastosHoy = todosLosGastos.filter { it.fecha >= iniHoy }
+                val gastosHoy = todosLosGastos.filter { it.fecha >= iniHoyCalc }
                 val totalGastoHoy = gastosHoy.sumOf { it.monto }
 
                 // Gráfico (Lunes a Sábado)
@@ -370,6 +462,8 @@ class DashboardVendedorViewModel(
                 val totalHoy = ventasHoy.sumOf { it.total }
                 val ticketPromedio = if (ventasHoy.isNotEmpty()) totalHoy / ventasHoy.size else 0.0
 
+                Log.d("DashboardVM", "Breakdown actualizado: ${breakdown.size} perfiles. Hoy: $totalHoy")
+
                 _uiState.update { it.copy(
                     isLoading = false,
                     ventaDia = totalHoy,
@@ -379,10 +473,12 @@ class DashboardVendedorViewModel(
                     ventaBloque = totalVentaBloque,              // ✅ Regresado a VENTA BRUTA
                     ventasPorDiaSemana = ventasPorDia,
                     ventasHoy = ventasHoy,
-                    gastosHoy = todosLosGastos.filter { it.fecha >= iniHoy }.map { 
+                    gastosHoy = todosLosGastos.filter { it.fecha >= iniHoyCalc }.map { 
                         Gasto(it.id, it.monto, it.categoria, it.descripcion, it.fecha, it.vendedorId, it.rutaNombre)
                     },
-                    totalGastosHoy = totalGastoHoy
+                    totalGastosHoy = totalGastoHoy,
+                    perfilesVenta = perfiles,
+                    ventasPorPerfil = breakdown
                 ) }
             }.collect()
         }
@@ -484,5 +580,6 @@ class DashboardVendedorViewModel(
         salesListener?.remove()
         expensesListener?.remove()
         configPagosListener?.remove()
+        metaFriturasListener?.remove()
     }
 }

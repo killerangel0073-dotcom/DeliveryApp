@@ -98,8 +98,7 @@ exports.notificarNuevaVenta = onDocumentCreated("ventas/{ventaId}", async (event
             android: {
                 priority: "high",
                 notification: {
-                    sound: "default",
-                    channelId: "ventas_channel",
+                    channelId: "ventas_v3",
                     ...(urlImagenFinal ? { image: urlImagenFinal } : {})
                 }
             },

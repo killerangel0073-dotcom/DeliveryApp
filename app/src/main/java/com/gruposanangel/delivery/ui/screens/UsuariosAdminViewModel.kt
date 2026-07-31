@@ -57,7 +57,12 @@ data class UsuariosAdminUiState(
     val isRemovingRutaPropuesta: Boolean = false,
     
     val rutaCambioPendienteId: String? = null,
-    val rutaCambioPendienteNombre: String? = null
+    val rutaCambioPendienteNombre: String? = null,
+
+    // 🔥 CONFIGURACIÓN DE PERFILES DE VENTA
+    val perfilesVentaEdit: List<PerfilVenta> = emptyList(),
+    val marcasDisponibles: List<String> = emptyList(),
+    val categoriasDisponibles: Map<String, List<String>> = emptyMap()
 )
 
 class UsuariosAdminViewModel : ViewModel() {
@@ -79,7 +84,37 @@ class UsuariosAdminViewModel : ViewModel() {
     )
 
     init {
+        cargarConfiguracionBase()
         cargarUsuarios()
+    }
+
+    private fun cargarConfiguracionBase() {
+        viewModelScope.launch {
+            try {
+                // 1. Cargar Marcas
+                val marcasSnap = db.collection("marca").get().await()
+                val listaMarcas = marcasSnap.documents.mapNotNull { it.getString("id") ?: it.getString("nombre") }.distinct()
+
+                // 2. Cargar Categorías
+                val catsSnap = db.collection("Categorias").get().await()
+                val mapaCategorias = mutableMapOf<String, MutableList<String>>()
+                
+                catsSnap.documents.forEach { doc ->
+                    val marcaId = doc.getString("marca_id") ?: "Delisa"
+                    val catNombre = doc.getString("nombre") ?: doc.getString("id") ?: ""
+                    if (catNombre.isNotEmpty()) {
+                        mapaCategorias.getOrPut(marcaId) { mutableListOf() }.add(catNombre)
+                    }
+                }
+
+                _uiState.update { it.copy(
+                    marcasDisponibles = listaMarcas,
+                    categoriasDisponibles = mapaCategorias
+                ) }
+            } catch (e: Exception) {
+                Log.e("UsuariosVM", "Error cargando config base", e)
+            }
+        }
     }
 
     fun cargarUsuarios() {
@@ -124,7 +159,11 @@ class UsuariosAdminViewModel : ViewModel() {
                         ineEstado = doc.getString("ineEstado") ?: "PENDIENTE",
                         ineUltimaRevision = doc.getLong("ineUltimaRevision"),
                         ultimaRutaId = rId,
-                        ultimaRutaNombre = rNombre
+                        ultimaRutaNombre = rNombre,
+                        perfilesVentaJson = if (doc.get("perfilesVenta") != null) {
+                            val raw = doc.get("perfilesVenta") as? List<*>
+                            org.json.JSONArray(raw).toString()
+                        } else null
                     )
                 }
                 _uiState.update { it.copy(usuarios = lista, rutas = listaRutas, isLoading = false) }
@@ -142,6 +181,29 @@ class UsuariosAdminViewModel : ViewModel() {
     }
 
     fun seleccionarUsuario(usuario: UsuarioEntity?) {
+        val perfiles = try {
+            val json = usuario?.perfilesVentaJson
+            if (!json.isNullOrBlank()) {
+                val array = org.json.JSONArray(json)
+                (0 until array.length()).map { i ->
+                    val obj = array.getJSONObject(i)
+                    val filtrosArr = obj.getJSONArray("filtros")
+                    val filtros = (0 until filtrosArr.length()).map { j ->
+                        val fObj = filtrosArr.getJSONObject(j)
+                        val catsArr = fObj.optJSONArray("categorias")
+                        val cats = if (catsArr != null) {
+                            (0 until catsArr.length()).map { k -> catsArr.getString(k) }
+                        } else emptyList<String>()
+                        FiltroPerfil(fObj.getString("marca"), cats)
+                    }
+                    PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros)
+                }
+            } else emptyList()
+        } catch (e: Exception) {
+            Log.e("UsuariosVM", "Error parseando perfiles", e)
+            emptyList()
+        }
+
         _uiState.update { it.copy(
             usuarioSeleccionado = usuario, 
             isNewUserMode = usuario == null,
@@ -150,8 +212,27 @@ class UsuariosAdminViewModel : ViewModel() {
             errorLicencia = null,
             errorIne = null,
             rutaCambioPendienteId = null,
-            rutaCambioPendienteNombre = null
+            rutaCambioPendienteNombre = null,
+            perfilesVentaEdit = perfiles
         ) }
+    }
+
+    fun agregarPerfil(perfil: PerfilVenta) {
+        val current = _uiState.value.perfilesVentaEdit.toMutableList()
+        current.add(perfil.copy(id = UUID.randomUUID().toString()))
+        _uiState.update { it.copy(perfilesVentaEdit = current) }
+    }
+
+    fun eliminarPerfil(perfilId: String) {
+        val current = _uiState.value.perfilesVentaEdit.filter { it.id != perfilId }
+        _uiState.update { it.copy(perfilesVentaEdit = current) }
+    }
+
+    fun actualizarPerfil(perfil: PerfilVenta) {
+        val current = _uiState.value.perfilesVentaEdit.map { 
+            if (it.id == perfil.id) perfil else it
+        }
+        _uiState.update { it.copy(perfilesVentaEdit = current) }
     }
 
     fun proponerRuta(ruta: RutaEntity?) {
@@ -363,7 +444,19 @@ class UsuariosAdminViewModel : ViewModel() {
                     "status" to if (activo) "ACTIVO" else "SUSPENDIDO",
                     "licenciaConducir" to licencia, 
                     "credencialElector" to credencial,
-                    "created_time" to com.google.firebase.Timestamp.now()
+                    "created_time" to com.google.firebase.Timestamp.now(),
+                    "perfilesVenta" to state.perfilesVentaEdit.map { perfil ->
+                        mapOf(
+                            "id" to perfil.id,
+                            "nombre" to perfil.nombre,
+                            "filtros" to perfil.filtros.map { filtro ->
+                                mapOf(
+                                    "marca" to filtro.marca,
+                                    "categorias" to filtro.categorias
+                                )
+                            }
+                        )
+                    }
                 )
                 photoUrl?.let { data["photo_url"] = it }
                 

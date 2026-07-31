@@ -56,7 +56,7 @@ class RepositoryUsuario(
                 jefeDirectoNombre = jefeSnap.getString("nombre") ?: jefeDirectoId
             }
 
-            // Ruta y Almacen asignado
+            // Ruta y Almacen asignado (Base)
             val rutaRef = userData["rutaAsignada"] as? DocumentReference
             var ultimaRutaId: String? = null
             var ultimaRutaNombre: String? = null
@@ -66,7 +66,7 @@ class RepositoryUsuario(
             if (rutaRef != null) {
                 val rutaSnap = rutaRef.get().await()
                 ultimaRutaId = rutaSnap.id
-                ultimaRutaNombre = rutaSnap.getString("nombre") ?: rutaRef.id
+                ultimaRutaNombre = rutaSnap.getString("nombre") ?: rutaSnap.id
 
                 val almacenRef = rutaSnap.get("almacenAsignado") as? DocumentReference
                 if (almacenRef != null) {
@@ -75,6 +75,53 @@ class RepositoryUsuario(
                     ultimoAlmacenNombre = almacenSnap.getString("nombre") ?: almacenRef.id
                 }
             }
+
+            // --- NUEVA LÓGICA DE COBERTURA Y MULTI-ALMACÉN ---
+            val cobertura = userData["coberturaActiva"] as? Map<String, Any>
+            val expiracion = (cobertura?.get("expiracion") as? com.google.firebase.Timestamp)?.toDate()?.time ?: 0L
+            val esCoberturaValida = cobertura != null && System.currentTimeMillis() < expiracion
+
+            val listaAlmacenesFinal = mutableListOf<String>()
+
+            if (esCoberturaValida) {
+                Log.d("RepositoryUsuario", "🚨 Cobertura de emergencia detectada y válida para $uid")
+                
+                // 1. Sobrescribir Ruta (Para ver los clientes de la ruta que se cubre)
+                val rutaCoberturaRef = cobertura!!["rutaId"] as? DocumentReference
+                if (rutaCoberturaRef != null) {
+                    val rutaSnap = rutaCoberturaRef.get().await()
+                    ultimaRutaId = rutaSnap.id
+                    ultimaRutaNombre = rutaSnap.getString("nombre") ?: rutaSnap.id
+                }
+
+                // 2. Determinar Almacenes Permitidos
+                val modo = cobertura["modo"] as? String ?: "RELEVO"
+                val almacenesCobertura = cobertura["almacenes"] as? List<String> ?: emptyList()
+                
+                listaAlmacenesFinal.addAll(almacenesCobertura)
+
+                // Si es modo RESPALDO, el vendedor usa su propio stock para cubrir otra ruta
+                if (modo == "RESPALDO" && ultimoAlmacenNombre != null) {
+                    if (!listaAlmacenesFinal.contains(ultimoAlmacenNombre)) {
+                        listaAlmacenesFinal.add(ultimoAlmacenNombre)
+                    }
+                }
+            } else {
+                // Modo Normal: Solo su almacén asignado si existe
+                if (ultimoAlmacenNombre != null) {
+                    listaAlmacenesFinal.add(ultimoAlmacenNombre)
+                }
+                
+                // 🔥 SOPORTE MULTI-LÍNEA (Delisa + Frituras) incluso en modo normal
+                val almacenesExtra = userData["almacenesAdicionales"] as? List<String>
+                almacenesExtra?.forEach { if (!listaAlmacenesFinal.contains(it)) listaAlmacenesFinal.add(it) }
+            }
+
+            // --- CONFIGURACIÓN DE VENTA DINÁMICA ---
+            val perfilesRaw = userData["perfilesVenta"] as? List<Map<String, Any>>
+            val perfilesJson = if (perfilesRaw != null) {
+                org.json.JSONArray(perfilesRaw).toString()
+            } else null
 
             val entity = UsuarioEntity(
                 uid = uid,
@@ -88,13 +135,17 @@ class RepositoryUsuario(
                 fechaBaja = fechaBaja,
                 motivoBaja = motivoBaja,
                 createdTime = createdTime,
-                credencialElector = credencialElector,
+                credencialElector = createdTime?.let { "" } ?: credencialElector, // Ajuste menor de compatibilidad
                 jefeDirectoId = jefeDirectoId,
                 jefeDirectoNombre = jefeDirectoNombre,
                 ultimaRutaId = ultimaRutaId,
                 ultimaRutaNombre = ultimaRutaNombre,
                 ultimoAlmacenId = ultimoAlmacenId,
-                ultimoAlmacenNombre = ultimoAlmacenNombre
+                ultimoAlmacenNombre = ultimoAlmacenNombre,
+                almacenesConfig = listaAlmacenesFinal.joinToString(","),
+                enCobertura = esCoberturaValida,
+                expiracionCobertura = if (esCoberturaValida) expiracion else null,
+                perfilesVentaJson = perfilesJson
             )
 
             // Guardar en Room (Se usa REPLACE en el DAO por lo que no es necesario limpiar la tabla)

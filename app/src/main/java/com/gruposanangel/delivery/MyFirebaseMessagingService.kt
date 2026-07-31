@@ -9,6 +9,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
@@ -32,8 +33,9 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     companion object {
         private const val TAG = "MyFirebaseMessaging"
-        private const val CHANNEL_ID_VENTAS = "ventas_channel"   // canal exclusivo para ventas
-        private const val CHANNEL_ID = "default_channel"
+        private const val CHANNEL_ID_VENTAS = "ventas_v3"   // Actualizado a v3
+        private const val CHANNEL_ID_JORNADA = "jornada_v3" // Actualizado a v3
+        private const val CHANNEL_ID = "default_v3"
 
         private const val CHANNEL_NAME = "Notificaciones"
         private const val PREFS_NAME = "fcm_prefs"
@@ -95,6 +97,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val intentAction = when (data["tipo"]) {
             "CARGA_NUEVA" -> "OPEN_NOTIFICACIONES"
             "VENTA_NUEVA" -> "OPEN_VENTA_DETALLE"
+            "JORNADA" -> "OPEN_DASHBOARD_ADMIN"
             else -> "OPEN_MAPA"
         }
 
@@ -114,7 +117,18 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val pendingIntent = PendingIntent.getActivity(this, notificationId, intent, pendingFlags)
 
-        val channelToUse = if (data["tipo"] == "VENTA_NUEVA") CHANNEL_ID_VENTAS else CHANNEL_ID
+        val channelToUse = when (data["tipo"]) {
+            "VENTA_NUEVA" -> CHANNEL_ID_VENTAS
+            "JORNADA" -> CHANNEL_ID_JORNADA
+            else -> CHANNEL_ID
+        }
+
+        val soundUri = when (data["tipo"]) {
+            "VENTA_NUEVA" -> Uri.parse("android.resource://${packageName}/raw/notificacionventa")
+            "JORNADA" -> Uri.parse("android.resource://${packageName}/raw/iniciofinruta")
+            "CARGA_NUEVA" -> Uri.parse("android.resource://${packageName}/raw/sonidonotificacion")
+            else -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        }
 
         val builder = NotificationCompat.Builder(this, channelToUse)
             .setContentTitle(title)
@@ -124,13 +138,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setSound(
-                if (data["tipo"] == "VENTA_NUEVA")
-                    Uri.parse("android.resource://${packageName}/raw/cajaregistradora")
-                else
-                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            )
+            .setDefaults(NotificationCompat.DEFAULT_VIBRATE or NotificationCompat.DEFAULT_LIGHTS)
+            .setSound(soundUri)
 
 
         val imageUrl = data["imagen"]
@@ -188,21 +197,45 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     ============================================================ */
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .build()
+
+            // Canal General / Cargas con sonido personalizado
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_HIGH
-            )
+            ).apply {
+                description = "Notificaciones generales y de carga"
+                setSound(Uri.parse("android.resource://${packageName}/raw/sonidonotificacion"), audioAttributes)
+            }
 
+            // Canal Ventas con sonido personalizado
             val ventasChannel = NotificationChannel(
                 CHANNEL_ID_VENTAS,
-                "Ventas", // nombre legible para el usuario
+                "Ventas",
                 NotificationManager.IMPORTANCE_HIGH
-            )
+            ).apply {
+                description = "Notificaciones de ventas realizadas"
+                setSound(Uri.parse("android.resource://${packageName}/raw/notificacionventa"), audioAttributes)
+            }
+
+            // Canal Jornada con sonido personalizado
+            val jornadaChannel = NotificationChannel(
+                CHANNEL_ID_JORNADA,
+                "Jornada Laboral",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Inicio y fin de ruta de vendedores"
+                setSound(Uri.parse("android.resource://${packageName}/raw/iniciofinruta"), audioAttributes)
+            }
 
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
-            manager?.createNotificationChannel(ventasChannel) // <- registrar el canal de ventas
+            manager?.createNotificationChannel(ventasChannel)
+            manager?.createNotificationChannel(jornadaChannel)
         }
     }
 

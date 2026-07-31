@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import androidx.compose.ui.text.style.TextAlign
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.gruposanangel.delivery.R
@@ -53,19 +54,23 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.*
 
-private val categoriasPorMarca = mapOf("Delisa" to listOf("Botanas", "Dulces"), "El Cazador" to listOf("Carnes frías", "Chiles secos"))
-private val subcategoriasPorCategoria = mapOf("Carnes frías" to listOf("Jamón", "Salchicha"), "Chiles secos" to listOf("Guajillo", "Pasilla"), "Botanas" to listOf("Cacahuates", "Semillas", "Mix"), "Dulces" to listOf("Caramelos", "Chocolates", "Gomitas", "Enchilados"))
-
 @Composable
 fun CrearProductoScreen(navController: NavController) {
     val context = LocalContext.current; val scope = rememberCoroutineScope(); val isPreview = LocalInspectionMode.current
+    val viewModel: ProductoFormViewModel = viewModel()
+    val configState by viewModel.uiState.collectAsState()
+    
     var isLoading by remember { mutableStateOf(false) }; var errorMessage by remember { mutableStateOf<String?>(null) }
     var imageBitmap by remember { mutableStateOf<Bitmap?>(null) }; var imageFile by remember { mutableStateOf<File?>(null) }
     val launcherGallery = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { scope.launch { val file = createImageFile2(context); context.contentResolver.openInputStream(it)?.use { input -> FileOutputStream(file).use { output -> input.copyTo(output) } }; imageFile = file; imageBitmap = BitmapFactory.decodeFile(file.absolutePath) } } }
     val launcherCamera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bmp -> bmp?.let { val file = createImageFile2(context); FileOutputStream(file).use { out -> it.compress(Bitmap.CompressFormat.JPEG, 85, out) }; imageFile = file; imageBitmap = bmp } }
 
     CrearProductoContent(
-        isLoading = isLoading, errorMessage = errorMessage, imageBitmap = imageBitmap,
+        isLoading = isLoading || configState.isLoading, 
+        errorMessage = errorMessage, 
+        imageBitmap = imageBitmap,
+        marcas = configState.marcas,
+        categoriasMap = configState.categoriasPorMarca,
         onBack = { navController.popBackStack() },
         onImageSourceSelected = { isCamera -> if (isCamera) launcherCamera.launch(null) else launcherGallery.launch("image/*") },
         onGuardar = { n, m, c, s, d, p, cu, ud, gv, pc ->
@@ -99,7 +104,16 @@ fun CrearProductoScreen(navController: NavController) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CrearProductoContent(isLoading: Boolean, errorMessage: String?, imageBitmap: Bitmap?, onBack: () -> Unit, onImageSourceSelected: (Boolean) -> Unit, onGuardar: (String, String, String, String, String, Double, String, String, String, Double) -> Unit) {
+fun CrearProductoContent(
+    isLoading: Boolean, 
+    errorMessage: String?, 
+    imageBitmap: Bitmap?, 
+    marcas: List<String> = emptyList(),
+    categoriasMap: Map<String, List<String>> = emptyMap(),
+    onBack: () -> Unit, 
+    onImageSourceSelected: (Boolean) -> Unit, 
+    onGuardar: (String, String, String, String, String, Double, String, String, String, Double) -> Unit
+) {
     var nombre by remember { mutableStateOf(TextFieldValue("")) }; var descripcion by remember { mutableStateOf(TextFieldValue("")) }; var precio by remember { mutableStateOf(TextFieldValue("")) }
     var cantidadUnitario by remember { mutableStateOf(TextFieldValue("")) }
     var unidadesPorDisplay by remember { mutableStateOf(TextFieldValue("")) }
@@ -144,9 +158,9 @@ fun CrearProductoContent(isLoading: Boolean, errorMessage: String?, imageBitmap:
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     ModernField("Nombre", nombre, Icons.Outlined.Label) { nombre = it }
-                    DropdownField("Marca", marca, listOf("Delisa", "El Cazador"), Icons.Outlined.Bookmark) { marca = it; categoria = ""; subcategoria = "" }
-                    DropdownField("Categoría", categoria, categoriasPorMarca[marca].orEmpty(), Icons.Outlined.Category, enabled = marca.isNotEmpty()) { categoria = it; subcategoria = "" }
-                    DropdownField("Subcategoría", subcategoria, subcategoriasPorCategoria[categoria].orEmpty(), Icons.Outlined.Layers, enabled = categoria.isNotEmpty()) { subcategoria = it }
+                    DropdownField("Marca", marca, marcas.ifEmpty { listOf("Delisa", "El Cazador") }, Icons.Outlined.Bookmark) { marca = it; categoria = ""; subcategoria = "" }
+                    DropdownField("Categoría", categoria, categoriasMap[marca].orEmpty(), Icons.Outlined.Category, enabled = marca.isNotEmpty()) { categoria = it; subcategoria = "" }
+                    DropdownField("Subcategoría", subcategoria, emptyList(), Icons.Outlined.Layers, enabled = false) { subcategoria = it }
                     ModernField("Descripción", descripcion, Icons.Outlined.Description, maxLines = 3) { descripcion = it }
                     
                     Text(
@@ -262,5 +276,5 @@ fun createImageFile2(context: android.content.Context): File { val dir = File(co
 @Preview(showBackground = true, showSystemUi = true, name = "Crear Producto - Formulario")
 @Composable
 fun CrearProductoPreview() {
-    DeliveryTheme { CrearProductoContent(false, null, null, {}, {}, {_,_,_,_,_,_,_,_,_,_ ->}) }
+    DeliveryTheme { CrearProductoContent(false, null, null, emptyList(), emptyMap(), {}, {}, {_,_,_,_,_,_,_,_,_,_ ->}) }
 }

@@ -361,7 +361,7 @@ fun PantallaHistorialCargas(
 
     if (showDateRangePicker) {
         val dateRangePickerState = rememberDateRangePickerState(initialSelectedStartDateMillis = uiState.fechaInicio, initialSelectedEndDateMillis = uiState.fechaFin)
-        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+        val isDark = ThemeConfig.isActuallyDark
         
         DeliveryTheme(darkTheme = isDark) {
             DatePickerDialog(

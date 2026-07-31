@@ -50,8 +50,10 @@ import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.data.RepositoryInventario
+import com.gruposanangel.delivery.data.PerfilVenta
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.DelisaRed
 import java.text.NumberFormat
 import java.util.*
 
@@ -76,23 +78,34 @@ fun PantallaInventario(
         uiState = uiState,
         onNotificacionClick = { navController.navigate("NOTIFICACIONES") },
         onAlmacenSelect = { viewModel.seleccionarAlmacen(it) },
-        onVistaGlobalClick = { viewModel.activarVistaGlobal() }
+        onVistaGlobalClick = { viewModel.activarVistaGlobal() },
+        onPerfilSelect = { viewModel.seleccionarPerfil(it) }
     )
 }
 
 @Composable
 fun PantallaInventarioContent(
-    navController: NavController, // 🔥 Añadido
+    navController: NavController,
     uiState: InventarioUiState,
     onNotificacionClick: () -> Unit,
     onAlmacenSelect: (String) -> Unit = {},
-    onVistaGlobalClick: () -> Unit = {}
+    onVistaGlobalClick: () -> Unit = {},
+    onPerfilSelect: (PerfilVenta) -> Unit = {}
 ) {
     var verDanado by remember { mutableStateOf(false) }
     val productosAMostrar = if (verDanado) uiState.productosDanados else uiState.productos
     
     val totalProductos = productosAMostrar.sumOf { it.cantidad }
     val valorTotal = productosAMostrar.sumOf { it.cantidad * it.precio }
+
+    val listState = rememberLazyListState()
+
+    // 🔥 AUTO-SCROLL AL CAMBIAR DE OPCIÓN
+    LaunchedEffect(uiState.perfilSeleccionado, verDanado, uiState.almacenSeleccionado) {
+        if (productosAMostrar.isNotEmpty()) {
+            listState.animateScrollToItem(0)
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(
@@ -119,6 +132,15 @@ fun PantallaInventarioContent(
                 onNotificacionClick = onNotificacionClick,
                 titulo = if (verDanado) "DEVOLUCIONES/DAÑADOS" else (uiState.almacenSeleccionado ?: "MI INVENTARIO")
             )
+
+            // 🔹 SELECTOR DE PERFIL (Solo para vendedores o si no es vista global admin)
+            if (!uiState.isAdmin || (uiState.almacenSeleccionado?.startsWith("Vendedor") == true && !uiState.esVistaGlobal)) {
+                PerfilVentaSelector(
+                    perfiles = uiState.perfilesDisponibles,
+                    seleccionado = uiState.perfilSeleccionado,
+                    onSeleccionar = onPerfilSelect
+                )
+            }
 
             // 🔹 BOTÓN DE ARQUEO / LIQUIDACIÓN (Solo para Admins viendo a un Vendedor)
             if (uiState.isAdmin && uiState.almacenSeleccionado?.startsWith("Vendedor") == true && !uiState.esVistaGlobal) {
@@ -182,6 +204,7 @@ fun PantallaInventarioContent(
                     Text(msg, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 } else {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(), 
                         verticalArrangement = Arrangement.spacedBy(10.dp), 
                         contentPadding = PaddingValues(bottom = 80.dp)
@@ -441,15 +464,15 @@ fun ResumenInventario(
                                 shape = CircleShape,
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .offset(x = 2.dp, y = (-2).dp)
-                                    .size(20.dp),
-                                border = BorderStroke(2.dp, com.gruposanangel.delivery.ui.theme.DelisaRed)
+                                    .offset(x = 4.dp, y = (-4).dp) // 🔥 Ajustado para que sobresalga un poco más
+                                    .size(22.dp), // 🔥 Ligeramente más grande
+                                border = BorderStroke(2.dp, Color.White) // 🔥 Borde blanco para máximo contraste sobre rojo
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = notificacionesCount.toString(), 
+                                        text = if (notificacionesCount > 99) "99+" else notificacionesCount.toString(), 
                                         color = Color.White, 
-                                        fontSize = 10.sp, 
+                                        fontSize = 9.sp, // 🔥 Ajustado para que quepa bien
                                         fontWeight = FontWeight.Black
                                     )
                                 }
@@ -531,7 +554,12 @@ fun PantallaInventarioPreview() {
     DeliveryTheme {
         PantallaInventarioContent(
             navController = rememberNavController(),
-            uiState = InventarioUiState(isLoading = false, productos = productos, rutaAsignada = "Ruta 1"),
+            uiState = InventarioUiState(
+                isLoading = false, 
+                productos = productos, 
+                rutaAsignada = "Ruta 1",
+                notificaciones = listOf(Notificacion(titulo = "Test", mensaje = "Msg", fecha = ""))
+            ),
             onNotificacionClick = {}
         )
     }

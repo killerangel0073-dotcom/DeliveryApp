@@ -42,6 +42,7 @@ import coil.compose.AsyncImage
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.VentaEntity
 import com.gruposanangel.delivery.VentaRepository
+import com.gruposanangel.delivery.data.PerfilVenta
 import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.PantallaSeleccionImpresora
 import java.text.NumberFormat
@@ -233,7 +234,7 @@ fun DashboardContent(
             initialSelectedStartDateMillis = startDate.time,
             initialSelectedEndDateMillis = endDate.time
         )
-        val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+        val isDark = ThemeConfig.isActuallyDark
 
         DeliveryTheme(darkTheme = isDark) {
             DatePickerDialog(
@@ -854,6 +855,11 @@ fun DashboardContent(
                             }
                         }
                         item {
+                            AccionCard("Almacenes", Icons.Default.Warehouse, Color(0xFFFF5722), Modifier.width(100.dp)) {
+                                onNavigate("ADMIN_ALMACENES")
+                            }
+                        }
+                        item {
                             AccionCard("Auditorías", Icons.Default.FactCheck, Color(0xFF607D8B), Modifier.width(100.dp)) {
                                 onNavigate("HISTORIAL_CARGAS")
                             }
@@ -1214,6 +1220,19 @@ fun VendedorCard(
                 MetricItem("TICKET PROM.", formato.format(seller.ticketPromedio), Modifier.weight(1.3f))
                 MetricDivider()
                 MetricItem("VENTAS", "${seller.totalTicketsActivos}", Modifier.weight(1f))
+            }
+            
+            // 🔥 NUEVA SECCIÓN: DESGLOSE POR PERFIL (En tarjeta de administrador)
+            if (seller.perfilesVenta.size > 1) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                Spacer(Modifier.height(12.dp))
+                BreakdownPerfiles(
+                    breakdown = seller.breakdown,
+                    formato = formato,
+                    mostrarTitulo = false, // No hace falta título aquí, ya estamos en el vendedor
+                    compacto = true // Estilo más pequeño para el dashboard admin
+                )
             }
         }
     }

@@ -52,7 +52,7 @@ fun PantallaLoginPro(onLoginSuccess: () -> Unit) {
     )
     val uiState by viewModel.uiState.collectAsState()
 
-    val isDark = ThemeConfig.isDarkTheme.value ?: isSystemInDarkTheme()
+    val isDark = ThemeConfig.isActuallyDark
 
     DeliveryTheme(darkTheme = isDark) {
         PantallaLoginProContent(
