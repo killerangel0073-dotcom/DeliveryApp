@@ -37,4 +37,10 @@ interface GastoDao {
 
     @Query("DELETE FROM gastos WHERE fecha < :limite")
     suspend fun limpiarGastosAntiguos(limite: Long)
+
+    @Query("DELETE FROM gastos WHERE id = :id")
+    suspend fun eliminarGastoPorId(id: String)
+
+    @Query("SELECT * FROM gastos WHERE esFijo = 1 AND activo = 1")
+    fun obtenerGastosFijosActivos(): Flow<List<GastoEntity>>
 }

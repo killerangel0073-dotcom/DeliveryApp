@@ -1,12 +1,12 @@
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const admin = require('firebase-admin');
-const db = admin.firestore();
 
 /**
  * Cloud Function para procesar ajustes de inventario (Cambios, Devoluciones y Cargas Manuales)
  * Trigger: onCreate en ajustes_inventario/{ajusteId}
  */
 exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajusteId}', async (event) => {
+    const db = admin.firestore();
     const data = event.data.data();
     const ajusteId = event.params.ajusteId;
 
@@ -19,9 +19,11 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
       return null;
     }
 
-    const stockId = `${productoId}_${almacenNombre}`;
+    const stockId = `${productoId}_${almacenNombre}`.trim();
     const stockRef = db.collection('inventarioStock').doc(stockId);
     const danadoRef = db.collection('inventarioDanado').doc(stockId);
+
+    console.log(`📦 Procesando ajuste para: ${stockId} | Tipo: ${tipo} | Cant: ${cantidad}`);
 
     // 🛡️ UNIFICACIÓN: Si es una carga manual, creamos o actualizamos el registro de "Orden" para el historial oficial
     if (tipo === 'CARGA_INVENTARIO' && referenciaId && referenciaId.startsWith('DIRECT_LOAD')) {
@@ -70,6 +72,7 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
           case 'CARGA_INVENTARIO':
           case 'ENTRADA_CAMBIO_BUENO':
           case 'AJUSTE_ARQUEO_SOBRANTE': // 🔥 Nueva lógica: Suma
+          case 'RETORNO_LIQUIDACION':    // 🔥 Nuevo: Maneja tanto sumas como restas según el signo
             nuevaCantidad = cantidadActual + cantidad;
             actualizaStockBueno = true;
             break;
@@ -89,12 +92,16 @@ exports.procesarAjusteInventario = onDocumentCreated('ajustes_inventario/{ajuste
         }
 
         if (actualizaStockBueno) {
+          console.log(`📝 Actualizando Stock Bueno: ${stockId} -> Nueva Cant: ${nuevaCantidad}`);
           transaction.set(stockRef, {
             cantidad: nuevaCantidad,
             ultimaActualizacion: admin.firestore.FieldValue.serverTimestamp(),
-            almacenNombre: almacenNombre,
+            almacenNombre: almacenNombre.trim(),
             productoId: productoId,
-            productoNombre: nombreProducto || 'Producto'
+            productoNombre: nombreProducto || 'Producto',
+            // 🔥 CRITICO: Agregar referencias para que la App pueda leer el producto
+            productoRef: db.collection('producto').doc(productoId),
+            almacenRef: db.collection('almacenes').doc(almacenNombre.trim())
           }, { merge: true });
         }
 

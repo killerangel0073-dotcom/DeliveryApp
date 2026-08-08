@@ -134,9 +134,31 @@ class AnalyticsViewModel : ViewModel() {
                     it.id to ((it.getString("marca") ?: "Delisa") to (it.getString("categoria") ?: "General"))
                 }
                 
-                // 0.1 Obtener Usuarios para fotos de vendedores
+                // 0.1 Obtener Usuarios, Rutas y Clientes para mapeo completo
                 val usersSnap = db.collection("users").get().await()
-                val userPhotos = usersSnap.documents.associate { it.id to it.getString("photo_url") }
+                val rutasSnap = db.collection("rutas").get().await()
+                val clientesSnap = db.collection("clientes").get().await()
+                
+                val userMap = usersSnap.documents.associateBy { it.id }
+                val clientToRutaMap = clientesSnap.documents.associate { 
+                    it.id to (it.getString("rutaId") ?: it.getString("id_ruta") ?: "") 
+                }
+                
+                // Mapeo: AlmacenID -> { RutaNombre, VendedorNombre, FotoUrl, VendedorUid }
+                val mappingRutas = rutasSnap.documents.mapNotNull { rDoc ->
+                    val almRef = rDoc.getDocumentReference("almacenAsignado") ?: return@mapNotNull null
+                    val vendRef = rDoc.getDocumentReference("vendedorAsignado")
+                    val rutaNom = rDoc.getString("nombre") ?: rDoc.id
+                    
+                    val vendDoc = vendRef?.let { userMap[it.id] }
+                    
+                    almRef.id to object {
+                        val nombreRuta = rutaNom
+                        val nombreVendedor = vendDoc?.getString("nombre") ?: rutaNom.replace("Vendedor ", "")
+                        val foto = vendDoc?.getString("photo_url") ?: vendDoc?.getString("foto_url") ?: ""
+                        val uid = vendDoc?.id ?: almRef.id
+                    }
+                }.toMap()
 
                 // 1. Obtener Ventas
                 val ventasSnap = db.collection("ventas")
@@ -152,43 +174,43 @@ class AnalyticsViewModel : ViewModel() {
                     .whereLessThanOrEqualTo("timestamp", endTs)
                     .get().await()
 
-                Log.d("AnalyticsVM", "Gastos recuperados: ${gastosSnap.size()}")
-
-                // PROCESAMIENTO DE VENTAS Y PRODUCTOS
-                val totalGastos = gastosSnap.documents.sumOf { (it.get("monto") as? Number)?.toDouble() ?: 0.0 }
-
+                // PROCESAMIENTO
                 val productosMap = mutableMapOf<String, ProductStat>()
-                val vendedoresMap = mutableMapOf<String, SellerStat>()
+                val rankingMap = mutableMapOf<String, SellerStat>() // Key: Identificador Unificado de Ruta
 
-                // Pre-cargar vendedores desde la lista de usuarios para asegurar que aparezcan aunque no tengan ventas
-                usersSnap.documents.forEach { doc ->
-                    vendedoresMap[doc.id] = SellerStat(
-                        uid = doc.id,
-                        nombre = doc.getString("nombre") ?: "Vendedor",
+                // Inicializar ranking con todas las rutas conocidas (para que salgan aunque estén en $0)
+                mappingRutas.forEach { (_, info) ->
+                    val idRuta = info.nombreRuta
+                    rankingMap[idRuta] = SellerStat(
+                        uid = info.uid,
+                        nombre = info.nombreVendedor,
                         totalVenta = 0.0,
                         totalGastos = 0.0,
                         numTickets = 0,
                         cancelaciones = 0,
-                        fotoUrl = doc.getString("photo_url")
+                        fotoUrl = info.foto
                     )
                 }
 
-                // Obtener productos de las ventas y procesar montos filtrados por vendedor
                 coroutineScope {
                     val deferedVentasData = ventasSnap.documents.map { vDoc ->
                         async {
-                            val vId = vDoc.getString("vendedorId") ?: ""
+                            // 🔥 Prioridad RutaId, Fallback AlmacenId
+                            val rIdVenta = vDoc.getString("rutaId") ?: vDoc.getString("rutaNombre")
+                            val almId = vDoc.getString("almacenId") ?: vDoc.getString("almacenVendedorId") ?: ""
+                            val cId = vDoc.getString("clienteId") ?: ""
+                            
+                            // 🚀 UNIFICACIÓN CON FALLBACK A CLIENTE:
+                            val rankingKey = rIdVenta ?: mappingRutas[almId]?.nombreRuta ?: clientToRutaMap[cId] ?: almId
+                            
                             val esCancelada = vDoc.getString("estado") == "CANCELADA"
                             
                             val pSnap = vDoc.reference.collection("productos").get().await()
                             val prodsFiltrados = pSnap.documents.mapNotNull { pDoc ->
                                 val pId = pDoc.id
-                                
-                                // RECUPERACIÓN DE CLASIFICACIÓN
                                 val mReal = pDoc.getString("marca") ?: masterCatalog[pId]?.first ?: "Delisa"
                                 val cReal = pDoc.getString("categoria") ?: masterCatalog[pId]?.second ?: "General"
 
-                                // APLICAR FILTRO DE PERFIL OPERATIVO
                                 if (perfilFiltro != null && perfilFiltro.id != "ALL") {
                                     val cumple = perfilFiltro.filtros.any { f ->
                                         val matchMarca = mReal.trim().equals(f.marca.trim(), ignoreCase = true)
@@ -210,24 +232,25 @@ class AnalyticsViewModel : ViewModel() {
                                     cat = cReal
                                 )
                             }
-                            Triple(vId, esCancelada, prodsFiltrados)
+                            Triple(rankingKey, esCancelada, prodsFiltrados)
                         }
                     }
                     
                     val resultados = deferedVentasData.awaitAll()
                     var totalGlobalFiltrado = 0.0
 
-                    resultados.forEach { (vId, esCancelada, prods) ->
-                        if (prods.isEmpty()) return@forEach 
+                    resultados.forEach { (rankingKey, esCancelada, prods) ->
+                        if (prods.isEmpty() || rankingKey.isEmpty()) return@forEach 
                         
-                        val stat = vendedoresMap[vId] ?: return@forEach
+                        // Si la ruta no estaba inicializada, se crea una entrada de respaldo
+                        val stat = rankingMap[rankingKey] ?: SellerStat(rankingKey, rankingKey, 0.0, 0.0, 0, 0)
                         val montoTicketFiltrado = prods.sumOf { it.prec * it.cant }
 
                         if (esCancelada) {
-                            vendedoresMap[vId] = stat.copy(cancelaciones = stat.cancelaciones + 1)
+                            rankingMap[rankingKey] = stat.copy(cancelaciones = stat.cancelaciones + 1)
                         } else {
                             totalGlobalFiltrado += montoTicketFiltrado
-                            vendedoresMap[vId] = stat.copy(
+                            rankingMap[rankingKey] = stat.copy(
                                 totalVenta = stat.totalVenta + montoTicketFiltrado,
                                 numTickets = stat.numTickets + 1
                             )
@@ -243,13 +266,20 @@ class AnalyticsViewModel : ViewModel() {
                         }
                     }
 
-                    // Sumamos gastos a vendedores (Esto no depende del perfil, es operativo de la ruta)
+                    // Sumamos gastos (Consolidando por nombre de ruta)
                     gastosSnap.documents.forEach { doc ->
-                        val vId = doc.getString("vendedorId") ?: return@forEach
                         val monto = (doc.get("monto") as? Number)?.toDouble() ?: 0.0
-                        val actual = vendedoresMap[vId]
-                        if (actual != null) {
-                            vendedoresMap[vId] = actual.copy(totalGastos = actual.totalGastos + monto)
+                        val vId = doc.getString("vendedorId") ?: ""
+                        val rIdGasto = doc.getString("rutaId") ?: doc.getString("rutaNombre")
+                        
+                        val targetRankingId = rIdGasto ?: run {
+                            val almIdInferred = doc.getString("almacenId") ?: mappingRutas.entries.find { it.value.uid == vId }?.key
+                            mappingRutas[almIdInferred]?.nombreRuta ?: almIdInferred
+                        }
+                        
+                        if (targetRankingId != null && rankingMap.containsKey(targetRankingId)) {
+                            val actual = rankingMap[targetRankingId]!!
+                            rankingMap[targetRankingId] = actual.copy(totalGastos = actual.totalGastos + monto)
                         }
                     }
 
@@ -258,7 +288,7 @@ class AnalyticsViewModel : ViewModel() {
                         .map { (cat, docs) -> ExpenseStat(cat, docs.sumOf { (it.get("monto") as? Number)?.toDouble() ?: 0.0 }) }
                         .sortedByDescending { it.total }
 
-                    // Ventas por día (Tendencia)
+                    // Gráfico (Tendencia)
                     val calGroup = Calendar.getInstance()
                     val ventasDiaMap = ventasSnap.documents.filter { it.getString("estado") != "CANCELADA" }.groupBy { 
                         val ts = it.getTimestamp("fecha")?.toDate()?.time ?: 0L
@@ -274,14 +304,16 @@ class AnalyticsViewModel : ViewModel() {
                         DayStat(fecha = displayFormat.format(Date(e.key)).uppercase(), monto = e.value, timestamp = e.key) 
                     }.sortedBy { it.timestamp }
 
+                    val finalTotalGastos = gastosSnap.documents.sumOf { (it.get("monto") as? Number)?.toDouble() ?: 0.0 }
+
                     withContext(Dispatchers.Main) {
                         _uiState.update { it.copy(
                             isLoading = false,
                             totalVentaBruta = totalGlobalFiltrado,
-                            totalGastos = totalGastos,
-                            utilidadOperativa = totalGlobalFiltrado - totalGastos,
+                            totalGastos = finalTotalGastos,
+                            utilidadOperativa = totalGlobalFiltrado - finalTotalGastos,
                             topProductos = productosMap.values.sortedByDescending { it.cantidad }.take(5),
-                            rankingVendedores = vendedoresMap.values.filter { it.numTickets > 0 || it.totalVenta > 0 }.sortedByDescending { it.totalVenta },
+                            rankingVendedores = rankingMap.values.filter { it.numTickets > 0 || it.totalVenta > 0 }.sortedByDescending { it.totalVenta },
                             desgloseGastos = gastosPorCat,
                             ventasPorDia = trend,
                             error = null

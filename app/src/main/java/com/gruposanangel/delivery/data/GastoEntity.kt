@@ -13,5 +13,10 @@ data class GastoEntity(
     val vendedorId: String,
     val vendedorNombre: String,
     val rutaNombre: String,
-    val sincronizado: Boolean = false
+    val sincronizado: Boolean = false,
+    
+    // 🔥 NUEVOS CAMPOS FINANCIEROS
+    val esFijo: Boolean = false,          // true para Renta, Sueldos, etc.
+    val periodicidad: String = "UNICO",    // "UNICO", "QUINCENAL", "MENSUAL"
+    val activo: Boolean = true             // Para dar de baja gastos fijos sin borrarlos
 )

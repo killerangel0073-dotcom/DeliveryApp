@@ -88,7 +88,7 @@ class LocationService : Service() {
     private val TAG = "LocationService"
     private val RTDB_URL = "https://appventas--san-angel-default-rtdb.firebaseio.com/"
 
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private var fusedLocationClient: FusedLocationProviderClient? = null
     private val firebaseUser get() = FirebaseAuth.getInstance().currentUser
     private val firestore = FirebaseFirestore.getInstance()
     private val rtdb = FirebaseDatabase.getInstance(RTDB_URL).reference // 🚀 RTDB con URL explícita
@@ -162,7 +162,15 @@ class LocationService : Service() {
             return
         }
 
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        try {
+            if (com.gruposanangel.delivery.utilidades.GoogleServicesUtils.isGooglePlayServicesAvailable(this)) {
+                fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+            } else {
+                Log.w(TAG, "⚠️ Huawei/Sin GMS detectado: FusedLocation deshabilitado.")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error crítico instanciando FusedLocation: ${e.message}")
+        }
         
         val db = AppDatabase.getDatabase(this)
         repoLocation = RepositoryLocation(db.locationDao())
@@ -193,7 +201,17 @@ class LocationService : Service() {
 
             val loc = lastLocation ?: continue
             val user = firebaseUser ?: continue
-            val ruta = rutaNombreCache ?: cargarRutaSuspend(user.uid) ?: continue
+            
+            // 🛡️ FILTRO DE RASTREO ESTRICTO
+            // Solo subimos ubicación si el usuario tiene una ruta asignada explícitamente.
+            // Si no tiene ruta, el servicio sigue funcionando localmente (para distancias en UI)
+            // pero se mantiene en "Modo Pasivo" (sin subir a la nube).
+            val ruta = cargarRutaSuspend(user.uid) 
+            if (ruta == null) {
+                // Modo Pasivo: Actualizamos solo el estado local para distancias
+                LocationState.updateUbicacion(loc)
+                continue 
+            }
 
             val now = System.currentTimeMillis()
             val tiempoSinSubir = now - lastUploadTimestamp
@@ -384,6 +402,8 @@ class LocationService : Service() {
 
 
     private fun requestLocationUpdates() {
+        val client = fusedLocationClient ?: return
+        
         // Configuramos para que SEA AGRESIVO buscando GPS real, no caché
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L)
             .setMinUpdateIntervalMillis(2000L)
@@ -394,7 +414,7 @@ class LocationService : Service() {
 
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             try {
-                fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+                client.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
             } catch (e: Exception) { Log.e(TAG, "Error GPS", e) }
         }
     }
@@ -774,24 +794,17 @@ class LocationService : Service() {
     }
 
     private suspend fun cargarRutaSuspend(userId: String): String? {
-        if (rutaNombreCache != null) return rutaNombreCache
         return try {
             val userDoc = firestore.collection("users").document(userId).get().await()
             val rutaRef = userDoc.getDocumentReference("rutaAsignada")
 
             if (rutaRef != null) {
                 val snapshot = rutaRef.get().await()
-                // Intentamos sacar el nombre, si no existe, usamos el ID del documento (ej. "Ruta 2")
-                val nombre = snapshot.getString("nombre") ?: rutaRef.id
-                rutaNombreCache = nombre
-                Log.d(TAG, "Ruta detectada: $nombre")
-                nombre
+                snapshot.getString("nombre") ?: rutaRef.id
             } else {
-                Log.e(TAG, "El usuario no tiene rutaAsignada en Firestore")
                 null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error cargando ruta: ${e.message}")
             null
         }
     }
@@ -849,7 +862,7 @@ class LocationService : Service() {
         isRunning = false
         configListener?.remove()
         configListener = null
-        try { fusedLocationClient.removeLocationUpdates(locationCallback) } catch (e: Exception) {}
+        try { fusedLocationClient?.removeLocationUpdates(locationCallback) } catch (e: Exception) {}
         detenerAlarma()
         serviceJob.cancel()
         if (wakeLock?.isHeld == true) wakeLock?.release()

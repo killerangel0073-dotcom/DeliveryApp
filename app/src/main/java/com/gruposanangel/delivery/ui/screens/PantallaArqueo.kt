@@ -74,15 +74,13 @@ fun PantallaArqueo(navController: NavController) {
     val uiState by viewModel.uiState.collectAsState()
     var tabIndex by remember { mutableIntStateOf(0) }
     var showAuthDialog by remember { mutableStateOf(false) }
+    var showSuccessDialog by remember { mutableStateOf(false) }
 
     val isDark = ThemeConfig.isActuallyDark
 
     LaunchedEffect(uiState.reporteGuardado) {
         if (uiState.reporteGuardado) {
-            Toast.makeText(context, "Inventario actualizado y arqueo cerrado", Toast.LENGTH_LONG).show()
-            val file = GenerarPDFArqueo(context, uiState)
-            mostrarReporteArqueo(context, file)
-            navController.popBackStack()
+            showSuccessDialog = true
         }
     }
 
@@ -147,6 +145,27 @@ fun PantallaArqueo(navController: NavController) {
                 }
             }
         }
+
+        // 🔥 OVERLAY DE CARGA GLOBAL
+        if (uiState.isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+                    .clickable(enabled = false) {},
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = DelisaRed)
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Procesando Auditoría...",
+                        fontWeight = FontWeight.Bold,
+                        color = DelisaRed
+                    )
+                }
+            }
+        }
     }
 
     if (showAuthDialog) {
@@ -190,6 +209,48 @@ fun PantallaArqueo(navController: NavController) {
                 TextButton(onClick = { showAuthDialog = false }, enabled = !uiState.isLoading) { 
                     Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant) 
                 }
+            },
+            shape = RoundedCornerShape(28.dp)
+        )
+    }
+
+    if (showSuccessDialog) {
+        AlertDialog(
+            onDismissRequest = { 
+                showSuccessDialog = false
+                val file = GenerarPDFArqueo(context, uiState)
+                mostrarReporteArqueo(context, file)
+                navController.popBackStack()
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.Verified, 
+                    contentDescription = null, 
+                    tint = DelisaGreenDark,
+                    modifier = Modifier.size(48.dp)
+                )
+            },
+            title = { Text("Arqueo Finalizado", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) },
+            text = { 
+                Text(
+                    text = "El inventario ha sido actualizado y el arqueo se ha cerrado correctamente.\n\nA continuación se generará el reporte PDF de auditoría.", 
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                ) 
+            },
+            confirmButton = {
+                Button(
+                    onClick = { 
+                        showSuccessDialog = false
+                        val file = GenerarPDFArqueo(context, uiState)
+                        mostrarReporteArqueo(context, file)
+                        navController.popBackStack() 
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("VER REPORTE Y FINALIZAR", color = Color.White, fontWeight = FontWeight.Bold) }
             },
             shape = RoundedCornerShape(28.dp)
         )
@@ -410,9 +471,22 @@ fun ArqueoFisicoTab(state: ArqueoUiState, onUpdateReal: (String, String) -> Unit
             }
         }
 
-        LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(state.productosArqueo, key = { it.id }) { producto ->
-                ItemProductoArqueoPremium(producto, onUpdateReal)
+        val productosPorCategoria = remember(state.productosArqueo) {
+            state.productosArqueo.groupBy { it.categoria }
+        }
+
+        LazyColumn(
+            modifier = Modifier.weight(1f).padding(horizontal = 16.dp), 
+            // verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            productosPorCategoria.forEach { (categoria, productos) ->
+                item(key = "header_$categoria") {
+                    CategoryHeader(categoria)
+                }
+                items(productos, key = { it.id }) { producto ->
+                    ItemProductoArqueoPremium(producto, onUpdateReal)
+                    Spacer(Modifier.height(12.dp))
+                }
             }
         }
 

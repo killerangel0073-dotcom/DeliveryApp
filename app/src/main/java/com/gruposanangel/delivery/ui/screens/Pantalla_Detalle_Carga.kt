@@ -96,18 +96,13 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
     val esEmergencia = uiState.carga?.nombreCarga?.contains("EMERGENCIA") == true
     val esCancelada = uiState.carga?.estado == "CANCELADA"
     
-    // 🔥 CONTROL DE SEGURIDAD: Solo el vendedor puede aceptar la carga
-    // 🛡️ ACTUALIZACIÓN: Si es Almacen Huasteca, solo CEO/Gerente.
-    val puesto = uiState.puestoTrabajo?.trim() ?: ""
-    val esVendedor = puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta"
-    val esDirectivo = puesto == "CEO" || puesto == "Gerente General"
-    val esHuasteca = uiState.destinoAlmacen == "Almacen Huasteca"
-
-    val autorizadaParaAceptar = if (esHuasteca) esDirectivo else esVendedor
-    val mensajeErrorPermiso = if (esHuasteca) 
-        "SOLO EL CEO O GERENTE PUEDEN ACEPTAR ESTA CARGA" 
-    else 
-        "SOLO EL VENDEDOR PUEDE CONFIRMAR ESTA CARGA"
+    // 🔥 CONTROL DE SEGURIDAD: Vendedores y Administradores pueden aceptar cargas
+    val puesto = uiState.puestoTrabajo?.trim()?.uppercase() ?: ""
+    val esVendedor = puesto == "VENDEDOR DE RUTA" || puesto == "SUPLENTE DE RUTA"
+    val esAdmin = puesto.contains("CEO") || puesto.contains("GERENTE") || puesto.contains("SUPERVISOR") || puesto.contains("ADMIN")
+    
+    val autorizadaParaAceptar = esVendedor || esAdmin
+    val mensajeErrorPermiso = "ESTA CUENTA NO TIENE PERMISOS PARA ACEPTAR CARGAS"
 
     Scaffold(
         topBar = {

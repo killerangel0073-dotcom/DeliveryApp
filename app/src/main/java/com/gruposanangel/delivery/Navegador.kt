@@ -310,10 +310,14 @@ fun Navegador(
         }
 
         composable(
-            route = "ventas_room?clienteId={clienteId}",
-            arguments = listOf(navArgument("clienteId") { type = NavType.StringType; nullable = true })
+            route = "ventas_room?clienteId={clienteId}&isAdminOverride={isAdminOverride}",
+            arguments = listOf(
+                navArgument("clienteId") { type = NavType.StringType; nullable = true },
+                navArgument("isAdminOverride") { type = NavType.BoolType; defaultValue = true }
+            )
         ) { backStackEntry ->
             val clienteId = backStackEntry.arguments?.getString("clienteId")
+            val isAdminOverride = backStackEntry.arguments?.getBoolean("isAdminOverride") ?: true
             val db = AppDatabase.getDatabase(context)
             val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
 
@@ -321,15 +325,20 @@ fun Navegador(
                 context = context,
                 navController = navController,
                 ventaRepository = ventaRepository,
-                clienteId = clienteId
+                clienteId = clienteId,
+                isAdminOverride = isAdminOverride
             )
         }
 
         composable(
-            route = "historial_cliente/{clienteId}",
-            arguments = listOf(navArgument("clienteId") { type = NavType.StringType })
+            route = "historial_cliente/{clienteId}?isAdminOverride={isAdminOverride}",
+            arguments = listOf(
+                navArgument("clienteId") { type = NavType.StringType },
+                navArgument("isAdminOverride") { type = NavType.BoolType; defaultValue = true }
+            )
         ) { backStackEntry ->
             val clienteId = backStackEntry.arguments?.getString("clienteId") ?: ""
+            val isAdminOverride = backStackEntry.arguments?.getBoolean("isAdminOverride") ?: true
             val db = AppDatabase.getDatabase(context)
             val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
 
@@ -337,23 +346,8 @@ fun Navegador(
                 context = context,
                 navController = navController,
                 ventaRepository = ventaRepository,
-                clienteId = clienteId
-            )
-        }
-
-        composable(
-            route = "detalle_ticket_completo/{ticketId}",
-            arguments = listOf(navArgument("ticketId") { type = NavType.StringType })
-        ) { backStackEntry ->
-            val ticketId = backStackEntry.arguments?.getString("ticketId") ?: ""
-            val db = AppDatabase.getDatabase(context)
-            val ventaRepository = VentaRepository(db.VentaDao(), db.productoDao())
-
-            DetalleTicketScreen(
-                navController = navController,
-                ticketId = ticketId,
-                ventaRepository = ventaRepository,
-                impresoraBluetooth = impresoraBluetooth
+                clienteId = clienteId,
+                isAdminOverride = isAdminOverride
             )
         }
 
@@ -408,14 +402,16 @@ fun Navegador(
 
 
         composable(
-            route = "pantalla_ventas/{clienteId}?origen={origen}",
+            route = "pantalla_ventas/{clienteId}?origen={origen}&isAdminOverride={isAdminOverride}",
             arguments = listOf(
                 navArgument("clienteId") { type = NavType.StringType },
-                navArgument("origen") { type = NavType.StringType; defaultValue = "Clientes"; nullable = true }
+                navArgument("origen") { type = NavType.StringType; defaultValue = "Clientes"; nullable = true },
+                navArgument("isAdminOverride") { type = NavType.BoolType; defaultValue = true }
             )
         ) { backStackEntry ->
             val clienteId = backStackEntry.arguments?.getString("clienteId") ?: ""
             val origen = backStackEntry.arguments?.getString("origen") ?: "Clientes"
+            val isAdminOverride = backStackEntry.arguments?.getBoolean("isAdminOverride") ?: true
             val db = AppDatabase.getDatabase(context)
             val firebaseDataSource = FirebaseDataSource()
             val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
@@ -426,7 +422,8 @@ fun Navegador(
                 repository = repository,
                 inventarioRepo = inventarioRepo,
                 impresoraBluetooth = impresoraBluetooth,
-                origen = origen
+                origen = origen,
+                isAdminOverride = isAdminOverride
             )
         }
     }

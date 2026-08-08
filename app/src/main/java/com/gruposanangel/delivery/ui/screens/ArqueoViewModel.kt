@@ -50,7 +50,8 @@ data class ProductoArqueo(
     val stockInicialBitacora: Int = 0,
     val cargasPorDia: List<Int> = listOf(0, 0, 0, 0, 0, 0, 0), // L, M, M, J, V, S, D
     var stockReal: String = "",
-    val imagenUrl: String = ""
+    val imagenUrl: String = "",
+    val categoria: String = ""
 ) {
     val totalCargas: Int get() = cargasPorDia.sum()
     val diferencia: Int get() = (stockReal.toIntOrNull() ?: 0) - stockTeorico
@@ -255,9 +256,11 @@ class ArqueoViewModel(
                     stockInicialBitacora = inicial,
                     cargasPorDia = cargasDia,
                     stockReal = previo, 
-                    imagenUrl = p.imagenUrl ?: ""
+                    imagenUrl = p.imagenUrl ?: "",
+                    categoria = p.categoria
                 )
-            }
+            }.sortedWith(compareBy<ProductoArqueo>({ it.categoria }, { it.nombre }))
+
             _uiState.update { it.copy(productosArqueo = lista, isLoading = false) }
         }.launchIn(viewModelScope)
     }

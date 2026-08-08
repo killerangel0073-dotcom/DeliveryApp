@@ -98,7 +98,20 @@ fun Pantalla_Detalle_Venta_Admin(
         isLoading = true
         val user = repoUsuario.obtenerUsuarioActual()
         userRole = user?.puestoTrabajo ?: ""
-        ticketState = viewModel.obtenerTicketCompleto(ticketId)
+        val ticket = viewModel.obtenerTicketCompleto(ticketId)
+        
+        // 🛡️ REPARACIÓN DE FOTO: Si el ticket local no tiene foto, intentamos usar la del cliente guardada en el teléfono
+        if (ticket != null && ticket.fotoCliente.isEmpty()) {
+            val cliente = db.clienteDao().getClientePorId(ticket.numeroTicket.let { 
+                // Intentamos recuperar el clienteId desde la base de datos si el ticket no lo trae directamente en el objeto de visualización
+                val v = db.VentaDao().obtenerVentaPorId(ticketId)
+                v?.clienteId ?: ""
+            })
+            ticketState = ticket.copy(fotoCliente = cliente?.fotografiaUrl ?: "")
+        } else {
+            ticketState = ticket
+        }
+
         isLoading = false
     }
 
@@ -109,32 +122,31 @@ fun Pantalla_Detalle_Venta_Admin(
     val onImprimir: () -> Unit = {
         if (impresoraBluetooth == null) {
             Toast.makeText(context, "No hay impresora configurada", Toast.LENGTH_SHORT).show()
-        } else {
+        } else if (ticketState != null) {
             scope.launch(Dispatchers.IO) {
                 try {
-                    val ventaEntity = viewModel.obtenerVentaPorId(ticketId)
-                    val detalles = viewModel.obtenerDetallesDeVenta(ticketId)
-                    val productosParaImprimir = detalles.map { d ->
-                        Plantilla_Producto(d.productoId, d.nombre, d.precio, d.cantidad)
+                    val ticket = ticketState!!
+                    val productosParaImprimir = ticket.productos.map { d ->
+                        Plantilla_Producto(
+                            id = "", 
+                            nombre = d.nombre, 
+                            precio = d.precio, 
+                            cantidad = d.cantidad,
+                            categoria = d.categoria
+                        )
                     }
-                    val usuario = if (ventaEntity?.vendedorId != null) {
-                        db.usuarioDao().obtenerPorId(ventaEntity.vendedorId)
-                    } else null
-                    
-                    val nombreVendedorFinal = usuario?.nombre ?: ticketState?.vendedorNombre ?: "Vendedor"
                     
                     ImprimirTicket58mmCompleto(
                         device = impresoraBluetooth,
                         context = context,
                         logoDrawableId = R.drawable.logo,
-                        cliente = ventaEntity?.clienteNombre ?: ticketState?.cliente ?: "",
+                        cliente = ticket.cliente,
                         productos = productosParaImprimir,
-                        ventaId = ventaEntity?.id,
-                        fechaVenta = ventaEntity?.fecha?.let { Date(it) } ?: ticketState?.fecha ?: Date(),
-                        totalVenta = ventaEntity?.total ?: ticketState?.total ?: 0.0,
-                        vendedorNombre = nombreVendedorFinal,
-                        metodoPago = ventaEntity?.metodoPago ?: "",
-
+                        ventaId = ticket.numeroTicket,
+                        fechaVenta = ticket.fecha,
+                        totalVenta = ticket.total,
+                        vendedorNombre = ticket.vendedorNombre,
+                        metodoPago = "",
                     )
                     withContext(Dispatchers.Main) {
                         Toast.makeText(context, "Imprimiendo...", Toast.LENGTH_SHORT).show()
@@ -228,7 +240,7 @@ fun Pantalla_Detalle_Venta_Admin(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // 🔥 BANNER DE CANCELACIÓN
+                    // 🔥 1. BANNER DE CANCELACIÓN
                     if (ticket.estado == "CANCELADA") {
                         item {
                             Card(
@@ -260,12 +272,45 @@ fun Pantalla_Detalle_Venta_Admin(
                         }
                     }
 
-                    // 🔹 CARD RESUMEN CABECERA
+                    // 🔥 2. BANNER DE VISITA SIN VENTA
+                    if (ticket.total == 0.0 && !ticket.motivoVisita.isNullOrBlank()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(24.dp)),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = "VISITA SIN VENTA", 
+                                        fontWeight = FontWeight.Black, 
+                                        color = MaterialTheme.colorScheme.onSurface, 
+                                        fontSize = 18.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "MOTIVO: ${ticket.motivoVisita}",
+                                        color = DelisaRed,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 14.sp,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 🔹 3. CARD RESUMEN CABECERA
                     item {
                         HeaderVentaCard(ticket, formatoMoneda, formatoFecha, formatoHora)
                     }
 
-                    // 🔥 AUDITORÍA GEOGRÁFICA (EVIDENCIA FUERA DE RANGO)
+                    // 🔥 4. AUDITORÍA GEOGRÁFICA
                     if (ticket.fueraDeRango) {
                         item {
                             Card(
@@ -276,50 +321,20 @@ fun Pantalla_Detalle_Venta_Admin(
                             ) {
                                 Column(Modifier.padding(16.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Default.LocationOff,
-                                            contentDescription = null,
-                                            tint = DelisaRed,
-                                            modifier = Modifier.size(20.dp)
-                                        )
+                                        Icon(Icons.Default.LocationOff, null, tint = DelisaRed, modifier = Modifier.size(20.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text(
-                                            text = "VENTA REALIZADA FUERA DE RANGO",
-                                            fontWeight = FontWeight.Black,
-                                            color = DelisaRed,
-                                            fontSize = 13.sp,
-                                            letterSpacing = 0.5.sp
-                                        )
+                                        Text("VENTA REALIZADA FUERA DE RANGO", fontWeight = FontWeight.Black, color = DelisaRed, fontSize = 13.sp)
                                     }
 
                                     if (!ticket.fotoEvidenciaUrl.isNullOrEmpty()) {
                                         Spacer(Modifier.height(12.dp))
-                                        Text(
-                                            text = "EVIDENCIA FÍSICA DE VISITA:",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(Modifier.height(8.dp))
                                         AsyncImage(
                                             model = ticket.fotoEvidenciaUrl,
-                                            contentDescription = "Evidencia de Visita",
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(220.dp)
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .background(MaterialTheme.colorScheme.surface),
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(16.dp)),
                                             contentScale = ContentScale.Crop,
                                             placeholder = painterResource(R.drawable.repartidor),
                                             error = painterResource(R.drawable.repartidor)
-                                        )
-                                    } else {
-                                        Spacer(Modifier.height(8.dp))
-                                        Text(
-                                            text = "⚠️ Atención: El vendedor no capturó fotografía de evidencia.",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(start = 28.dp)
                                         )
                                     }
                                 }
@@ -327,58 +342,44 @@ fun Pantalla_Detalle_Venta_Admin(
                         }
                     }
 
-                    // 🔹 ACCIONES DE AJUSTE (AUDITORÍA)
-                    if (mostrarAcciones && ticket.estado != "CANCELADA") {
+                    // 🔹 5. ACCIONES DE AJUSTE
+                    if (mostrarAcciones && ticket.estado != "CANCELADA" && ticket.total > 0.0) {
                         item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = { tipoAjuste = "CAMBIO"; showBottomSheet = true },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, DelisaRed),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = DelisaRed),
-                                    contentPadding = PaddingValues(horizontal = 4.dp)
-                                ) {
-                                    Icon(Icons.Default.Sync, null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("CAMBIO", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { tipoAjuste = "CAMBIO"; showBottomSheet = true }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, DelisaRed)) {
+                                    Icon(Icons.Default.Sync, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("CAMBIO", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                 }
-                                OutlinedButton(
-                                    onClick = { tipoAjuste = "DEVOLUCION"; showBottomSheet = true },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, WarningOrange),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = WarningOrange),
-                                    contentPadding = PaddingValues(horizontal = 4.dp)
-                                ) {
-                                    Icon(Icons.Default.AssignmentReturn, null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("DEVOLUCIÓN", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                                OutlinedButton(onClick = { tipoAjuste = "DEVOLUCION"; showBottomSheet = true }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), border = androidx.compose.foundation.BorderStroke(1.dp, WarningOrange)) {
+                                    Icon(Icons.Default.AssignmentReturn, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("DEVOLUCIÓN", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                 }
                             }
                         }
                     }
 
-                    // 🔹 SECCIÓN PRODUCTOS
-                    item {
-                        Text(
-                            "Resumen de Productos",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    items(ticket.productos) { producto ->
-                        CardProductoVendido(producto, formatoMoneda)
+                    // 🔹 6. SECCIÓN PRODUCTOS
+                    if (ticket.productos.isNotEmpty()) {
+                        item {
+                            Text(
+                                "Resumen de Productos", 
+                                style = MaterialTheme.typography.titleMedium, 
+                                fontWeight = FontWeight.Black, 
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        
+                        val productosPorCategoria = ticket.productos.sortedBy { it.categoria }.groupBy { it.categoria }
+                        
+                        productosPorCategoria.forEach { (categoria, productos) ->
+                            item(key = "header_$categoria") {
+                                CategoryHeader(categoria)
+                            }
+                            items(productos) { producto ->
+                                CardProductoVendido(producto, formatoMoneda)
+                            }
+                        }
                     }
                     
-                    item {
-                        Spacer(Modifier.height(120.dp)) // Espacio para el bottom bar que ahora es más grande
-                    }
+                    item { Spacer(Modifier.height(120.dp)) }
                 }
             }
         }
@@ -689,12 +690,28 @@ fun HeaderVentaCard(
                 }
                 Spacer(Modifier.width(16.dp))
                 Column {
-                    Text(
-                        "TICKET #${ticket.numeroTicket.takeLast(6).uppercase()}",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "TICKET #${ticket.numeroTicket.takeLast(6).uppercase()}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        // 🔥 INDICADOR DE ORIGEN
+                        Surface(
+                            color = if (ticket.origenDatos == "LOCAL") DelisaGreen.copy(alpha = 0.1f) else WarningOrange.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = if (ticket.origenDatos == "LOCAL") "MODO: LOCAL" else "MODO: NUBE",
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (ticket.origenDatos == "LOCAL") DelisaGreenDark else WarningOrange
+                            )
+                        }
+                    }
                     Text(
                         ticket.cliente,
                         fontSize = 20.sp,

@@ -52,6 +52,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import android.util.Log
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
@@ -65,25 +67,52 @@ class VentasRoomViewModel(private val ventaRepository: VentaRepository, context:
     val uiState: StateFlow<VentasRoomUiState> = _uiState.asStateFlow()
     private val db = AppDatabase.getDatabase(context); private val clienteDao = db.clienteDao()
     private val usuarioDao = db.usuarioDao()
+    
+    private val _isAdminOverride = MutableStateFlow<Boolean?>(null)
+
+    fun configurarModo(esAdmin: Boolean) {
+        _isAdminOverride.value = esAdmin
+    }
 
     fun cargarVentas(inicio: Long, fin: Long, clienteIdFiltro: String? = null) {
         viewModelScope.launch {
             val usuario = usuarioDao.obtenerUsuarioActual()
             val uid = usuario?.uid ?: ""
+            val almid = usuario?.ultimoAlmacenNombre ?: ""
+            val rNom = usuario?.ultimaRutaNombre ?: ""
+            val rId = usuario?.ultimaRutaId ?: ""
             val puesto = usuario?.puestoTrabajo?.trim() ?: ""
-            val idParaQuery = if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") uid else ""
+            
+            val esAdminReal = puesto.contains("CEO", true) || puesto.contains("Gerente", true) || puesto.contains("Supervisor", true)
+            val esVendedor = (puesto.contains("Vendedor", ignoreCase = true) || puesto.contains("Suplente", ignoreCase = true)) || 
+                             (_isAdminOverride.value == false && esAdminReal)
             
             _uiState.value = _uiState.value.copy(isLoading = true)
             
-            if (clienteIdFiltro == null) {
-                ventaRepository.sincronizarVentasPeriodo(idParaQuery, inicio, fin)
+            // 🔥 MEJORA: Si filtramos por cliente, disparamos descarga de 90 días en segundo plano
+            if (clienteIdFiltro != null) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        ventaRepository.descargarHistorialCliente90Dias(clienteIdFiltro)
+                        // Una vez descargado, refrescamos la lista local
+                        val ventasActualizadas = ventaRepository.obtenerTodoHistorialCliente(clienteIdFiltro)
+                        val listaActualizada = ventasActualizadas.map { VentaConFotoUI(it, clienteDao.getClientePorId(it.clienteId)?.fotografiaUrl ?: "") }
+                        _uiState.value = VentasRoomUiState(isLoading = false, ventasConFoto = listaActualizada)
+                    } catch (e: Exception) {
+                        Log.e("VentasRoomVM", "Error descargando historial cloud", e)
+                    }
+                }
             }
-            
+
             val ventasRaw = if (clienteIdFiltro != null) {
-                ventaRepository.obtenerVentasPorPeriodo(idParaQuery, 0, System.currentTimeMillis())
-                    .filter { it.clienteId == clienteIdFiltro }
+                // Obtenemos todo lo que hay en local para este cliente
+                ventaRepository.obtenerTodoHistorialCliente(clienteIdFiltro)
             } else {
-                ventaRepository.obtenerVentasPorPeriodo(idParaQuery, inicio, fin)
+                if (esVendedor && (almid.isNotEmpty() || rNom.isNotEmpty())) {
+                    ventaRepository.obtenerVentasPorUnidadPeriodo(almid, rNom, rId, inicio, fin)
+                } else {
+                    ventaRepository.obtenerVentasPorPeriodo(if(esAdminReal && _isAdminOverride.value != false) "" else uid, inicio, fin)
+                }
             }
 
             val lista = ventasRaw.map { VentaConFotoUI(it, clienteDao.getClientePorId(it.clienteId)?.fotografiaUrl ?: "") }
@@ -100,7 +129,8 @@ fun VentasRoomScreen(
     context: Context, 
     navController: NavController? = null, 
     ventaRepository: VentaRepository,
-    clienteId: String? = null
+    clienteId: String? = null,
+    isAdminOverride: Boolean? = null
 ) {
     val isPreview = LocalInspectionMode.current
     if (isPreview) {
@@ -119,7 +149,13 @@ fun VentasRoomScreen(
         var fechaSeleccionada by remember { mutableStateOf(Date()) }
         val cal = Calendar.getInstance()
         
-        LaunchedEffect(fechaSeleccionada, clienteId) {
+        LaunchedEffect(isAdminOverride) {
+            if (isAdminOverride != null) {
+                vm.configurarModo(isAdminOverride)
+            }
+        }
+        
+        LaunchedEffect(fechaSeleccionada, clienteId, isAdminOverride) {
             cal.time = fechaSeleccionada; cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); val ini = cal.timeInMillis
             cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); val fin = cal.timeInMillis; 
             vm.cargarVentas(ini, fin, clienteId)

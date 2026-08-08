@@ -1,12 +1,12 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
-const db = admin.firestore();
 
 /**
  * Cloud Function para Anular/Cancelar una venta.
  * Realiza la devolución de stock al vendedor de forma atómica.
  */
 const anularVenta = functions.https.onRequest(async (req, res) => {
+    const db = admin.firestore();
     try {
         if (req.method !== 'POST') {
             return res.status(405).send({ error: 'Método no permitido' });

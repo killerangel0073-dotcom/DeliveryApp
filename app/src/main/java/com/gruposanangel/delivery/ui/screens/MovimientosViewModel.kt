@@ -48,7 +48,9 @@ class MovimientosViewModel(
                         nombre = it.nombre,
                         precio = it.precio,
                         cantidad = 0,
-                        imagenUrl = it.imagenUrl ?: ""
+                        imagenUrl = it.imagenUrl ?: "",
+                        marca = it.marca,
+                        categoria = it.categoria
                     )
                 }
         }

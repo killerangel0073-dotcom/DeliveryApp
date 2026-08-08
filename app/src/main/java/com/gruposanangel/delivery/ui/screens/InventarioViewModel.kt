@@ -13,6 +13,7 @@ import com.gruposanangel.delivery.data.ProductoEntity
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -46,15 +47,16 @@ class InventarioViewModel(
 
     private val db = FirebaseFirestore.getInstance()
     private var notificationsListener: ListenerRegistration? = null
-    private var selectedWarehouseListener: ListenerRegistration? = null // 🔥 Nuevo listener dinámico
+    private var selectedWarehouseListener: ListenerRegistration? = null 
     
     private val formatoFecha = SimpleDateFormat(
         "EEEE, dd 'de' MMMM 'de' yyyy, hh:mm a", 
         Locale("es", "MX")
     )
 
+    private var lastSnapshot: com.google.firebase.firestore.QuerySnapshot? = null
+
     init {
-        // 🔥 OFFLINE-FIRST: Observar datos del usuario desde Room de forma reactiva
         usuarioRepo.getUsuarioActual()
             .onEach { usuario ->
                 if (usuario != null) {
@@ -66,14 +68,12 @@ class InventarioViewModel(
                     
                     val nombreAlmacen = usuario.ultimoAlmacenNombre
                     
-                    // --- PARSEAR PERFILES DE VENTA PARA FILTRADO ---
                     val perfiles = mutableListOf<com.gruposanangel.delivery.data.PerfilVenta>()
-                    // 1. Agregar opción "TODO"
                     perfiles.add(com.gruposanangel.delivery.data.PerfilVenta("ALL", "TODO", emptyList()))
                     
-                    // 2. Cargar perfiles configurados
                     try {
                         val json = usuario.perfilesVentaJson
+
                         if (!json.isNullOrBlank()) {
                             val array = org.json.JSONArray(json)
                             for (i in 0 until array.length()) {
@@ -83,9 +83,7 @@ class InventarioViewModel(
                                 for (j in 0 until filtrosArr.length()) {
                                     val fObj = filtrosArr.getJSONObject(j)
                                     val catsArr = fObj.optJSONArray("categorias")
-                                    val cats = if (catsArr != null) {
-                                        (0 until catsArr.length()).map { catsArr.getString(it) }
-                                    } else emptyList<String>()
+                                    val cats = if (catsArr != null) (0 until catsArr.length()).map { catsArr.getString(it) } else emptyList()
                                     filtros.add(com.gruposanangel.delivery.data.FiltroPerfil(fObj.getString("marca"), cats))
                                 }
                                 perfiles.add(com.gruposanangel.delivery.data.PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros))
@@ -93,21 +91,26 @@ class InventarioViewModel(
                         }
                     } catch (e: Exception) { Log.e("InventarioVM", "Error parseando perfiles", e) }
 
-                    // --- Sincronizar el perfil seleccionado ---
                     val perfilActualizado = if (_uiState.value.perfilSeleccionado != null) {
-                        perfiles.find { it.id == _uiState.value.perfilSeleccionado?.id } ?: perfiles.first() // Fallback al primero (TODO)
+                        perfiles.find { it.id == _uiState.value.perfilSeleccionado?.id } ?: perfiles.first()
                     } else {
                         perfiles.first()
                     }
 
                     _uiState.update { state ->
+                        // 🛡️ REGLA DE ORO: BLOQUEO DE PERFILES PARA AUDITORÍA ADMIN
+                        // Si el Admin está viendo una unidad externa, CONGELAMOS la interfaz para que no borre los perfiles del vendedor
+                        val esAuditoriaExterna = esAdmin && !state.almacenSeleccionado.isNullOrBlank() && 
+                                               state.almacenSeleccionado != "VISTA GLOBAL" && 
+                                               state.almacenSeleccionado != nombreAlmacen
+
                         state.copy(
                             puestoTrabajo = usuario.puestoTrabajo,
                             rutaAsignada = nombreAlmacen,
                             isAdmin = esAdmin,
                             isLoading = false,
-                            perfilesDisponibles = perfiles,
-                            perfilSeleccionado = perfilActualizado
+                            perfilesDisponibles = if (esAuditoriaExterna) state.perfilesDisponibles else perfiles,
+                            perfilSeleccionado = if (esAuditoriaExterna) state.perfilSeleccionado else perfilActualizado
                         )
                     }
                     
@@ -115,16 +118,11 @@ class InventarioViewModel(
                         cargarListaAlmacenes()
                     }
                     
-                    // 🔥 PRESELECCIÓN POR ROL
-                    if (esDirectivo) {
-                        // CEO/Gerente: Vista Global (El mundo) por defecto
+                    if (esDirectivo && _uiState.value.almacenSeleccionado == null) {
                         activarVistaGlobal()
-                    } else if (esAlmacenRol) {
-                        // Almacenistas: Su almacén asignado por defecto (Fallback a Huasteca)
+                    } else if (esAlmacenRol && _uiState.value.almacenSeleccionado == null) {
                         seleccionarAlmacen(nombreAlmacen ?: "Almacen Huasteca")
-                    }
- else if (!nombreAlmacen.isNullOrEmpty()) {
-                        // Vendedores: Su propio almacén por defecto
+                    } else if (!nombreAlmacen.isNullOrEmpty() && _uiState.value.almacenSeleccionado == null) {
                         seleccionarAlmacen(nombreAlmacen)
                         escucharNotificaciones(nombreAlmacen)
                         cargarStockDanado(nombreAlmacen)
@@ -134,7 +132,6 @@ class InventarioViewModel(
             }
             .launchIn(viewModelScope)
 
-        // Sincronización inicial: Intentar descargar desde Firebase usando el UID de Auth
         viewModelScope.launch {
             val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
             if (uid != null) {
@@ -142,7 +139,6 @@ class InventarioViewModel(
             }
         }
 
-        // 🔥 OFFLINE-FIRST: Observar productos desde Room de forma reactiva
         combine(
             inventarioRepo.obtenerProductosLocal(),
             _uiState.map { it.perfilSeleccionado }.distinctUntilChanged()
@@ -150,9 +146,8 @@ class InventarioViewModel(
                 val state = _uiState.value
                 val almacenActual = state.almacenSeleccionado
                 
-                // 🛡️ REGLA DE VISIBILIDAD: Para Vendedores usamos Room (Offline-First)
-                // Para Admins, el filtrado reactivo de Room también ayuda si ya tienen la data.
-                if (!state.esVistaGlobal && !almacenActual.isNullOrEmpty()) {
+                // 🛡️ Filtro local solo para NO admins o si es su propio almacen
+                if (!state.esVistaGlobal && !almacenActual.isNullOrEmpty() && !state.isAdmin) {
                     val predicate: (ProductoEntity) -> Boolean = { entidad ->
                         if (perfilActivo == null || perfilActivo.id == "ALL") true
                         else {
@@ -166,7 +161,6 @@ class InventarioViewModel(
                         }
                     }
 
-                    // 1. Filtrar Productos Buenos
                     val modelos = entities
                         .filter { it.cantidadDisponible > 0 && it.id.contains(almacenActual) }
                         .filter(predicate)
@@ -181,14 +175,9 @@ class InventarioViewModel(
                                 categoria = entity.categoria
                             )
                         }
-                        .sortedByDescending { it.cantidad * it.precio }
+                        .sortedWith(compareBy<Plantilla_Producto>({ it.categoria }, { it.nombre }))
                     
-                    // Solo actualizamos si no somos Admin o si el listener de Firebase no ha mandado algo más fresco
-                    if (!state.isAdmin) {
-                        _uiState.update { it.copy(productos = modelos) }
-                    }
-                    
-                    // Disparar recarga de Dañados (se filtrarán en cargarStockDanado)
+                    _uiState.update { it.copy(productos = modelos) }
                     cargarStockDanado(almacenActual)
                 }
             }
@@ -197,6 +186,15 @@ class InventarioViewModel(
 
     fun seleccionarPerfil(perfil: com.gruposanangel.delivery.data.PerfilVenta) {
         _uiState.update { it.copy(perfilSeleccionado = perfil) }
+        
+        // 🔄 Si es admin o auditoría, refrescar stock inmediatamente con el nuevo perfil
+        if (_uiState.value.isAdmin) {
+            val almacen = _uiState.value.almacenSeleccionado
+            if (!almacen.isNullOrBlank() && almacen != "VISTA GLOBAL") {
+                lastSnapshot?.let { procesarStockSnapshot(it, almacen) }
+                cargarStockDanado(almacen)
+            }
+        }
     }
 
     private fun observarMovimientosLocales(almacen: String, vendedorId: String) {
@@ -204,7 +202,6 @@ class InventarioViewModel(
         cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
         val inicioHoy = cal.timeInMillis
 
-        // Observamos cualquier cambio en los movimientos de hoy para actualizar la pestaña de devoluciones
         inventarioRepo.obtenerMovimientosDesdeFlow(vendedorId, inicioHoy)
             .onEach { movimientos ->
                 val tieneDevoluciones = movimientos.any { it.almacenNombre == almacen && (it.tipo == "ENTRADA_MALO_DEVOLUCION" || it.tipo == "DEVOLUCION_DANIADO") }
@@ -218,17 +215,115 @@ class InventarioViewModel(
     private fun cargarListaAlmacenes() {
         viewModelScope.launch {
             var lista = inventarioRepo.obtenerListaAlmacenes()
-            // 🛡️ Filtro global: "Compra Producto" no es un almacén físico real para conteo, se elimina para todos
             lista = lista.filter { it != "Compra Producto" }
             _uiState.update { it.copy(listaAlmacenes = lista) }
         }
     }
 
+    @Suppress("UNCHECKED_CAST")
+    fun sobreescribirAdmin(esAdmin: Boolean) {
+        _uiState.update { it.copy(isAdmin = esAdmin) }
+        if (esAdmin) {
+            cargarListaAlmacenes()
+        } else {
+            // Si deja de ser admin (Modo Ruta), forzar su almacén actual
+            viewModelScope.launch {
+                val user = usuarioRepo.obtenerUsuarioActual()
+                val alm = user?.ultimoAlmacenNombre ?: ""
+                if (alm.isNotEmpty()) {
+                    seleccionarAlmacen(alm)
+                }
+            }
+        }
+    }
+
     fun seleccionarAlmacen(almacen: String) {
-        selectedWarehouseListener?.remove() // Limpiar listener previo
+        selectedWarehouseListener?.remove() 
         _uiState.update { it.copy(isLoading = true, almacenSeleccionado = almacen, esVistaGlobal = false) }
 
-        // 🔥 ESCUCHA EN TIEMPO REAL DEL ALMACÉN SELECCIONADO
+        if (_uiState.value.isAdmin) {
+            viewModelScope.launch {
+                try {
+                    Log.d("InventarioVM", "Iniciando búsqueda de perfiles para auditoría en: $almacen")
+                    val perfiles = mutableListOf<com.gruposanangel.delivery.data.PerfilVenta>()
+                    perfiles.add(com.gruposanangel.delivery.data.PerfilVenta("ALL", "TODO", emptyList()))
+
+                    val destinoLimpio = almacen.replace("Vendedor ", "").trim()
+                    var userDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+
+                    // 1. Intentar por Rutas (como en FirebaseDataSource)
+                    val rutasSnap = db.collection("rutas").get().await()
+                    for (doc in rutasSnap.documents) {
+                        val nom = doc.getString("nombre") ?: ""
+                        val almRef = doc.getDocumentReference("almacenAsignado")
+                        if (nom.contains(destinoLimpio, true) || (almRef != null && almRef.id.contains(destinoLimpio, true))) {
+                            val vendRef = doc.getDocumentReference("vendedorAsignado")
+                            if (vendRef != null) {
+                                userDoc = vendRef.get().await()
+                                break
+                            }
+                        }
+                    }
+
+                    // 2. Fallback: Buscar por nombre en usuarios
+                    if (userDoc == null || !userDoc.exists()) {
+                        val usersSnap = db.collection("users").whereEqualTo("activo", true).get().await()
+                        userDoc = usersSnap.documents.find { 
+                            (it.getString("nombre") ?: "").contains(destinoLimpio, true) ||
+                            (it.getString("ultimoAlmacenNombre") ?: "").contains(almacen, true)
+                        }
+                    }
+
+                    if (userDoc != null && userDoc.exists()) {
+                        Log.d("InventarioVM", "Dueño encontrado para perfiles: ${userDoc.getString("nombre")}")
+                        
+                        val arrayRaw = userDoc.get("perfilesVenta") as? List<Map<String, Any>>
+                        val json = userDoc.getString("perfilesVentaJson") 
+
+                        if (!arrayRaw.isNullOrEmpty()) {
+                            arrayRaw.forEach { pMap ->
+                                val id = pMap["id"] as? String ?: UUID.randomUUID().toString()
+                                val nom = pMap["nombre"] as? String ?: ""
+                                val fRaw = pMap["filtros"] as? List<Map<String, Any>>
+                                val filts = fRaw?.map { f ->
+                                    val m = f["marca"] as? String ?: ""
+                                    val c = (f["categorias"] as? List<*>)?.mapNotNull { it.toString() } ?: emptyList()
+                                    com.gruposanangel.delivery.data.FiltroPerfil(m, c)
+                                } ?: emptyList()
+                                if (nom.isNotEmpty()) {
+                                    if (perfiles.none { it.id == id }) {
+                                        perfiles.add(com.gruposanangel.delivery.data.PerfilVenta(id, nom, filts))
+                                    }
+                                }
+                            }
+                        } else if (!json.isNullOrBlank()) {
+                            try {
+                                val array = org.json.JSONArray(json)
+                                for (i in 0 until array.length()) {
+                                    val obj = array.getJSONObject(i)
+                                    val filtrosArr = obj.getJSONArray("filtros")
+                                    val filtros = mutableListOf<com.gruposanangel.delivery.data.FiltroPerfil>()
+                                    for (j in 0 until filtrosArr.length()) {
+                                        val fObj = filtrosArr.getJSONObject(j)
+                                        val catsArr = fObj.optJSONArray("categorias")
+                                        val cats = if (catsArr != null) (0 until catsArr.length()).map { catsArr.getString(it) } else emptyList()
+                                        filtros.add(com.gruposanangel.delivery.data.FiltroPerfil(fObj.getString("marca"), cats))
+                                    }
+                                    val id = obj.getString("id")
+                                    if (perfiles.none { it.id == id }) {
+                                        perfiles.add(com.gruposanangel.delivery.data.PerfilVenta(id, obj.getString("nombre"), filtros))
+                                    }
+                                }
+                            } catch (e: Exception) { Log.e("InventarioVM", "Error JSON perfiles", e) }
+                        }
+                    }
+                    
+                    Log.d("InventarioVM", "Perfiles finales cargados para auditoría: ${perfiles.size}")
+                    _uiState.update { it.copy(perfilesDisponibles = perfiles, perfilSeleccionado = perfiles.first()) }
+                } catch (e: Exception) { Log.e("InventarioVM", "Error auditoría perfiles", e) }
+            }
+        }
+
         selectedWarehouseListener = db.collection("inventarioStock")
             .whereEqualTo("almacenNombre", almacen)
             .addSnapshotListener { snapshot, error ->
@@ -236,90 +331,99 @@ class InventarioViewModel(
                     _uiState.update { it.copy(isLoading = false, error = error.message) }
                     return@addSnapshotListener
                 }
-
-                viewModelScope.launch {
-                    try {
-                        val catalogo = inventarioRepo.obtenerProductosLocal().first()
-                        val stockMap = snapshot?.documents?.associate { 
-                            (it.getString("productoId") ?: it.id.split("_")[0]) to (it.getLong("cantidad")?.toInt() ?: 0)
-                        } ?: emptyMap()
-
-                        val productosStock = stockMap.mapNotNull { (prodId, cant) ->
-                            if (cant <= 0) return@mapNotNull null
-                            val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
-                            
-                            // 🔥 FILTRADO POR PERFIL TAMBIÉN PARA ADMIN (FIREBASE DATA)
-                            val perfil = _uiState.value.perfilSeleccionado
-                            val cumplePerfil = if (perfil == null || perfil.id == "ALL") true
-                            else {
-                                perfil.filtros.any { filtro ->
-                                    val marcaMatch = info.marca.trim().equals(filtro.marca.trim(), ignoreCase = true)
-                                    val categoriaMatch = if (filtro.categorias.isNotEmpty()) {
-                                        filtro.categorias.any { it.trim().equals(info.categoria.trim(), ignoreCase = true) }
-                                    } else true
-                                    marcaMatch && categoriaMatch
-                                }
-                            }
-
-                            if (!cumplePerfil) return@mapNotNull null
-
-                            Plantilla_Producto(
-                                id = prodId, 
-                                nombre = info.nombre, 
-                                precio = info.precio, 
-                                cantidad = cant, 
-                                cantidadDisponible = 0, 
-                                imagenUrl = info.imagenUrl ?: "",
-                                marca = info.marca,
-                                categoria = info.categoria
-                            )
-                        }.sortedByDescending { it.cantidad * it.precio }
-
-                        // Cargar también dañados (aunque no sean en tiempo real por ahora para no saturar)
-                        val danado = inventarioRepo.obtenerStockDanado(almacen)
-                        val productosDanados = danado.mapNotNull { (prodId, cant) ->
-                            if (cant <= 0) return@mapNotNull null
-                            val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
-                            Plantilla_Producto(prodId, info.nombre, info.precio, cant, 0, info.imagenUrl ?: "")
-                        }.sortedByDescending { it.cantidad * it.precio }
-
-                        _uiState.update { it.copy(
-                            productos = productosStock,
-                            productosDanados = productosDanados,
-                            isLoading = false
-                        ) }
-                    } catch (e: Exception) {
-                        Log.e("InventarioVM", "Error procesando snapshot", e)
-                    }
-                }
+                
+                lastSnapshot = snapshot
+                procesarStockSnapshot(snapshot, almacen)
             }
-        
-        // 🔥 TAMBIÉN ESCUCHAR NOTIFICACIONES PARA ESTE ALMACÉN (Para que admins vean cargas pendientes de otros)
         escucharNotificaciones(almacen)
     }
 
+    private fun procesarStockSnapshot(snapshot: com.google.firebase.firestore.QuerySnapshot?, almacen: String) {
+        viewModelScope.launch {
+            try {
+                val catalogSnap = db.collection("producto").get().await()
+                val catalogo = catalogSnap.documents.associateBy { it.id }
+
+                val stockMap = snapshot?.documents?.associate { 
+                    (it.getString("productoId") ?: it.id.substringBeforeLast("_Vendedor").substringBeforeLast("_Almacen").substringBeforeLast("_")) to (it.getLong("cantidad")?.toInt() ?: 0)
+                } ?: emptyMap()
+
+                val productosStock = stockMap.mapNotNull { (prodId, cant) ->
+                    if (cant <= 0) return@mapNotNull null
+                    val info = catalogo[prodId]
+                    
+                    val pMarca = info?.getString("marca") ?: "Delisa"
+                    val pCat = info?.getString("categoria") ?: "General"
+                    val pNom = info?.getString("nombre") ?: "Producto Desconocido ($prodId)"
+                    val pPrec = (info?.get("precio") as? Number)?.toDouble() ?: 0.0
+                    val pImg = info?.getString("imagenUrl") ?: info?.getString("fotoUrl") ?: ""
+                    
+                    val perfil = _uiState.value.perfilSeleccionado
+                    
+                    val cumplePerfil = if (perfil == null || perfil.id == "ALL") true
+                    else {
+                        perfil.filtros.any { filtro ->
+                            val marcaMatch = pMarca.trim().equals(filtro.marca.trim(), ignoreCase = true)
+                            val categoriaMatch = if (filtro.categorias.isNotEmpty()) {
+                                filtro.categorias.any { it.trim().equals(pCat.trim(), ignoreCase = true) }
+                            } else true
+                            marcaMatch && categoriaMatch
+                        }
+                    }
+
+                    if (!cumplePerfil) return@mapNotNull null
+
+                    Plantilla_Producto(
+                        id = prodId, 
+                        nombre = pNom, 
+                        precio = pPrec, 
+                        cantidad = cant, 
+                        cantidadDisponible = 0, 
+                        imagenUrl = pImg,
+                        marca = pMarca,
+                        categoria = pCat
+                    )
+                }.sortedWith(compareBy<Plantilla_Producto>({ it.categoria }, { it.nombre }))
+
+                _uiState.update { it.copy(productos = productosStock, isLoading = false) }
+                // Solo cargar dañados si el snapshot vino del almacén actual
+                if (_uiState.value.almacenSeleccionado == almacen) {
+                    cargarStockDanado(almacen)
+                }
+            } catch (e: Exception) { Log.e("InventarioVM", "Error procesando stock snapshot", e) }
+        }
+    }
+
     fun activarVistaGlobal() {
-        _uiState.update { it.copy(isLoading = true, esVistaGlobal = true, almacenSeleccionado = "VISTA GLOBAL") }
+        val todoPerfil = com.gruposanangel.delivery.data.PerfilVenta("ALL", "TODO", emptyList())
+        _uiState.update { it.copy(
+            isLoading = true, 
+            esVistaGlobal = true, 
+            almacenSeleccionado = "VISTA GLOBAL",
+            perfilesDisponibles = listOf(todoPerfil),
+            perfilSeleccionado = todoPerfil
+        ) }
         viewModelScope.launch {
             try {
                 val globalStock = inventarioRepo.obtenerStockGlobal()
-                val catalogo = inventarioRepo.obtenerProductosLocal().first()
+                val catalogSnap = db.collection("producto").get().await()
+                val catalogo = catalogSnap.documents.associateBy { it.id }
                 
                 val productos = globalStock.mapNotNull { (prodId, cant) ->
                     if (cant <= 0) return@mapNotNull null
-                    val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
+                    val info = catalogo[prodId]
                     
                     Plantilla_Producto(
                         id = prodId, 
-                        nombre = info.nombre, 
-                        precio = info.precio, 
+                        nombre = info?.getString("nombre") ?: "Producto Desconocido ($prodId)", 
+                        precio = (info?.get("precio") as? Number)?.toDouble() ?: 0.0, 
                         cantidad = cant, 
                         cantidadDisponible = 0, 
-                        imagenUrl = info.imagenUrl ?: "",
-                        marca = info.marca,
-                        categoria = info.categoria
+                        imagenUrl = info?.getString("imagenUrl") ?: info?.getString("fotoUrl") ?: "",
+                        marca = info?.getString("marca") ?: "Delisa",
+                        categoria = info?.getString("categoria") ?: "General"
                     )
-                }.sortedByDescending { it.cantidad * it.precio }
+                }.sortedWith(compareBy<Plantilla_Producto>({ it.categoria }, { it.nombre }))
 
                 _uiState.update { it.copy(productos = productos, productosDanados = emptyList(), isLoading = false) }
             } catch (e: Exception) {
@@ -332,20 +436,26 @@ class InventarioViewModel(
         viewModelScope.launch {
             try {
                 val danado = inventarioRepo.obtenerStockDanado(almacen)
-                val catalogo = inventarioRepo.obtenerProductosLocal().first()
+                val catalogSnap = db.collection("producto").get().await()
+                val catalogo = catalogSnap.documents.associateBy { it.id }
                 val perfil = _uiState.value.perfilSeleccionado
 
                 val lista = danado.mapNotNull { (prodId, cant) ->
                     if (cant <= 0) return@mapNotNull null
-                    val info = catalogo.find { it.productoId == prodId } ?: return@mapNotNull null
+                    val info = catalogo[prodId]
                     
-                    // 🔥 FILTRO DE PERFIL TAMBIÉN PARA DAÑADOS
-                    val cumplePerfil = if (perfil == null || perfil.id == "ALL" || _uiState.value.isAdmin && !_uiState.value.almacenSeleccionado?.startsWith("Vendedor").let { it == true }) true
+                    val pMarca = info?.getString("marca") ?: "Delisa"
+                    val pCat = info?.getString("categoria") ?: "General"
+                    val pNom = info?.getString("nombre") ?: "Producto Desconocido ($prodId)"
+                    val pPrec = (info?.get("precio") as? Number)?.toDouble() ?: 0.0
+                    val pImg = info?.getString("imagenUrl") ?: info?.getString("fotoUrl") ?: ""
+
+                    val cumplePerfil = if (perfil == null || perfil.id == "ALL") true
                     else {
                         perfil.filtros.any { filtro ->
-                            val marcaMatch = info.marca.trim().equals(filtro.marca.trim(), ignoreCase = true)
+                            val marcaMatch = pMarca.trim().equals(filtro.marca.trim(), ignoreCase = true)
                             val categoriaMatch = if (filtro.categorias.isNotEmpty()) {
-                                filtro.categorias.any { it.trim().equals(info.categoria.trim(), ignoreCase = true) }
+                                filtro.categorias.any { it.trim().equals(pCat.trim(), ignoreCase = true) }
                             } else true
                             marcaMatch && categoriaMatch
                         }
@@ -355,15 +465,15 @@ class InventarioViewModel(
 
                     Plantilla_Producto(
                         id = prodId, 
-                        nombre = info.nombre, 
-                        precio = info.precio, 
+                        nombre = pNom, 
+                        precio = pPrec, 
                         cantidad = cant, 
                         cantidadDisponible = 0, 
-                        imagenUrl = info.imagenUrl ?: "",
-                        marca = info.marca,
-                        categoria = info.categoria
+                        imagenUrl = pImg,
+                        marca = pMarca,
+                        categoria = pCat
                     )
-                }.sortedByDescending { it.cantidad * it.precio }
+                }.sortedWith(compareBy<Plantilla_Producto>({ it.categoria }, { it.nombre }))
                 _uiState.update { it.copy(productosDanados = lista) }
             } catch (e: Exception) { }
         }
@@ -398,6 +508,7 @@ class InventarioViewModel(
     override fun onCleared() {
         super.onCleared()
         notificationsListener?.remove()
+        selectedWarehouseListener?.remove()
     }
 }
 

@@ -61,7 +61,8 @@ import java.util.Date
 @Composable
 fun MapaScreen(
     navController: NavController,
-    viewModel: MapaViewModel
+    viewModel: MapaViewModel,
+    isAdminOverride: Boolean? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -70,7 +71,11 @@ fun MapaScreen(
     val isDark = ThemeConfig.isActuallyDark
 
     // 🔥 SINCRONIZACIÓN EN TIEMPO REAL Y AUTO-TEMA DE MAPA
-    LaunchedEffect(Unit) {
+    LaunchedEffect(isAdminOverride) {
+        if (isAdminOverride != null) {
+            viewModel.sobreescribirAdmin(isAdminOverride)
+        }
+
         viewModel.startRealtimeSync(context)
         // Inicializar estilo de mapa según el tema actual si no se ha cambiado
         if (uiState.mapStyleJson == null && uiState.mapType == MapType.NORMAL) {
@@ -185,10 +190,27 @@ fun MapaScreen(
 
                 markerState.position = LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
 
-                LaunchedEffect(state.animLat.value, state.animLng.value, uiState.seguirVendedor) {
-                    if (uiState.seguirVendedor == vendedor.ruta) {
-                        val newPos = LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
-                        viewModel.cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(newPos, 18f), 600)
+                // 🎥 SEGUIMIENTO DE CÁMARA SUAVE Y PRECISO (Sin perder precisión de ubicación)
+                LaunchedEffect(vendedor.lat, vendedor.lng, uiState.seguirVendedor) {
+                    if (uiState.seguirVendedor == vendedor.ruta && vendedor.lat != 0.0) {
+                        val targetPos = LatLng(vendedor.lat, vendedor.lng)
+                        
+                        // Solo movemos la cámara si el vendedor se alejó más de 5 metros del centro actual
+                        // para evitar vibraciones innecesarias, pero manteniendo el objetivo centrado.
+                        val currentCamPos = viewModel.cameraPositionState.position.target
+                        val distanceResults = FloatArray(1)
+                        android.location.Location.distanceBetween(
+                            currentCamPos.latitude, currentCamPos.longitude,
+                            targetPos.latitude, targetPos.longitude,
+                            distanceResults
+                        )
+                        
+                        if (distanceResults[0] > 5f) { // Umbral de 5 metros para suavizado
+                            viewModel.cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLng(targetPos), 
+                                1000 // Animación fluida de 1 segundo
+                            )
+                        }
                         markerState.showInfoWindow()
                     }
                 }
@@ -228,33 +250,38 @@ fun MapaScreen(
             // DIBUJAR CLIENTES
             if (uiState.markersVisible) {
                 uiState.clientes.forEach { cliente ->
-                    val isSelected = uiState.selectedCliente?.id == cliente.id
+                    key(cliente.id) { // 🔥 Estabilización de marcador (Evita redibujados innecesarios)
+                        val isSelected = uiState.selectedCliente?.id == cliente.id
 
-                    val icon = when (cliente.valor.lowercase()) {
-                        "alto" -> if (isSelected) iconAltoSel else iconAlto
-                        "medio" -> if (isSelected) iconMedioSel else iconMedio
-                        "bajo" -> if (isSelected) iconBajoSel else iconBajo
-                        else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
-                    }
-                    val mState = remember(cliente.id) { MarkerState(LatLng(cliente.ubicacionLat, cliente.ubicacionLng)) }
-
-                    Marker(
-                        state = mState,
-                        zIndex = if (isSelected) 2f else 1f,
-                        title = cliente.nombreNegocio,
-                        icon = icon,
-                        onClick = {
-                            viewModel.selectCliente(cliente)
-                            // 🔍 ZOOM SUAVE AL SELECCIONAR CLIENTE
-                            scope.launch { 
-                                viewModel.cameraPositionState.animate(
-                                    CameraUpdateFactory.newLatLngZoom(mState.position, 16.5f), 
-                                    800
-                                ) 
+                        val icon = remember(cliente.valor, isSelected, mapIsReady) {
+                            if (!mapIsReady) return@remember null
+                            when (cliente.valor.lowercase()) {
+                                "alto" -> if (isSelected) iconAltoSel else iconAlto
+                                "medio" -> if (isSelected) iconMedioSel else iconMedio
+                                "bajo" -> if (isSelected) iconBajoSel else iconBajo
+                                else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
                             }
-                            true
                         }
-                    )
+                        
+                        val mState = rememberMarkerState(key = cliente.id, position = LatLng(cliente.ubicacionLat, cliente.ubicacionLng))
+
+                        Marker(
+                            state = mState,
+                            zIndex = if (isSelected) 2f else 1f,
+                            title = cliente.nombreNegocio,
+                            icon = icon,
+                            onClick = {
+                                viewModel.selectCliente(cliente)
+                                scope.launch { 
+                                    viewModel.cameraPositionState.animate(
+                                        CameraUpdateFactory.newLatLngZoom(mState.position, 16.5f), 
+                                        800
+                                    ) 
+                                }
+                                true
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -287,15 +314,16 @@ fun MapaScreen(
             ) { Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(22.dp)) }
 
             val p = uiState.puestoTrabajo?.trim() ?: ""
-            val esVendedor = p == "Vendedor de Ruta" || p == "Suplente de Ruta"
+            val esAdminEfectivo = p in listOf("CEO", "Gerente General", "Supervisor", "Administración", "Gerente")
+            val esVendedorEfectivo = !esAdminEfectivo
 
             // 🛣️ Botones de Ruta Laterales (Chips)
             Column(
                 Modifier.align(Alignment.TopStart).padding(top = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (esVendedor) {
-                    // 🔘 BOTÓN ÚNICO SEGUIMIENTO (PARA VENDEDORES)
+                if (esVendedorEfectivo) {
+                    // 🔘 BOTÓN ÚNICO SEGUIMIENTO (PARA VENDEDORES O ADMIN EN MODO RUTA)
                     uiState.miRuta?.let { rutaAsignada ->
                         val activo = uiState.seguirVendedor == rutaAsignada
                         val interactionSource = remember { MutableInteractionSource() }
@@ -398,56 +426,98 @@ fun MapaScreen(
             }
 
             // 🌍 Capas de Mapa (Esquina Superior Derecha)
-            var expanded by remember { mutableStateOf(false) }
+            var showLayerSheet by remember { mutableStateOf(false) }
+            val sheetState = rememberModalBottomSheetState()
+
             Column(Modifier.align(Alignment.TopEnd).padding(top = 16.dp), horizontalAlignment = Alignment.End) {
-                FloatingActionButton(
-                    onClick = { expanded = true },
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .shadow(3.dp, RoundedCornerShape(14.dp))
-                        .then(if (isDark) Modifier.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(14.dp)) else Modifier),
-                    shape = RoundedCornerShape(14.dp)
+                // 🌍 BOTÓN DE CAPAS (Limpio y sin tintes grisáceos)
+                Surface(
+                    onClick = { showLayerSheet = true },
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp, // 🛡️ CRÍTICO: Quita el tinte gris de Material 3
+                    shadowElevation = 4.dp,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.size(44.dp)
                 ) {
-                    Icon(Icons.Default.Layers, null, modifier = Modifier.size(20.dp), tint = DelisaRed)
-                }
-                DropdownMenu(
-                    expanded = expanded, 
-                    onDismissRequest = { expanded = false },
-                    modifier = Modifier.background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Mapa Estándar", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }, 
-                        leadingIcon = { Icon(Icons.Default.Map, null, tint = DelisaRed) },
-                        onClick = { viewModel.setMapType(MapType.NORMAL); expanded = false }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Vista Satélite", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }, 
-                        leadingIcon = { Icon(Icons.Default.Satellite, null, tint = DelisaRed) },
-                        onClick = { viewModel.setMapType(MapType.SATELLITE); expanded = false }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Modo Oscuro", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) }, 
-                        leadingIcon = { Icon(Icons.Default.DarkMode, null, tint = DelisaRed) },
-                        onClick = { viewModel.setMapType(MapType.NORMAL, darkMapStyleJson); expanded = false }
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Layers,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                            tint = DelisaRed
+                        )
+                    }
                 }
                 
-                if (!esVendedor) {
+                if (esAdminEfectivo) {
                     Spacer(Modifier.height(12.dp))
-
-                    FloatingActionButton(
+                    // 📜 BOTÓN DE HISTORIAL (Limpio)
+                    Surface(
                         onClick = { navController.navigate("HISTORIAL_RUTA") },
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .shadow(3.dp, RoundedCornerShape(14.dp))
-                            .then(if (isDark) Modifier.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(14.dp)) else Modifier),
-                        shape = RoundedCornerShape(14.dp)
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 4.dp,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.size(44.dp)
                     ) {
-                        Icon(Icons.Default.History, null, modifier = Modifier.size(20.dp), tint = DelisaRed)
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
+                                tint = DelisaRed
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 🔥 NUEVO SELECTOR DE CAPAS PREMIUM
+            if (showLayerSheet) {
+                ModalBottomSheet(
+                    onDismissRequest = { showLayerSheet = false },
+                    sheetState = sheetState,
+                    containerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
+                    dragHandle = { BottomSheetDefaults.DragHandle(color = DelisaRed.copy(0.4f)) }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp)
+                            .padding(bottom = 40.dp)
+                    ) {
+                        Text(
+                            "TIPO DE MAPA",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            letterSpacing = 1.sp
+                        )
+                        Spacer(Modifier.height(20.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            MapTypeOption(
+                                label = "Estándar",
+                                icon = Icons.Default.Map,
+                                selected = uiState.mapType == MapType.NORMAL && uiState.mapStyleJson == null,
+                                onClick = { viewModel.setMapType(MapType.NORMAL); showLayerSheet = false }
+                            )
+                            MapTypeOption(
+                                label = "Satélite",
+                                icon = Icons.Default.Satellite,
+                                selected = uiState.mapType == MapType.SATELLITE,
+                                onClick = { viewModel.setMapType(MapType.SATELLITE); showLayerSheet = false }
+                            )
+                            MapTypeOption(
+                                label = "Noche",
+                                icon = Icons.Default.DarkMode,
+                                selected = uiState.mapStyleJson != null,
+                                onClick = { viewModel.setMapType(MapType.NORMAL, darkMapStyleJson); showLayerSheet = false }
+                            )
+                        }
                     }
                 }
             }
@@ -519,7 +589,7 @@ fun MapaScreen(
                 }
 
                 // 🔥 Selector de Ruta para Admin (CEO / Gerente)
-                if (!esVendedor && uiState.markersVisible) {
+                if (esAdminEfectivo && uiState.markersVisible) {
                     Spacer(Modifier.height(8.dp))
                     val interactionSource = remember { MutableInteractionSource() }
                     val isPressed by interactionSource.collectIsPressedAsState()
@@ -581,7 +651,7 @@ fun MapaScreen(
                 .zIndex(10f)
         ) {
             if (uiState.selectedCliente != null) {
-                ClienteCard(uiState.selectedCliente!!, navController)
+                ClienteCard(uiState.selectedCliente!!, navController, isAdminOverride)
             } else if (uiState.vendedorSeleccionadoRuta != null) {
                 val vendedor = uiState.vendedores.find { it.ruta == uiState.vendedorSeleccionadoRuta }
                 vendedor?.let { VendedorInfoCard(it) }
@@ -595,7 +665,7 @@ fun MapaScreen(
 // =============================================================
 
 @Composable
-fun ClienteCard(cliente: Cliente, navController: NavController) {
+fun ClienteCard(cliente: Cliente, navController: NavController, isAdminOverride: Boolean? = null) {
     val isDark = isSystemInDarkTheme()
     Card(
         modifier = Modifier
@@ -652,7 +722,7 @@ fun ClienteCard(cliente: Cliente, navController: NavController) {
                     .clickable(
                         interactionSource = interactionSource,
                         indication = rememberRipple(bounded = true, color = DelisaRed, radius = 27.dp),
-                        onClick = { navController.navigate("pantalla_ventas/${cliente.id}?origen=Mapa") }
+                        onClick = { navController.navigate("pantalla_ventas/${cliente.id}?origen=Mapa&isAdminOverride=${isAdminOverride ?: true}") }
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -703,6 +773,25 @@ fun VendedorInfoCard(vendedor: VendedorUbicacion) {
                 VendorBatteryIndicator(batteryLevel = vendedor.battery)
             }
         }
+    }
+}
+
+@Composable
+fun MapTypeOption(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Surface(
+            onClick = onClick,
+            modifier = Modifier.size(64.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = if (selected) DelisaRed.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            border = if (selected) BorderStroke(2.dp, DelisaRed) else null
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = if (selected) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, color = if (selected) DelisaRed else MaterialTheme.colorScheme.onSurface)
     }
 }
 

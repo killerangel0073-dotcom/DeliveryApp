@@ -1,11 +1,11 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
-const db = admin.firestore();
 
 /**
  * Cloud Function HTTP para registrar una venta completa en Firestore con Idempotencia.
  */
 const registrarVenta = functions.https.onRequest(async (req, res) => {
+  const db = admin.firestore();
   try {
     if (req.method !== 'POST') {
       return res.status(405).send({ error: 'Método no permitido' });
@@ -79,14 +79,19 @@ const registrarVenta = functions.https.onRequest(async (req, res) => {
       // 🔹 Validar stocks y Precios (Auditoría Financiera)
       let alertaPrecioGlobal = false;
       let precioMaestroAudit = "";
+      let alertaStockGlobal = false;
 
       resultados.forEach(r => {
         if (!r.stockSnap.exists) {
           throw new Error(`Stock no existe para ${r.producto.nombre}`);
         }
         const stockActual = r.stockSnap.data().cantidad || 0;
+
+        // 🔥 MODO EMERGENCIA: Si no hay stock en nube pero el vendedor sí tiene físico,
+        // permitimos la venta pero marcamos alerta para auditoría.
         if (stockActual < r.producto.cantidad) {
-          throw new Error(`Stock insuficiente para ${r.producto.nombre}`);
+          alertaStockGlobal = true;
+          console.warn(`⚠️ STOCK INSUFICIENTE en nube para ${r.producto.nombre}. Nube: ${stockActual}, Venta: ${r.producto.cantidad}. Se permite venta con saldo negativo.`);
         }
 
         // 🛡️ Blindaje de Precio: Comparar contra precio unitario maestro
@@ -120,6 +125,7 @@ const registrarVenta = functions.https.onRequest(async (req, res) => {
         longitudVenta: longitudVenta || 0,
         alertaPrecio: alertaPrecioGlobal, // 🔥 Flag de Auditoría
         precioMaestro: alertaPrecioGlobal ? precioMaestroAudit : null, // 🔥 Referencia de precios maestros
+        alertaStock: alertaStockGlobal, // 🔥 Flag de Auditoría Inventario
         motivoVisita: motivoVisita || null // 🔥 Guardado en Firestore
       });
 

@@ -382,4 +382,8 @@ class RepositoryCliente(private val dao: ClienteDao) {
     fun obtenerClientesLocal(): Flow<List<ClienteEntity>> {
         return dao.getAllClientesFlow()
     }
+
+    suspend fun obtenerClientesLocalNoFlow(): List<ClienteEntity> = withContext(Dispatchers.IO) {
+        dao.getAllClientes()
+    }
 }

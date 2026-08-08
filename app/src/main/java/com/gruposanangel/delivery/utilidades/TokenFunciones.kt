@@ -47,19 +47,23 @@ object FcmUtils {
      * Obtiene el token actual del dispositivo y lo sube a Firestore.
      */
     fun updateFcmToken(uid: String) {
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (!task.isSuccessful) {
-                Log.e("FCM", "❌ No se pudo obtener el token")
-                return@addOnCompleteListener
-            }
-
-            val token = task.result
-            val db = FirebaseFirestore.getInstance()
-            db.collection("users").document(uid)
-                .set(mapOf("fcmTokens" to FieldValue.arrayUnion(token)), SetOptions.merge())
-                .addOnSuccessListener {
-                    Log.d("FCM", "✅ Token actualizado al iniciar sesión para el usuario [$uid]")
+        try {
+            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                if (!task.isSuccessful) {
+                    Log.e("FCM", "❌ No se pudo obtener el token")
+                    return@addOnCompleteListener
                 }
+
+                val token = task.result
+                val db = FirebaseFirestore.getInstance()
+                db.collection("users").document(uid)
+                    .set(mapOf("fcmTokens" to FieldValue.arrayUnion(token)), SetOptions.merge())
+                    .addOnSuccessListener {
+                        Log.d("FCM", "✅ Token actualizado al iniciar sesión para el usuario [$uid]")
+                    }
+            }
+        } catch (e: Exception) {
+            Log.e("FCM", "⚠️ Error bypass: El dispositivo no soporta Firebase Messaging (Probable Huawei sin GMS)")
         }
     }
 }

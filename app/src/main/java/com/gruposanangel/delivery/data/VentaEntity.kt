@@ -16,6 +16,8 @@ data class VentaEntity(
     val vendedorId: String,
     val vendedorNombre: String? = null,
     val almacenId: String? = null,
+    val rutaId: String? = null,        // 🔥 Nuevo: Identificador de la Ruta (Comercial)
+    val rutaNombre: String? = null,    // 🔥 Nuevo: Nombre de la Ruta (Comercial)
     
     // --- AUDITORÍA DE TIEMPO (Blindaje de Fraude) ---
     val fecha: Long,                  // Hora real verificada (para UI y reportes)
@@ -31,6 +33,9 @@ data class VentaEntity(
 
     val sincronizado: Boolean,
     val firestoreId: String? = null,
+    val intentosSync: Int = 0,         
+    val ultimoError: String? = null,   
+    val fotoSincronizada: Boolean = false, // 🔥 Nuevo: Control independiente para la foto
 
     // --- ESTADO DE LA VENTA ---
     val estado: String = "pagada", // "pagada", "CANCELADA"

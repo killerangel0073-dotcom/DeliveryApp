@@ -50,6 +50,59 @@ class RepositoryGasto(private val gastoDao: GastoDao) {
         return if (raw is DocumentReference) raw.id else raw?.toString() ?: ""
     }
 
+    /**
+     * Sincroniza todos los gastos de una RUTA de los últimos 90 días.
+     */
+    suspend fun sincronizarRuta90Dias(rutaId: String, rutaNombre: String) = withContext(Dispatchers.IO) {
+        if (rutaId.isEmpty() && rutaNombre.isEmpty()) return@withContext
+        
+        val noventaDiasAtras = java.util.Calendar.getInstance().apply {
+            add(java.util.Calendar.DAY_OF_YEAR, -90)
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+        }.time
+
+        try {
+            Log.d(TAG, "📡 Sincronizando GASTOS para Ruta: $rutaNombre")
+            
+            // Consultamos por Nombre de Ruta o ID para asegurar legacy y nuevo
+            val snapshot = db.collection("gastos")
+                .whereGreaterThanOrEqualTo("timestamp", Timestamp(noventaDiasAtras))
+                .get().await()
+
+            var procesados = 0
+            snapshot.documents.forEach { doc ->
+                val rNomDoc = doc.getString("rutaNombre") ?: ""
+                val rIdDoc = doc.getString("rutaId") ?: ""
+                
+                // Si coincide con nuestra ruta
+                if (rIdDoc == rutaId || rNomDoc == rutaNombre) {
+                    val id = doc.id
+                    val monto = (doc.get("monto") as? Number)?.toDouble() ?: 0.0
+                    val categoria = doc.getString("categoria") ?: "Otros"
+                    val descripcion = doc.getString("descripcion") ?: ""
+                    
+                    val fRaw = doc.get("timestamp") ?: doc.get("fecha")
+                    val fechaMs = when(fRaw) {
+                        is Timestamp -> fRaw.toDate().time
+                        is Number -> fRaw.toLong()
+                        else -> 0L
+                    }
+                    
+                    if (fechaMs > 0) {
+                        val vIdDoc = vIdFromRaw(doc.get("vendedorId") ?: doc.get("vendedorRef"))
+                        val vNom = doc.getString("vendedorNombre") ?: ""
+                        
+                        gastoDao.insertar(GastoEntity(id, monto, categoria, descripcion, fechaMs, vIdDoc, vNom, rNomDoc, true))
+                        procesados++
+                    }
+                }
+            }
+            Log.d(TAG, "✅ Gastos de ruta guardados: $procesados")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error sincronizando gastos de ruta: ${e.message}")
+        }
+    }
+
     suspend fun descargarGastosPeriodo(vendedorId: String, inicio: Long, fin: Long) = withContext(Dispatchers.IO) {
         try {
             // 🛡️ Ampliamos ventana para evitar desfases (como en ventas)
@@ -128,4 +181,95 @@ class RepositoryGasto(private val gastoDao: GastoDao) {
             Log.e(TAG, "Error sincronizando gastos: ${e.message}")
         }
     }
+
+    /**
+     * Sincroniza el catálogo de gastos fijos (Renta, Sueldos, etc)
+     */
+    suspend fun descargarGastosFijos() = withContext(Dispatchers.IO) {
+        try {
+            val snapshot = db.collection("config_gastos_fijos")
+                .whereEqualTo("activo", true)
+                .get().await()
+
+            snapshot.documents.forEach { doc ->
+                val id = doc.id
+                val monto = (doc.get("monto") as? Number)?.toDouble() ?: 0.0
+                val desc = doc.getString("descripcion") ?: ""
+                val peri = doc.getString("periodicidad") ?: "MENSUAL"
+                
+                gastoDao.insertar(GastoEntity(
+                    id = id,
+                    monto = monto,
+                    categoria = "FIJO",
+                    descripcion = desc,
+                    fecha = System.currentTimeMillis(),
+                    vendedorId = "ADMIN",
+                    vendedorNombre = "SISTEMA",
+                    rutaNombre = "GLOBAL",
+                    sincronizado = true,
+                    esFijo = true,
+                    periodicidad = peri,
+                    activo = true
+                ))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error descargando fijos: ${e.message}")
+        }
+    }
+
+    suspend fun guardarGastoFijo(descripcion: String, monto: Double, peri: String, categoria: String = "FIJO") = withContext(Dispatchers.IO) {
+        val id = java.util.UUID.randomUUID().toString()
+        val data = mapOf(
+            "descripcion" to descripcion,
+            "monto" to monto,
+            "periodicidad" to peri,
+            "categoria" to categoria,
+            "activo" to true,
+            "timestamp" to Timestamp.now()
+        )
+        try {
+            db.collection("config_gastos_fijos").document(id).set(data).await()
+            gastoDao.insertar(GastoEntity(
+                id = id, monto = monto, categoria = categoria, descripcion = descripcion,
+                fecha = System.currentTimeMillis(), vendedorId = "ADMIN", vendedorNombre = "SISTEMA",
+                rutaNombre = "GLOBAL", sincronizado = true, esFijo = true,
+                periodicidad = peri, activo = true
+            ))
+        } catch (e: Exception) {
+            Log.e(TAG, "Error guardando fijo: ${e.message}")
+        }
+    }
+
+    suspend fun eliminarGastoFijo(id: String) = withContext(Dispatchers.IO) {
+        try {
+            db.collection("config_gastos_fijos").document(id).update("activo", false).await()
+            gastoDao.eliminarGastoPorId(id)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error eliminando fijo: ${e.message}")
+        }
+    }
+
+    suspend fun actualizarGastoFijo(id: String, descripcion: String, monto: Double, peri: String) = withContext(Dispatchers.IO) {
+        val data = mapOf(
+            "descripcion" to descripcion,
+            "monto" to monto,
+            "periodicidad" to peri,
+            "timestamp" to Timestamp.now()
+        )
+        try {
+            db.collection("config_gastos_fijos").document(id).update(data).await()
+            // Actualizar localmente
+            val local = GastoEntity(
+                id = id, monto = monto, categoria = "FIJO", descripcion = descripcion,
+                fecha = System.currentTimeMillis(), vendedorId = "ADMIN", vendedorNombre = "SISTEMA",
+                rutaNombre = "GLOBAL", sincronizado = true, esFijo = true,
+                periodicidad = peri, activo = true
+            )
+            gastoDao.insertar(local)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error actualizando fijo: ${e.message}")
+        }
+    }
+
+    fun obtenerGastosFijosActivos(): Flow<List<GastoEntity>> = gastoDao.obtenerGastosFijosActivos()
 }

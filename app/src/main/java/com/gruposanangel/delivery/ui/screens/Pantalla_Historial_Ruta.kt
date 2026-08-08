@@ -2,9 +2,14 @@
 
 package com.gruposanangel.delivery.ui.screens
 
+import android.util.Log
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,6 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,11 +27,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -64,13 +74,36 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
         position = CameraPosition.fromLatLngZoom(LatLng(19.4768, -96.5897), 12f)
     }
 
-    // Encuadre automático cuando cargan puntos
+    // 🛡️ ENCUADRE DE CÁMARA SEGURO Y BLINDADO
     LaunchedEffect(uiState.puntos) {
-        if (uiState.puntos.isNotEmpty()) {
-            val builder = LatLngBounds.Builder()
-            uiState.puntos.forEach { builder.include(LatLng(it.lat, it.lng)) }
-            val bounds = builder.build()
-            cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 150), 1000)
+        if (uiState.puntos.size >= 2) {
+            try {
+                val builder = LatLngBounds.Builder()
+                var validCount = 0
+                uiState.puntos.forEach { 
+                    if (it.lat != 0.0 && it.lng != 0.0) {
+                        builder.include(LatLng(it.lat, it.lng))
+                        validCount++
+                    }
+                }
+                
+                if (validCount >= 2) {
+                    val bounds = builder.build()
+                    val dist = FloatArray(1)
+                    android.location.Location.distanceBetween(
+                        bounds.southwest.latitude, bounds.southwest.longitude,
+                        bounds.northeast.latitude, bounds.northeast.longitude, dist
+                    )
+                    
+                    if (dist[0] < 50f) {
+                        cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(bounds.center, 16f), 800)
+                    } else {
+                        cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 150), 800)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("HistorialRuta", "Error de cámara", e)
+            }
         }
     }
 
@@ -99,56 +132,20 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
                     modifier = Modifier.fillMaxSize(),
                     cameraPositionState = cameraPositionState,
                     properties = MapProperties(mapType = MapType.NORMAL),
-                    uiSettings = MapUiSettings(zoomControlsEnabled = false)
+                    uiSettings = MapUiSettings(zoomControlsEnabled = false),
+                    onMapClick = { viewModel.seleccionarVenta(null) }
                 ) {
-                    // 🛣️ DIBUJO DE RUTA OPTIMIZADO
-                    if (uiState.puntos.size > 1) {
-                        val polylines = remember(uiState.puntos) {
-                            val result = mutableListOf<Pair<List<LatLng>, Color>>()
-                            var currentPoints = mutableListOf<LatLng>()
-                            var lastColor: Color? = null
-
-                            for (i in 0 until uiState.puntos.size - 1) {
-                                val p1 = uiState.puntos[i]
-                                val p2 = uiState.puntos[i+1]
-                                
-                                val segmentColor = when {
-                                    p1.vel > 80.0 -> Color(0xFFFF1744)
-                                    p1.vel > 50.0 -> Color(0xFFFFD600)
-                                    p1.vel < 5.0 -> Color(0xFF9E9E9E)
-                                    else -> Color(0xFF00E676)
-                                }
-
-                                if (lastColor == null) {
-                                    lastColor = segmentColor
-                                    currentPoints.add(LatLng(p1.lat, p1.lng))
-                                }
-
-                                if (segmentColor == lastColor) {
-                                    currentPoints.add(LatLng(p2.lat, p2.lng))
-                                } else {
-                                    result.add(currentPoints to lastColor)
-                                    currentPoints = mutableListOf(LatLng(p1.lat, p1.lng), LatLng(p2.lat, p2.lng))
-                                    lastColor = segmentColor
-                                }
-                            }
-                            if (currentPoints.isNotEmpty() && lastColor != null) {
-                                result.add(currentPoints to lastColor)
-                            }
-                            result
-                        }
-
-                        polylines.forEach { (points, color) ->
-                            Polyline(
-                                points = points,
-                                color = color,
-                                width = 10f,
-                                jointType = JointType.ROUND,
-                                startCap = RoundCap(),
-                                endCap = RoundCap(),
-                                geodesic = true
-                            )
-                        }
+                    // 🛣️ DIBUJO DE RUTA (Pre-calculado y Seguro)
+                    uiState.segments.forEach { segment ->
+                        Polyline(
+                            points = segment.points,
+                            color = Color(segment.color.toInt()), 
+                            width = 10f,
+                            jointType = JointType.ROUND,
+                            startCap = RoundCap(),
+                            endCap = RoundCap(),
+                            geodesic = true
+                        )
                     }
 
                     // 🏁 MARCADORES DE INICIO Y FIN
@@ -157,12 +154,12 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
                         val end = uiState.puntos.last()
                         
                         Marker(
-                            state = rememberMarkerState(position = LatLng(start.lat, start.lng)),
+                            state = rememberMarkerState(key = "start_point", position = LatLng(start.lat, start.lng)),
                             title = "Punto de Partida",
                             icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
                         )
                         Marker(
-                            state = rememberMarkerState(position = LatLng(end.lat, end.lng)),
+                            state = rememberMarkerState(key = "end_point", position = LatLng(end.lat, end.lng)),
                             title = "Última Posición",
                             icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
                         )
@@ -177,7 +174,7 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
                         }
                         
                         Marker(
-                            state = rememberMarkerState(position = incidencia.latLng),
+                            state = rememberMarkerState(key = "inc_${incidencia.timestamp}", position = incidencia.latLng),
                             title = if (incidencia.tipo == "EXCESO_VELOCIDAD") "🚀 Exceso de Velocidad" else "⏳ Parada Prolongada",
                             snippet = incidencia.descripcion,
                             icon = markerIcon,
@@ -188,18 +185,20 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
                     // 📸 MARCADORES DE VENTAS (Thumbnail del Cliente)
                     uiState.ventas.forEach { venta ->
                         key(venta.id, venta.fotoUrl) {
-                            val markerState = rememberMarkerState(position = venta.latLng)
+                            val markerState = rememberMarkerState(key = "venta_${venta.id}", position = venta.latLng)
                             
                             MarkerComposable(
                                 state = markerState,
                                 title = venta.clienteNombre,
-                                snippet = "Venta Total: $${venta.total}"
+                                snippet = "Venta Total: $${venta.total}",
+                                onClick = {
+                                    viewModel.seleccionarVenta(venta)
+                                    false
+                                }
                             ) {
-                                var isImageLoaded by remember { mutableStateOf(false) }
-
                                 Box(
                                     modifier = Modifier
-                                        .size(if (isImageLoaded) 48.dp else 47.9.dp)
+                                        .size(if (uiState.selectedVenta?.id == venta.id) 64.dp else 48.dp)
                                         .shadow(8.dp, CircleShape)
                                         .background(if (venta.fueraDeRango) DelisaRed else DelisaRedDark, CircleShape)
                                         .padding(2.5.dp)
@@ -209,11 +208,13 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
                                 ) {
                                     if (!venta.fotoUrl.isNullOrBlank()) {
                                         AsyncImage(
-                                            model = venta.fotoUrl,
+                                            model = coil.request.ImageRequest.Builder(LocalContext.current)
+                                                .data(venta.fotoUrl)
+                                                .allowHardware(false) 
+                                                .build(),
                                             contentDescription = null,
                                             modifier = Modifier.fillMaxSize(),
                                             contentScale = ContentScale.Crop,
-                                            onSuccess = { isImageLoaded = true },
                                             placeholder = painterResource(R.drawable.repartidor),
                                             error = painterResource(R.drawable.repartidor)
                                         )
@@ -231,17 +232,27 @@ fun Pantalla_Historial_Ruta(navController: NavController) {
                     }
                 }
 
-                // Panel de Métricas Inferior
+                // Panel de Métricas Inferior / Tarjeta Informativa
                 Box(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .padding(16.dp)
                         .zIndex(10f)
                 ) {
-                    HistorialMetricsCard(
-                        uiState = uiState,
-                        onDemoClick = { viewModel.cargarDemoData() }
-                    )
+                    if (uiState.selectedVenta != null) {
+                        VentaInformativaCard(
+                            venta = uiState.selectedVenta!!,
+                            onClose = { viewModel.seleccionarVenta(null) },
+                            onVerDetalle = { 
+                                navController.navigate("detalle_venta_admin/${uiState.selectedVenta!!.id}?mostrarAcciones=false")
+                            }
+                        )
+                    } else {
+                        HistorialMetricsCard(
+                            uiState = uiState,
+                            onDemoClick = { viewModel.cargarDemoData() }
+                        )
+                    }
                 }
 
                 if (uiState.isLoading) {
@@ -267,7 +278,6 @@ fun RouteAndDatePicker(
     val sdf = SimpleDateFormat("dd MMM", Locale.forLanguageTag("es-MX"))
 
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 8.dp)) {
-        // Selector de Ruta
         Box {
             Surface(
                 onClick = { showRutaMenu = true },
@@ -307,7 +317,6 @@ fun RouteAndDatePicker(
 
         Spacer(Modifier.width(8.dp))
 
-        // Selector de Fecha
         Surface(
             onClick = { showDatePicker = true },
             shape = RoundedCornerShape(12.dp),
@@ -365,6 +374,93 @@ fun RouteAndDatePicker(
                         weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun VentaInformativaCard(
+    venta: VentaMarker,
+    onClose: () -> Unit,
+    onVerDetalle: () -> Unit
+) {
+    val fmtMoneda = java.text.NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(12.dp, RoundedCornerShape(28.dp)),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!venta.fotoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = venta.fotoUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(Icons.Default.Storefront, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = venta.clienteNombre,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Venta: ${fmtMoneda.format(venta.total)}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = DelisaRed
+                )
+                if (venta.fueraDeRango) {
+                    Surface(
+                        color = DelisaRed.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        Text(
+                            "FUERA DE RANGO",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Black,
+                            color = DelisaRed
+                        )
+                    }
+                }
+            }
+
+            Column(horizontalAlignment = Alignment.End) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f))
+                }
+                TextButton(
+                    onClick = onVerDetalle,
+                    colors = ButtonDefaults.textButtonColors(contentColor = DelisaRed)
+                ) {
+                    Text("DETALLE", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                }
             }
         }
     }

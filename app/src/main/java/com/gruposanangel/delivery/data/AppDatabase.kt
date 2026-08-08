@@ -17,7 +17,7 @@ import androidx.room.RoomDatabase
         MovimientoInventarioEntity::class,
         GastoEntity::class
     ],
-    version = 34,
+    version = 37,
     exportSchema = true // Habilitado para soportar migraciones automáticas
 )
 abstract class AppDatabase : RoomDatabase() {

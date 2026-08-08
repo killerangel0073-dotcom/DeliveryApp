@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -36,7 +37,6 @@ import com.gruposanangel.delivery.ui.screens.LoginViewModel
 import com.gruposanangel.delivery.ui.screens.LoginViewModelFactory
 import kotlinx.coroutines.delay
 import com.gruposanangel.delivery.ui.theme.*
-import androidx.compose.foundation.isSystemInDarkTheme
 import java.util.Calendar
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
@@ -74,6 +74,8 @@ fun PantallaLoginProContent(
     onLoginSuccess: () -> Unit,
     loginSuccessSignal: Boolean,
 ) {
+    val isDark = isSystemInDarkTheme()
+    
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -111,23 +113,25 @@ fun PantallaLoginProContent(
     val buttonCorner by animateDpAsState(
         targetValue = if (isLoading) 100.dp else 14.dp,
         animationSpec = tween(300),
-        label = "corner",
+        label = "corner"
     )
 
     Box(
         modifier = Modifier.fillMaxSize(),
     ) {
+        // 🔹 FONDO CINEMÁTICO (FIJO OSCURO)
         Image(
             painter = painterResource(R.drawable.fondo_mapa),
             contentDescription = null,
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
+            contentScale = ContentScale.Crop
         )
 
+        // 🔹 OVERLAY OSCURO FIJO (ESTILO ORIGINAL)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.45f)),
+                .background(Color.Black.copy(alpha = 0.5f))
         )
 
         if (isLoading) {
@@ -143,7 +147,7 @@ fun PantallaLoginProContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(24.dp),
-            contentAlignment = Alignment.Center,
+            contentAlignment = Alignment.Center
         ) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -157,7 +161,7 @@ fun PantallaLoginProContent(
                     modifier = Modifier
                         .size(160.dp)
                         .padding(bottom = 10.dp),
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.Fit
                 )
 
                 Text(
@@ -165,7 +169,7 @@ fun PantallaLoginProContent(
                     color = Color.White,
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Black,
-                    letterSpacing = 1.sp,
+                    letterSpacing = 1.sp
                 )
 
                 Text(
@@ -173,7 +177,7 @@ fun PantallaLoginProContent(
                     color = Color.White.copy(alpha = 0.7f),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
+                    letterSpacing = 2.sp
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -190,16 +194,16 @@ fun PantallaLoginProContent(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White.copy(alpha = 0.9f),
+                            focusedContainerColor = if (isDark) Color.Black.copy(0.3f) else Color.White,
+                            unfocusedContainerColor = if (isDark) Color.Black.copy(0.2f) else Color.White.copy(0.85f),
                             focusedBorderColor = DelisaRed,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedLabelColor = Color.White,
-                            unfocusedLabelColor = Color.White.copy(alpha = 0.6f),
+                            unfocusedBorderColor = if (isDark) Color.White.copy(0.2f) else Color.Black.copy(0.1f),
+                            focusedLabelColor = DelisaRed,
+                            unfocusedLabelColor = if (isDark) Color.White.copy(0.6f) else MaterialTheme.colorScheme.onSurfaceVariant,
                             cursorColor = DelisaRed,
-                            focusedTextColor = Color.Black,
-                            unfocusedTextColor = Color.Black,
-                        ),
+                            focusedTextColor = if (isDark) Color.White else Color.Black,
+                            unfocusedTextColor = if (isDark) Color.White else Color.Black
+                        )
                     )
                 }
 
@@ -215,7 +219,7 @@ fun PantallaLoginProContent(
                                 Icon(
                                     if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                     null,
-                                    tint = Color.Gray,
+                                    tint = if (isDark) Color.White.copy(0.4f) else Color.Gray
                                 )
                             }
                         },
@@ -225,16 +229,16 @@ fun PantallaLoginProContent(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White.copy(alpha = 0.9f),
+                            focusedContainerColor = if (isDark) Color.Black.copy(0.3f) else Color.White,
+                            unfocusedContainerColor = if (isDark) Color.Black.copy(0.2f) else Color.White.copy(0.85f),
                             focusedBorderColor = DelisaRed,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedLabelColor = Color.White,
-                            unfocusedLabelColor = Color.White.copy(alpha = 0.6f),
+                            unfocusedBorderColor = if (isDark) Color.White.copy(0.2f) else Color.Black.copy(0.1f),
+                            focusedLabelColor = DelisaRed,
+                            unfocusedLabelColor = if (isDark) Color.White.copy(0.6f) else MaterialTheme.colorScheme.onSurfaceVariant,
                             cursorColor = DelisaRed,
-                            focusedTextColor = Color.Black,
-                            unfocusedTextColor = Color.Black,
-                        ),
+                            focusedTextColor = if (isDark) Color.White else Color.Black,
+                            unfocusedTextColor = if (isDark) Color.White else Color.Black
+                        )
                     )
                 }
 
@@ -242,13 +246,13 @@ fun PantallaLoginProContent(
                 AnimatedVisibility(
                     visible = errorMessage != null,
                     enter = slideInVertically { -it } + fadeIn(),
-                    exit = slideOutVertically { -it } + fadeOut(),
+                    exit = slideOutVertically { -it } + fadeOut()
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
                         shape = RoundedCornerShape(12.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error)
                     ) {
                         Text(
                             errorMessage.orEmpty(),
@@ -256,7 +260,7 @@ fun PantallaLoginProContent(
                             fontSize = 13.sp,
                             modifier = Modifier.padding(12.dp),
                             textAlign = TextAlign.Center,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -275,7 +279,7 @@ fun PantallaLoginProContent(
                         enabled = !isLoading,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = DelisaRed,
-                            disabledContainerColor = DelisaRed.copy(alpha = 0.5f),
+                            disabledContainerColor = DelisaRed.copy(alpha = 0.5f)
                         ),
                         contentPadding = PaddingValues(0.dp),
                     ) {
@@ -283,21 +287,21 @@ fun PantallaLoginProContent(
                             CircularProgressIndicator(
                                 color = Color.White,
                                 strokeWidth = 3.dp,
-                                modifier = Modifier.size(28.dp),
+                                modifier = Modifier.size(28.dp)
                             )
                         } else {
                             Text(
                                 "ACCEDER AL SISTEMA", 
                                 color = Color.White, 
                                 fontSize = 16.sp,
-                                fontWeight = FontWeight.Black,
+                                fontWeight = FontWeight.Black
                             )
                         }
                     }
                 }
                 
                 Text(
-                    text = "© ${Calendar.getInstance()[Calendar.YEAR]} Delisa Botanas",
+                    text = "© ${Calendar.getInstance().get(Calendar.YEAR)} Delisa Botanas",
                     color = Color.White.copy(alpha = 0.4f),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
@@ -308,13 +312,27 @@ fun PantallaLoginProContent(
     }
 }
 
-@Preview(showBackground = true, showSystemUi = true, name = "Login - Estado Normal")
+@Preview(showBackground = true, showSystemUi = true, name = "Login - Modo Claro")
 @Composable
-fun PreviewLoginNormal() {
+fun PreviewLoginLight() {
     DeliveryTheme(darkTheme = false) {
         PantallaLoginProContent(
             isLoading = false,
-            errorMessage = "Credenciales incorrectas, intente de nuevo.",
+            errorMessage = null,
+            onLoginClick = { _, _ -> },
+            onLoginSuccess = {},
+            loginSuccessSignal = false,
+        )
+    }
+}
+
+@Preview(showBackground = true, showSystemUi = true, name = "Login - Modo Oscuro")
+@Composable
+fun PreviewLoginDark() {
+    DeliveryTheme(darkTheme = true) {
+        PantallaLoginProContent(
+            isLoading = false,
+            errorMessage = null,
             onLoginClick = { _, _ -> },
             onLoginSuccess = {},
             loginSuccessSignal = false,

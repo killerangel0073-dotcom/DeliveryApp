@@ -6,6 +6,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
@@ -17,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
@@ -34,70 +36,73 @@ import java.text.NumberFormat
 fun PerfilVentaSelector(
     perfiles: List<PerfilVenta>,
     seleccionado: PerfilVenta?,
-    onSeleccionar: (PerfilVenta) -> Unit
+    onSeleccionar: (PerfilVenta) -> Unit,
+    siempreMostrar: Boolean = false
 ) {
-    if (perfiles.size <= 1) return
+    if (perfiles.isEmpty() || (perfiles.size <= 1 && !siempreMostrar)) return
 
+    val indexSeleccionado = perfiles.indexOfFirst { it.id == seleccionado?.id }.coerceAtLeast(0)
+    
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp),
-        contentAlignment = Alignment.Center
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 0.dp) // 🔥 Espacio inferior eliminado
     ) {
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            contentPadding = PaddingValues(horizontal = 16.dp)
+        // Contenedor principal estilo Segmented Control
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp) // 🔥 Ligeramente más esbelto
+                .clip(RoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), RoundedCornerShape(14.dp))
         ) {
-            items(perfiles.size) { index ->
-                val perfil = perfiles[index]
-                val isSelected = perfil.id == seleccionado?.id
-                
-                val backgroundColor by animateColorAsState(
-                    targetValue = if (isSelected) DelisaRed else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    label = "profileBg"
-                )
-                val contentColor by animateColorAsState(
-                    targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                    label = "profileContent"
-                )
-                val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.05f else 1f,
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-                    label = "profileScale"
-                )
+            val maxWidth = maxWidth
+            val tabWidth = maxWidth / perfiles.size
+            
+            // Indicador deslizable (Burbuja)
+            val indicatorOffset by animateDpAsState(
+                targetValue = tabWidth * indexSeleccionado,
+                animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioLowBouncy),
+                label = "indicator"
+            )
 
-                Surface(
-                    onClick = { onSeleccionar(perfil) },
-                    color = backgroundColor,
-                    shape = RoundedCornerShape(16.dp),
-                    border = if (!isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)) else null,
-                    modifier = Modifier
-                        .padding(horizontal = 4.dp)
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        }
-                        .animateContentSize()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+            Box(
+                modifier = Modifier
+                    .offset(x = indicatorOffset)
+                    .width(tabWidth)
+                    .fillMaxHeight()
+                    .padding(3.dp) // Margen interno de la burbuja
+                    .shadow(3.dp, RoundedCornerShape(11.dp))
+                    .background(DelisaRed, RoundedCornerShape(11.dp))
+            )
+
+            // Opciones (Texto)
+            Row(modifier = Modifier.fillMaxSize()) {
+                perfiles.forEachIndexed { index, perfil ->
+                    val isSelected = index == indexSeleccionado
+                    val textColor by animateColorAsState(
+                        targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                        label = "textColor"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { onSeleccionar(perfil) }
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp).padding(end = 4.dp),
-                                tint = Color.White
-                            )
-                        }
                         Text(
                             text = perfil.nombre.uppercase(),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            color = contentColor,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                            color = textColor,
+                            fontSize = 11.sp,
                             letterSpacing = 0.5.sp
                         )
                     }
@@ -214,5 +219,25 @@ fun BreakdownPerfiles(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun CategoryHeader(titulo: String) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp, bottom = 8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Text(
+            text = titulo.uppercase(),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            color = DelisaRed,
+            letterSpacing = 1.sp
+        )
     }
 }

@@ -160,10 +160,13 @@ fun MovimientosInventarioScreen(
 
     val productosOrdenados = remember(catalogo, state.stockOrigen, state.origen, state.cantidades) {
         catalogo.sortedWith(
-            compareByDescending<Plantilla_Producto> { (state.cantidades[it.id] ?: 0) > 0 } // Seleccionados arriba
-                .thenByDescending { state.stockOrigen[it.id] ?: 0 } // Luego por stock físico
-                .thenBy { it.nombre } // Finalmente alfabético
+            compareBy<Plantilla_Producto> { it.categoria }
+                .thenBy { it.nombre }
         )
+    }
+
+    val productosPorCategoria = remember(productosOrdenados) {
+        productosOrdenados.groupBy { it.categoria }
     }
 
     Scaffold(
@@ -252,19 +255,26 @@ fun MovimientosInventarioScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        // verticalArrangement = Arrangement.spacedBy(12.dp), // Eliminado para manejar espaciado manual con headers
                         contentPadding = PaddingValues(bottom = 16.dp)
                     ) {
-                        items(productosOrdenados, key = { it.id }) { producto ->
-                            ItemProductoCargaModerno(
-                                producto = producto,
-                                cantidadActual = state.cantidades[producto.id] ?: 0,
-                                stockDisponible = state.stockOrigen[producto.id] ?: 0,
-                                esCompra = state.origen == "Compra Producto" || isEmergency,
-                                isAudit = false,
-                                onCantidadChange = { viewModel.actualizarCantidad(producto.id, it) },
-                                onStockLimitReached = { mostrarAvisoStock(state.stockOrigen[producto.id] ?: 0) }
-                            )
+                        productosPorCategoria.forEach { (categoria, productos) ->
+                            item(key = "header_$categoria") {
+                                CategoryHeader(categoria)
+                            }
+                            
+                            items(productos, key = { it.id }) { producto ->
+                                ItemProductoCargaModerno(
+                                    producto = producto,
+                                    cantidadActual = state.cantidades[producto.id] ?: 0,
+                                    stockDisponible = state.stockOrigen[producto.id] ?: 0,
+                                    esCompra = state.origen == "Compra Producto" || isEmergency,
+                                    isAudit = false,
+                                    onCantidadChange = { viewModel.actualizarCantidad(producto.id, it) },
+                                    onStockLimitReached = { mostrarAvisoStock(state.stockOrigen[producto.id] ?: 0) }
+                                )
+                                Spacer(Modifier.height(12.dp))
+                            }
                         }
                     }
                 }

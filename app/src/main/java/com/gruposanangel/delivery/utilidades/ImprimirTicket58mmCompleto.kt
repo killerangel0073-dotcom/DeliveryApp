@@ -104,7 +104,20 @@ fun ImprimirTicket58mmCompleto(
             outputStream.write("--------------------------------\n".toByteArray())
 
             var totalCalc = 0.0
-            for (p in productos.filter { it.cantidad > 0 }) {
+            val productosFiltrados = productos.filter { it.cantidad > 0 }
+                .sortedWith(compareBy({ it.categoria }, { it.nombre }))
+
+            var categoriaActual = ""
+
+            for (p in productosFiltrados) {
+                // 🔥 HEADER DE CATEGORÍA
+                if (p.categoria.uppercase() != categoriaActual) {
+                    categoriaActual = p.categoria.uppercase()
+                    outputStream.write(BOLD_ON)
+                    outputStream.write(">> ${limpiarTexto(categoriaActual)}\n".toByteArray())
+                    outputStream.write(BOLD_OFF)
+                }
+
                 val subtotal = p.cantidad * p.precio
                 totalCalc += subtotal
                 
@@ -115,7 +128,6 @@ fun ImprimirTicket58mmCompleto(
                 val tot = String.format("%.2f", subtotal).padStart(6)
                 
                 outputStream.write("$cant $nombreAjustado $pre $tot\n".toByteArray())
-                outputStream.write("\n".toByteArray()) // Línea entre productos
             }
             outputStream.write("--------------------------------\n".toByteArray())
 

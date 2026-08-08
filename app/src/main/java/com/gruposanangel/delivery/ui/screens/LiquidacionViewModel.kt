@@ -19,7 +19,8 @@ data class LiquidacionUiState(
     val error: String? = null,
     val exito: Boolean = false,
     val origen: String = "",
-    val destino: String = ""
+    val destino: String = "",
+    val listaAlmacenes: List<String> = emptyList()
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -43,7 +44,9 @@ class LiquidacionViewModel(
                         nombre = it.nombre,
                         precio = it.precio,
                         cantidad = 0,
-                        imagenUrl = it.imagenUrl ?: ""
+                        imagenUrl = it.imagenUrl ?: "",
+                        marca = it.marca,
+                        categoria = it.categoria
                     )
                 }
         }
@@ -71,7 +74,15 @@ class LiquidacionViewModel(
             }
             .launchIn(viewModelScope)
 
+        cargarListaAlmacenes()
         recuperarEstado()
+    }
+
+    private fun cargarListaAlmacenes() {
+        viewModelScope.launch {
+            val lista = inventarioRepo.obtenerListaAlmacenes()
+            _uiState.update { it.copy(listaAlmacenes = lista.filter { it != "Compra Producto" }) }
+        }
     }
 
     private fun recuperarEstado() {
@@ -110,12 +121,25 @@ class LiquidacionViewModel(
     }
 
     fun inicializar(origen: String, destino: String) {
-        // Si el origen cambia, limpiamos el estado previo para no mezclar unidades
-        if (_uiState.value.origen != origen) {
-            _uiState.update { it.copy(origen = origen, destino = destino, cantidadesAuditadas = emptyMap()) }
-            _almacenAuditado.value = origen
+        // 🔥 CORRECCIÓN: Siempre actualizar si los valores son distintos para evitar basura de SharedPreferences
+        if (_uiState.value.origen != origen || _uiState.value.destino != destino) {
+            _uiState.update { it.copy(
+                origen = origen, 
+                destino = if (destino.isNotEmpty()) destino else it.destino 
+            ) }
+            
+            if (_uiState.value.origen != origen) {
+                _almacenAuditado.value = origen
+                // Solo limpiamos si el origen realmente cambió de unidad
+                _uiState.update { it.copy(cantidadesAuditadas = emptyMap()) }
+            }
             guardarEstado()
         }
+    }
+
+    fun seleccionarDestino(destino: String) {
+        _uiState.update { it.copy(destino = destino) }
+        guardarEstado()
     }
 
     fun actualizarCantidadAuditada(productoId: String, cantidad: Int) {
@@ -139,8 +163,9 @@ class LiquidacionViewModel(
             try {
                 val user = usuarioRepo.obtenerUsuarioActual()
                 val uid = user?.uid ?: ""
-                val destinoFinal = if (retornarABodega) state.destino else state.origen
-                val folio = "AUDIT_${System.currentTimeMillis()}"
+                val destinoFinal = state.destino.trim()
+                // 🔥 USAR EL PREFIJO QUE DISPARA EL PROCESAMIENTO DIRECTO EN LA CLOUD FUNCTION
+                val folio = "DIRECT_LOAD_${System.currentTimeMillis()}"
 
                 val productosParaAjuste = catalogoProductos.value.filter { 
                     (state.cantidadesAuditadas[it.id] ?: 0) > 0 || (state.stockTeorico[it.id] ?: 0) > 0 
@@ -151,41 +176,60 @@ class LiquidacionViewModel(
                     val teorico = state.stockTeorico[p.id] ?: 0
                     val diferencial = fisico - teorico
 
-                    val tipoAjuste = when {
-                        diferencial > 0 -> "AJUSTE_ARQUEO_SOBRANTE"
-                        diferencial < 0 -> "AJUSTE_ARQUEO_FALTANTE"
-                        else -> "AJUSTE_ARQUEO_OK"
+                    // 1. AJUSTE DE ARQUEO (Para cuadrar la camioneta actual)
+                    if (diferencial != 0) {
+                        val tipoAjuste = if (diferencial > 0) "AJUSTE_ARQUEO_SOBRANTE" else "AJUSTE_ARQUEO_FALTANTE"
+                        val movAjuste = MovimientoInventarioEntity(
+                            id = java.util.UUID.randomUUID().toString(),
+                            productoId = p.id,
+                            nombreProducto = p.nombre,
+                            cantidad = Math.abs(diferencial),
+                            tipo = tipoAjuste,
+                            vendedorId = uid,
+                            almacenNombre = state.origen,
+                            timestamp = System.currentTimeMillis(),
+                            referenciaId = "AUDIT_${System.currentTimeMillis()}",
+                            clienteId = null,
+                            sincronizado = false
+                        )
+                        inventarioRepo.registrarMovimientoCarga(movAjuste, p.copy(cantidad = diferencial))
                     }
 
-                    val movimiento = MovimientoInventarioEntity(
-                        id = java.util.UUID.randomUUID().toString(),
-                        productoId = p.id,
-                        nombreProducto = p.nombre,
-                        cantidad = Math.abs(diferencial),
-                        tipo = tipoAjuste,
-                        vendedorId = uid,
-                        almacenNombre = state.origen,
-                        clienteId = null,
-                        timestamp = System.currentTimeMillis(),
-                        referenciaId = folio,
-                        sincronizado = false,
-                        cantidadFisica = fisico,
-                        cantidadTeorica = teorico
-                    )
-                    
-                    inventarioRepo.registrarMovimientoCarga(movimiento, p.copy(cantidad = diferencial))
-
+                    // 2. RETORNO (Carga inversa hacia el almacén central)
                     if (retornarABodega && fisico > 0) {
-                        val movRetorno = movimiento.copy(
+                        // SALIDA DE LA CAMIONETA (Negativa para que la función reste: stock + (-cantidad))
+                        val movSalida = MovimientoInventarioEntity(
                             id = java.util.UUID.randomUUID().toString(),
-                            tipo = "RETORNO_LIQUIDACION",
-                            almacenNombre = destinoFinal,
-                            cantidad = fisico,
-                            referenciaId = folio + "_RETURN"
+                            productoId = p.id,
+                            nombreProducto = p.nombre,
+                            cantidad = -fisico, // 🔥 CRITICO: Valor negativo para descontar
+                            tipo = "CARGA_INVENTARIO", 
+                            vendedorId = uid,
+                            almacenNombre = state.origen,
+                            timestamp = System.currentTimeMillis(),
+                            referenciaId = folio,
+                            clienteId = null,
+                            sincronizado = false
                         )
-                        // Sacar del origen y meter al destino
-                        inventarioRepo.registrarMovimientoCarga(movRetorno.copy(almacenNombre = state.origen, cantidad = -fisico), p.copy(cantidad = -fisico))
-                        inventarioRepo.registrarMovimientoCarga(movRetorno, p.copy(cantidad = fisico))
+                        
+                        // ENTRADA AL ALMACÉN CENTRAL (Positiva para que sume)
+                        val movEntrada = MovimientoInventarioEntity(
+                            id = java.util.UUID.randomUUID().toString(),
+                            productoId = p.id,
+                            nombreProducto = p.nombre,
+                            cantidad = fisico, // 🔥 CRITICO: Valor positivo para sumar
+                            tipo = "CARGA_INVENTARIO",
+                            vendedorId = uid,
+                            almacenNombre = destinoFinal,
+                            timestamp = System.currentTimeMillis() + 1,
+                            referenciaId = folio,
+                            clienteId = null,
+                            sincronizado = false
+                        )
+
+                        // Ejecutamos ambos movimientos
+                        inventarioRepo.registrarMovimientoCarga(movSalida, p.copy(cantidad = -fisico))
+                        inventarioRepo.registrarMovimientoCarga(movEntrada, p.copy(cantidad = fisico))
                     }
                 }
 

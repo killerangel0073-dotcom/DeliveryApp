@@ -163,55 +163,10 @@ class RepositoryInventario(
         }
     }
 
-    private suspend fun obtenerImpactoInventarioPendiente(cloudTimestamps: Map<String, Long>): Map<String, Int> {
-        val mapaImpacto = mutableMapOf<String, Int>()
-        
-        // 1. Impacto de Ventas Pendientes (BLINDAJE CONTRA DOBLE DESCUENTO)
-        val ventasPendientes = ventaDao.obtenerVentasPendientes().filter { it.estado != "CANCELADA" }
-        for (v in ventasPendientes) {
-            ventaDao.obtenerDetallesPorVenta(v.id).forEach { d ->
-                // Usamos el ID completo (producto_almacen) si está disponible, sino el base
-                val idPK = d.stockId ?: d.productoId
-                
-                // 🔥 FILTRO DE TIEMPO QUIRÚRGICO PARA VENTAS:
-                // Si la venta local ocurrió ANTES o AL MISMO TIEMPO que la última actualización de la nube,
-                // asumimos que la nube ya descontó estas piezas y lo ignoramos localmente.
-                val ultimaActNube = cloudTimestamps[idPK] ?: 0L
-                if (v.fecha > ultimaActNube) {
-                    mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) - d.cantidad
-                } else {
-                    Log.d(TAG, "Ignorando venta pendiente en $idPK del ticket ${v.id}: La nube ya está más actualizada (${v.fecha} <= $ultimaActNube)")
-                }
-            }
-        }
-
-        // 2. Impacto de Ajustes (BLINDAJE CONTRA DUPLICIDAD)
-        val movimientosAuditoria = movimientoInventarioDao?.obtenerMovimientosPendientes() ?: emptyList()
-        
-        for (a in movimientosAuditoria) {
-            val almacen = a.almacenNombre ?: ""
-            val idPK = if (almacen.isNotEmpty() && !a.productoId.contains("_")) 
-                "${a.productoId}_$almacen" 
-            else a.productoId
-
-            // 🔥 FILTRO DE TIEMPO QUIRÚRGICO: 
-            // Si el movimiento local ocurrió ANTES o AL MISMO TIEMPO que la última actualización de la nube,
-            // asumimos que la nube ya lo tiene procesado y lo ignoramos para no duplicar.
-            val ultimaActNube = cloudTimestamps[idPK] ?: 0L
-            if (a.timestamp > ultimaActNube) {
-                when (a.tipo) {
-                    "ENTRADA_CAMBIO_BUENO", "CARGA_INVENTARIO" -> {
-                        mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) + a.cantidad
-                    }
-                    "SALIDA_CAMBIO_BUENO", "SALIDA_REPOSICION_BUENO" -> {
-                        mapaImpacto[idPK] = (mapaImpacto[idPK] ?: 0) - a.cantidad
-                    }
-                }
-            } else {
-                Log.d(TAG, "Ignorando impacto pendiente de $idPK: La nube ya está más actualizada (${a.timestamp} <= $ultimaActNube)")
-            }
-        }
-        return mapaImpacto
+    private suspend fun obtenerAlmacenesConVentasPendientes(): Set<String> {
+        return ventaDao.obtenerVentasPendientes()
+            .mapNotNull { it.almacenId }
+            .toSet()
     }
 
     suspend fun descargarProductosFirebase(uid: String) {
@@ -258,34 +213,33 @@ class RepositoryInventario(
                 .whereIn("almacenNombre", listaAlmacenes)
                 .get().await()
             
-            // 🔥 Extraemos los timestamps de última actualización de la nube
-            val cloudTimestamps = snapshot.documents.associate { 
-                it.id to (it.getTimestamp("ultimaActualizacion")?.toDate()?.time ?: 0L)
-            }
-            val impactoPendiente = obtenerImpactoInventarioPendiente(cloudTimestamps)
+            // 🔥 CANDADO DE COLA: Identificar almacenes con ventas locales no sincronizadas
+            val almacenesBloqueados = obtenerAlmacenesConVentasPendientes()
             
             val entities = snapshot.documents.mapNotNull { doc ->
                 val id = doc.id
+                val almacenDoc = doc.getString("almacenNombre") ?: ""
+
+                // 🛡️ Si el almacén tiene ventas pendientes, PAUSAMOS la sincronización para este registro.
+                // Room conservará el valor que ya tiene (descontado localmente).
+                if (almacenesBloqueados.contains(almacenDoc)) {
+                    return@mapNotNull null
+                }
+
                 val baseId = id.split("_")[0]
                 val cat = productoDao.getProductoById(baseId)
-
                 val nombreNube = doc.getString("productoNombre")
                 val precioNube = (doc.get("precioUnitario") as? Number)?.toDouble() ?: 0.0
 
-                // 🔥 CORRECCIÓN: Prioridad al Catálogo Maestro (cat) sobre el nombre guardado en Stock (nombreNube)
                 val nombreFinal = if (!cat?.nombre.isNullOrEmpty()) cat!!.nombre else (nombreNube ?: "Producto")
                 val precioFinal = if (cat != null && cat.precio > 0) cat.precio else (if (precioNube > 0) precioNube else 0.0)
 
-                // Ajustamos el stock de la nube con lo que el vendedor ya hizo localmente
-                val cantNube = (doc.getLong("cantidad") ?: 0L).toInt()
-                val cantFinal = (cantNube + (impactoPendiente[id] ?: 0)).coerceAtLeast(0)
-                
                 ProductoEntity(
                     id = id, 
                     productoId = baseId, 
                     nombre = nombreFinal, 
                     precio = precioFinal, 
-                    cantidadDisponible = cantFinal, 
+                    cantidadDisponible = (doc.getLong("cantidad") ?: 0L).toInt(),
                     imagenUrl = cat?.imagenUrl ?: doc.getString("imagenUrl") ?: "", 
                     syncStatus = true,
                     cantidadUnitario = cat?.cantidadUnitario ?: doc.getLong("cantidadUnitario"),
@@ -356,21 +310,25 @@ class RepositoryInventario(
 
                         repositoryScope.launch {
                             try {
-                                // 🔥 Extraemos los timestamps de última actualización de la nube
-                                val cloudTimestamps = snap.documents.associate { 
-                                    it.id to (it.getTimestamp("ultimaActualizacion")?.toDate()?.time ?: 0L)
-                                }
-                                val impactoPendiente = obtenerImpactoInventarioPendiente(cloudTimestamps)
+                                // 🔥 CANDADO DE COLA (Sync Reactiva)
+                                val almacenesBloqueados = obtenerAlmacenesConVentasPendientes()
+
                                 val entities = snap.documents.mapNotNull { d ->
                                     val id = d.id
+                                    val almacenDoc = d.getString("almacenNombre") ?: ""
+
+                                    // 🛡️ Si hay ventas locales pendientes para este almacén, ignoramos el aviso de la nube.
+                                    // La nube aún no tiene la verdad completa, el teléfono sí.
+                                    if (almacenesBloqueados.contains(almacenDoc)) {
+                                        return@mapNotNull null
+                                    }
+
                                     val baseId = id.split("_")[0]
                                     val cantNube = (d.getLong("cantidad") ?: 0L).toInt()
-                                    val cantFinal = (cantNube + (impactoPendiente[id] ?: 0)).coerceAtLeast(0)
                                     
                                     val cat = productoDao.getProductoById(baseId)
                                     val prev = productoDao.getProductoById(id)
 
-                                    // 🔥 CORRECCIÓN: Prioridad al Catálogo Maestro (cat) sobre el nombre guardado en Stock
                                     val nombreFinal = cat?.nombre ?: d.getString("productoNombre") ?: prev?.nombre ?: "Producto"
                                     val precioFinal = if (cat != null && cat.precio > 0) cat.precio else ((d.get("precioUnitario") as? Number)?.toDouble() ?: prev?.precio ?: 0.0)
                                     val imgFinal = cat?.imagenUrl ?: prev?.imagenUrl ?: d.getString("imagenUrl") ?: d.getString("fotoUrl") ?: ""
@@ -380,7 +338,7 @@ class RepositoryInventario(
                                         productoId = baseId,
                                         nombre = nombreFinal,
                                         precio = precioFinal,
-                                        cantidadDisponible = cantFinal,
+                                        cantidadDisponible = cantNube,
                                         imagenUrl = imgFinal,
                                         syncStatus = true,
                                         cantidadUnitario = cat?.cantidadUnitario ?: prev?.cantidadUnitario ?: d.getLong("cantidadUnitario"),
@@ -470,7 +428,9 @@ class RepositoryInventario(
             else 
                 movimiento.productoId
 
-            sumarStockLocal(idReal, movimiento.cantidad, plantilla, movimiento.productoId)
+            // 🔥 CORRECCIÓN: Usar plantilla.cantidad (que trae el signo correcto) 
+            // en lugar de movimiento.cantidad (que a veces es absoluto para la Cloud Function)
+            sumarStockLocal(idReal, plantilla.cantidad, plantilla, movimiento.productoId)
             
             // 3. Intentar sincronizar (Si falla, el Worker lo hará después)
             if (!movimiento.sincronizado) {

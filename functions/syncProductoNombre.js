@@ -1,12 +1,12 @@
 const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const admin = require('firebase-admin');
-const db = admin.firestore();
 
 /**
  * Trigger que se activa al actualizar un producto en el catálogo maestro (2da Gen).
  * Propaga el cambio de nombre y precio a todos los registros de inventarioStock.
  */
 exports.onProductoUpdated = onDocumentUpdated('producto/{productId}', async (event) => {
+    const db = admin.firestore();
     const newValue = event.data.after.data();
     const previousValue = event.data.before.data();
 

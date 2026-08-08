@@ -46,6 +46,7 @@ class NotificacionesViewModel(
     private var listenerArqueos: ListenerRegistration? = null
     private val formatoFecha = SimpleDateFormat("EEEE, dd 'de' MMMM, hh:mm a", Locale("es", "MX"))
     
+    private var localesJob: kotlinx.coroutines.Job? = null
     private val _notificacionesNubeCargas = MutableStateFlow<List<Notificacion>>(emptyList())
     private val _notificacionesNubeArqueos = MutableStateFlow<List<Notificacion>>(emptyList())
     private val _notificacionesLocales = MutableStateFlow<List<Notificacion>>(emptyList())
@@ -114,7 +115,6 @@ class NotificacionesViewModel(
         }
     }
 
-    private var localesJob: kotlinx.coroutines.Job? = null
     private fun observarLocales() {
         localesJob?.cancel()
         val uidActual = auth.currentUser?.uid ?: ""
@@ -122,16 +122,23 @@ class NotificacionesViewModel(
             .map { lista ->
                 lista.filter { 
                     it.timestamp <= _uiState.value.fechaFin &&
-                    ((it.tipo == "CARGA_INVENTARIO" && it.referenciaId?.contains("LOAD") == true) ||
-                    it.tipo == "AJUSTE_ARQUEO_FALTANTE" || 
-                    it.tipo == "AJUSTE_ARQUEO_SOBRANTE" ||
-                    it.tipo == "AJUSTE_ARQUEO_OK")
+                    ((it.tipo == "CARGA_INVENTARIO" && it.referenciaId?.startsWith("DIRECT_LOAD") == true) ||
+                    it.tipo.contains("ARQUEO"))
                 }
                 .map { mov ->
                     val esArqueo = mov.tipo.contains("ARQUEO")
+                    val esDirectLoad = mov.referenciaId?.startsWith("DIRECT_LOAD") == true
+                    
+                    val tituloFinal = when {
+                        esArqueo -> "ARQUEO DE INVENTARIO"
+                        esDirectLoad -> "LIQUIDACIÓN PROCESADA"
+                        else -> "CARGA MANUAL"
+                    }
+
                     Notificacion(
+                        // 🔥 CRITICO: El ID debe coincidir con el de la nube (referenciaId) para no duplicarse
                         id = mov.referenciaId ?: mov.id,
-                        titulo = if (esArqueo) "ARQUEO DE INVENTARIO" else "CARGA MANUAL (LOCAL)",
+                        titulo = tituloFinal,
                         mensaje = if (esArqueo) {
                             val prefijo = when {
                                 mov.tipo.contains("FALTANTE") -> "Faltante"
@@ -139,13 +146,16 @@ class NotificacionesViewModel(
                                 else -> "Correcto"
                             }
                             "Resultado de auditoría: $prefijo de ${mov.cantidad} pzas en ${mov.nombreProducto}."
+                        } else if (esDirectLoad) {
+                            "Liquidación de ${mov.cantidad} pzas de ${mov.nombreProducto}."
                         } else {
                             "Se cargaron ${mov.cantidad} pzas de ${mov.nombreProducto}."
                         },
                         fecha = try { formatoFecha.format(Date(mov.timestamp)) } catch(_:Exception) { "Reciente" },
                         timestamp = mov.timestamp,
                         esCarga = !esArqueo,
-                        aceptada = true
+                        aceptada = true,
+                        estado = if (esDirectLoad) "COMPLETADA" else "ACEPTADA"
                     )
                 }
             }
@@ -169,48 +179,66 @@ class NotificacionesViewModel(
         val inicioTs = com.google.firebase.Timestamp(Date(_uiState.value.fechaInicio))
         val finTs = com.google.firebase.Timestamp(Date(_uiState.value.fechaFin))
 
-        listenerCargas = db.collection("ordenesTransferencia")
-            .whereEqualTo("destino", nombreAlmacen)
+        // 🔥 MEJORA: Buscar donde el almacén sea ORIGEN o DESTINO usando Filter.or
+        val queryCargas = db.collection("ordenesTransferencia")
+            .where(
+                com.google.firebase.firestore.Filter.or(
+                    com.google.firebase.firestore.Filter.equalTo("destino", nombreAlmacen),
+                    com.google.firebase.firestore.Filter.equalTo("origen", nombreAlmacen)
+                )
+            )
             .whereGreaterThanOrEqualTo("timestamp", inicioTs)
             .whereLessThanOrEqualTo("timestamp", finTs)
-            .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, e ->
-                if (e != null) {
-                    Log.e("NOTIF_VM", "Error cargas", e)
-                    return@addSnapshotListener
-                }
-                val ords = snapshot?.documents?.mapNotNull { doc ->
-                    val data = doc.data ?: return@mapNotNull null
-                    val ts = data["timestamp"] as? com.google.firebase.Timestamp
-                    val estado = data["estado"] as? String ?: "PENDIENTE"
-                    val motivo = data["motivoCancelacion"] as? String
-                    
-                    // 🔥 Calcular el monto total de la carga
-                    val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
-                    val totalMonto = productosRaw.sumOf { p ->
-                        val cant = (p["cantidad"] as? Number)?.toDouble() ?: 0.0
-                        val prec = (p["precio"] as? Number)?.toDouble() ?: 0.0
-                        cant * prec
-                    }
-                    
-                    Notificacion(
-                        id = doc.id,
-                        titulo = if (estado == "CANCELADA") "CARGA ANULADA" else "Carga de Almacén",
-                        mensaje = if (estado == "CANCELADA") 
-                            "Esta transferencia fue cancelada"
-                        else 
-                            "Transferencia desde " + (doc.getString("origen") ?: "Almacén"),
-                        fecha = ts?.toDate()?.let { formatoFecha.format(it) } ?: "Pendiente",
-                        timestamp = ts?.seconds?.let { it * 1000 } ?: 0L,
-                        esCarga = true,
-                        aceptada = estado == "COMPLETADA" || estado == "ACEPTADA",
-                        estado = estado,
-                        monto = totalMonto,
-                        motivo = motivo
-                    )
-                } ?: emptyList()
-                _notificacionesNubeCargas.value = ords
+
+        listenerCargas = queryCargas.addSnapshotListener { snapshot, e ->
+            if (e != null) {
+                Log.e("NOTIF_VM", "Error cargas", e)
+                return@addSnapshotListener
             }
+            val ords = snapshot?.documents?.mapNotNull { doc ->
+                val data = doc.data ?: return@mapNotNull null
+                val ts = data["timestamp"] as? com.google.firebase.Timestamp
+                val estado = data["estado"] as? String ?: "PENDIENTE"
+                val origen = data["origen"] as? String ?: ""
+                val destino = data["destino"] as? String ?: ""
+                val motivo = data["motivoCancelacion"] as? String
+                
+                val esRetorno = origen == nombreAlmacen
+                val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
+                val totalMonto = productosRaw.sumOf { p ->
+                    val cant = (p["cantidad"] as? Number)?.toDouble() ?: 0.0
+                    val prec = (p["precio"] as? Number)?.toDouble() ?: 0.0
+                    Math.abs(cant) * prec // Usamos absoluto para el valor visual
+                }
+                
+                val tituloFinal = when {
+                    estado == "CANCELADA" -> "CARGA ANULADA"
+                    esRetorno -> "LIQUIDACIÓN ENVIADA"
+                    else -> "CARGA DE ALMACÉN"
+                }
+
+                val mensajeFinal = when {
+                    estado == "CANCELADA" -> "Esta transferencia fue cancelada"
+                    esRetorno -> "Retorno de mercancía hacia $destino"
+                    else -> "Transferencia recibida desde $origen"
+                }
+                
+                Notificacion(
+                    id = doc.id,
+                    titulo = tituloFinal,
+                    mensaje = mensajeFinal,
+                    fecha = ts?.toDate()?.let { formatoFecha.format(it) } ?: "Pendiente",
+                    timestamp = ts?.toDate()?.time ?: 0L,
+                    esCarga = true,
+                    // Las liquidaciones se consideran "aceptadas" porque son ajustes directos
+                    aceptada = esRetorno || estado == "COMPLETADA" || estado == "ACEPTADA",
+                    estado = estado,
+                    monto = totalMonto,
+                    motivo = motivo
+                )
+            } ?: emptyList()
+            _notificacionesNubeCargas.value = ords
+        }
 
         listenerArqueos = db.collection("ajustes_inventario")
             .whereEqualTo("almacenNombre", nombreAlmacen)

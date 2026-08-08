@@ -1,9 +1,9 @@
 package com.gruposanangel.delivery.ui.screens
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -12,6 +12,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +31,7 @@ import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,58 +58,61 @@ data class TicketVenta(
     val fecha: Date, 
     val sincronizado: Boolean, 
     val fotoCliente: String = "",
-    val estado: String = "pagada"
+    val estado: String = "pagada",
+    val intentosSync: Int = 0,
+    val ultimoError: String? = null
 )
 
 @Composable
-fun PaginaVentaScreen(navController: NavController, ventaRepository: VentaRepository) {
+fun PaginaVentaScreen(
+    navController: NavController, 
+    ventaRepository: VentaRepository,
+    isAdminOverride: Boolean? = null
+) {
     val context = LocalContext.current; val isPreview = LocalInspectionMode.current
     val db = AppDatabase.getDatabase(context); val repoUsuario = RepositoryUsuario(FirebaseDataSource(), db.usuarioDao())
-    val viewModel: VentaViewModel = viewModel(factory = VentaViewModelFactory(RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao()), ventaRepository, repoUsuario))
-    val ventasHoy by viewModel.ventasHoyFlow.collectAsState()
-    var ticketsHoy by remember { mutableStateOf<List<TicketVenta>>(emptyList()) }
+    val viewModel: VentaViewModel = viewModel(
+        factory = VentaViewModelFactory(
+            repositoryInventario = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao(), db.movimientoInventarioDao()), 
+            ventaRepository = ventaRepository, 
+            repositoryUsuario = repoUsuario,
+            clienteDao = db.clienteDao()
+        )
+    )
+    val uiState by viewModel.uiState.collectAsState()
+    val ticketsHoy by viewModel.ticketsHoyFlow.collectAsState()
     var isRefreshing by remember { mutableStateOf(false) }
 
     val isDark = ThemeConfig.isActuallyDark
 
-    LaunchedEffect(Unit) { 
-        if (!isPreview) { 
-            val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@LaunchedEffect
-            isRefreshing = true
-            viewModel.sincronizarVentasDia(uid)
-            isRefreshing = false
-        } 
-    }
-
-    LaunchedEffect(ventasHoy) { 
-        val lista = withContext(Dispatchers.IO) { 
-            ventasHoy.map { v -> 
-                val c = db.clienteDao().getClientePorId(v.clienteId)
-                TicketVenta(
-                    id = v.id, 
-                    cliente = v.clienteNombre, 
-                    total = v.total, 
-                    fecha = Date(v.fecha), 
-                    sincronizado = v.sincronizado, 
-                    fotoCliente = c?.fotografiaUrl ?: "",
-                    estado = v.estado
-                )
-            } 
+    // 🔥 SINCRONIZAR CON EL MODO (ADMIN/RUTA) DE LA PANTALLA PRINCIPAL
+    LaunchedEffect(isAdminOverride) {
+        if (isAdminOverride != null) {
+            viewModel.sobreescribirAdmin(isAdminOverride)
+            viewModel.sincronizarVentasDia(FirebaseAuth.getInstance().currentUser?.uid ?: "")
         }
-        ticketsHoy = lista
     }
 
     DeliveryTheme(darkTheme = isDark) {
         PaginaVentaContent(
             ticketsHoy = ticketsHoy, 
             isLoading = isRefreshing && ticketsHoy.isEmpty(),
-            onTicketClick = { navController.navigate("detalle_venta_admin/${it.id}") }
+            uiState = uiState,
+            onTicketClick = { navController.navigate("detalle_venta_admin/${it.id}") },
+            onFiltroRutaChanged = { viewModel.cambiarFiltroRuta(it) }
         )
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PaginaVentaContent(ticketsHoy: List<TicketVenta>, isLoading: Boolean = false, onTicketClick: (TicketVenta) -> Unit) {
+fun PaginaVentaContent(
+    ticketsHoy: List<TicketVenta>, 
+    isLoading: Boolean = false, 
+    uiState: VentaUiState,
+    onTicketClick: (TicketVenta) -> Unit,
+    onFiltroRutaChanged: (String) -> Unit
+) {
     val context = LocalContext.current; val fmtMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     val fmtFecha = SimpleDateFormat("EEEE d 'de' MMMM, hh:mm a", Locale.forLanguageTag("es-MX"))
     val prefs = remember { PreferenciasMetas(context) }; val metaVals = remember { prefs.obtenerValores(6500.0, 30) }
@@ -115,6 +123,78 @@ fun PaginaVentaContent(ticketsHoy: List<TicketVenta>, isLoading: Boolean = false
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
             Spacer(Modifier.height(10.dp))
+            
+            if (uiState.mostrarFiltrosAdmin && uiState.rutasDisponibles.isNotEmpty()) {
+                val indexSeleccionado = uiState.rutasDisponibles.indexOf(uiState.filtroRutaAdmin ?: "TODAS").coerceAtLeast(0)
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp, bottom = 12.dp)
+                ) {
+                    BoxWithConstraints(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), RoundedCornerShape(14.dp))
+                    ) {
+                        val maxWidth = maxWidth
+                        val tabWidth = maxWidth / uiState.rutasDisponibles.size
+                        
+                        val indicatorOffset by animateDpAsState(
+                            targetValue = tabWidth * indexSeleccionado,
+                            animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioLowBouncy),
+                            label = "routeIndicator"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .offset(x = indicatorOffset)
+                                .width(tabWidth)
+                                .fillMaxHeight()
+                                .padding(3.dp)
+                                .shadow(3.dp, RoundedCornerShape(11.dp))
+                                .background(DelisaRed, RoundedCornerShape(11.dp))
+                        )
+
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            uiState.rutasDisponibles.forEachIndexed { index, ruta ->
+                                val isSelected = index == indexSeleccionado
+                                val textColor by animateColorAsState(
+                                    targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    label = "routeTextColor"
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            onClick = { onFiltroRutaChanged(ruta) }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = ruta.uppercase(),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                        color = textColor,
+                                        fontSize = 10.sp,
+                                        letterSpacing = 0.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             MedidorDeMetaPremium(
                 metaDelDia = meta, 
                 totalClientes = cliTarget, 
@@ -128,7 +208,12 @@ fun PaginaVentaContent(ticketsHoy: List<TicketVenta>, isLoading: Boolean = false
             if (isLoading && ticketsHoy.isEmpty()) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
             } else if (ticketsHoy.isEmpty()) { 
-                Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Sin ventas hoy", color = MaterialTheme.colorScheme.onSurfaceVariant) } 
+                Box(Modifier.fillMaxSize(), Alignment.Center) { 
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.ReceiptLong, null, tint = MaterialTheme.colorScheme.outline.copy(0.3f), modifier = Modifier.size(64.dp))
+                        Text("Sin ventas registradas hoy", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                    }
+                } 
             } else { 
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) { items(ticketsHoy, key = { it.id }) { t -> CardTicketRuta(t, fmtFecha, fmtMoneda, onTicketClick) } } 
             }
@@ -200,19 +285,46 @@ fun CardTicketRuta(ticket: TicketVenta, fmtFecha: SimpleDateFormat, fmtMoneda: N
                     fontSize = 18.sp,
                     style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
                 )
+                
+                val colorContenedor = when {
+                    ticket.sincronizado -> DelisaGreen.copy(alpha = 0.1f)
+                    ticket.intentosSync > 0 -> WarningOrange.copy(alpha = 0.1f)
+                    else -> DelisaRed.copy(alpha = 0.1f)
+                }
+                val colorTexto = when {
+                    ticket.sincronizado -> DelisaGreenDark
+                    ticket.intentosSync > 0 -> WarningOrange
+                    else -> DelisaRed
+                }
+                val textoEstado = when {
+                    ticket.sincronizado -> "SINCRONIZADO"
+                    ticket.intentosSync > 0 -> "REINTENTANDO"
+                    else -> "PENDIENTE"
+                }
+
                 Surface(
                     shape = RoundedCornerShape(8.dp), 
-                    color = if (ticket.sincronizado) DelisaGreen.copy(alpha = 0.1f) else DelisaRed.copy(alpha = 0.1f),
+                    color = colorContenedor,
                     modifier = Modifier.width(90.dp)
                 ) { 
                     Text(
-                        text = if (ticket.sincronizado) "SINCRONIZADO" else "PENDIENTE", 
+                        text = textoEstado, 
                         modifier = Modifier.padding(vertical = 2.dp).fillMaxWidth(), 
                         fontSize = 10.sp, 
                         fontWeight = FontWeight.Black, 
-                        color = if (ticket.sincronizado) DelisaGreenDark else DelisaRed,
+                        color = colorTexto,
                         textAlign = TextAlign.Center
                     ) 
+                }
+                
+                if (!ticket.sincronizado && ticket.ultimoError != null) {
+                    Text(
+                        text = ticket.ultimoError.take(15) + "...",
+                        fontSize = 8.sp,
+                        color = WarningOrange,
+                        maxLines = 1,
+                        textAlign = TextAlign.End
+                    )
                 }
                 if (esCancelada) {
                     Spacer(Modifier.height(4.dp))
@@ -224,7 +336,7 @@ fun CardTicketRuta(ticket: TicketVenta, fmtFecha: SimpleDateFormat, fmtMoneda: N
                         Text(
                             text = "ANULADA", 
                             color = Color.White, 
-                            fontSize = 12.sp, // Más grande
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.ExtraBold, 
                             modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth(),
                             textAlign = TextAlign.Center
@@ -254,5 +366,5 @@ fun ResumenVentasCard(count: Int, total: Double, fmt: NumberFormat) {
 @Composable
 fun PaginaRutaPreview() {
     val tickets = listOf(TicketVenta("1", "Abarrotes Don Pepe", 1250.0, Date(), true), TicketVenta("2", "Mini Super El Sol", 450.0, Date(), false))
-    DeliveryTheme { PaginaVentaContent(tickets, isLoading = false, onTicketClick = {}) }
+    DeliveryTheme { PaginaVentaContent(tickets, isLoading = false, uiState = VentaUiState(), onTicketClick = {}, onFiltroRutaChanged = {}) }
 }

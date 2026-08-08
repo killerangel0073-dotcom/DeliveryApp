@@ -79,6 +79,13 @@ class RepositoryRuta(
     }
 
     /**
+     * Obtiene todos los clientes de la base de datos local para mapeo rápido.
+     */
+    suspend fun obtenerTodosLosClientesLocal(): List<ClienteEntity> = withContext(Dispatchers.IO) {
+        clienteDao.getAllClientes()
+    }
+
+    /**
      * Obtiene un cliente por su ID desde la DB local.
      */
     suspend fun obtenerClienteLocal(id: String): ClienteEntity? = withContext(Dispatchers.IO) {

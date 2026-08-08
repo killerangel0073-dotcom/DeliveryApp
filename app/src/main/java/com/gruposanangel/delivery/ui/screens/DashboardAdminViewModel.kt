@@ -11,6 +11,7 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.gruposanangel.delivery.data.VentaEntity
 import com.gruposanangel.delivery.data.UsuarioEntity
 import com.gruposanangel.delivery.VentaRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -33,7 +34,11 @@ data class SellerSummary(
 
 data class DashboardUiState(
     val isLoading: Boolean = true,
+    val isMigrating: Boolean = false,
+    val migrationProgress: String = "",
+    val migrationMessage: String? = null,
     val totalVentasDia: Double = 0.0,
+    // ... resto igual
     val totalTicketsDia: Int = 0,
     val totalClientesDia: Int = 0,
     val ticketPromedioGlobal: Double = 0.0,
@@ -42,6 +47,7 @@ data class DashboardUiState(
     val nombreAdmin: String = "",
     val photoUrlAdmin: String = "",
     val puestoAdmin: String = "",
+    val contraseñaAdmin: String? = null, // 🔥 Nueva
     val error: String? = null,
     val rankingAlto: Double = 0.0,
     val rankingMedio: Double = 0.0,
@@ -63,28 +69,29 @@ class DashboardAdminViewModel(
 
     private val _ventasFlow = MutableStateFlow<List<VentaEntity>>(emptyList())
     private val _usersFlow = MutableStateFlow<Map<String, UsuarioEntity>>(emptyMap())
-    private val _allVendedoresFlow = MutableStateFlow<Set<String>>(emptySet())
+    private val _rutasFlow = MutableStateFlow<List<com.google.firebase.firestore.DocumentSnapshot>>(emptyList())
     private val _jornadasFlow = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     private val _detallesFlow = MutableStateFlow<Map<String, List<com.gruposanangel.delivery.data.VentaDetalleEntity>>>(emptyMap())
-    private val _catalogFlow = MutableStateFlow<Map<String, Pair<String, String>>>(emptyMap()) // 🔥 Catálogo: ID -> Pair(Marca, Categoria)
+    private val _catalogFlow = MutableStateFlow<Map<String, Pair<String, String>>>(emptyMap()) 
 
     init {
         cargarCatalogoMaestro()
         escucharUsuarios()
+        escucharRutas()
         escucharJornadas()
         escucharRankingConfig()
         cargarDatosAdmin()
         
         // 🔥 MOTOR DE REACTIVIDAD: Combinar los flujos en tiempo real
-        combine(_ventasFlow, _usersFlow, _allVendedoresFlow, _jornadasFlow, _detallesFlow, _catalogFlow) { args ->
+        combine(_ventasFlow, _usersFlow, _rutasFlow, _jornadasFlow, _detallesFlow, _catalogFlow) { args ->
             val ventas = args[0] as List<VentaEntity>
             val users = args[1] as Map<String, UsuarioEntity>
-            val vendedores = args[2] as Set<String>
+            val rutas = args[2] as List<com.google.firebase.firestore.DocumentSnapshot>
             val jornadas = args[3] as Map<String, Boolean>
             val detallesMap = args[4] as Map<String, List<com.gruposanangel.delivery.data.VentaDetalleEntity>>
             val catalog = args[5] as Map<String, Pair<String, String>>
 
-            procesarDatos(ventas, users, vendedores, jornadas, detallesMap, catalog)
+            procesarDatos(ventas, users, rutas, jornadas, detallesMap, catalog)
         }.onEach { nuevoEstado ->
             _uiState.update { nuevoEstado }
         }.launchIn(viewModelScope)
@@ -101,6 +108,14 @@ class DashboardAdminViewModel(
                 }
                 _catalogFlow.value = map
             } catch (e: Exception) { }
+        }
+    }
+
+    private fun escucharRutas() {
+        db.collection("rutas").addSnapshotListener { snapshot, _ ->
+            if (snapshot != null) {
+                _rutasFlow.value = snapshot.documents
+            }
         }
     }
 
@@ -121,6 +136,7 @@ class DashboardAdminViewModel(
                     puestoTrabajo = doc.getString("puestoTrabajo"),
                     ultimaRutaId = rId,
                     ultimaRutaNombre = rId ?: "Sin Ruta",
+                    ultimoAlmacenNombre = doc.getString("ultimoAlmacenNombre"),
                     perfilesVentaJson = if (doc.get("perfilesVenta") != null) {
                         val raw = doc.get("perfilesVenta") as? List<*>
                         org.json.JSONArray(raw).toString()
@@ -134,7 +150,6 @@ class DashboardAdminViewModel(
             }.toSet()
 
             _usersFlow.value = usersMap
-            _allVendedoresFlow.value = vendedoresSet
         }
     }
 
@@ -173,7 +188,8 @@ class DashboardAdminViewModel(
                     _uiState.update { it.copy(
                         nombreAdmin = doc.getString("nombre") ?: "",
                         photoUrlAdmin = doc.getString("photo_url") ?: "",
-                        puestoAdmin = doc.getString("puestoTrabajo") ?: "Administrador"
+                        puestoAdmin = doc.getString("puestoTrabajo") ?: "Administrador",
+                        contraseñaAdmin = doc.getString("contraseña") // 🔥 Recuperamos la contraseña personalizada
                     ) }
                 }
             } catch (e: Exception) { }
@@ -283,54 +299,86 @@ class DashboardAdminViewModel(
     private fun procesarDatos(
         todasLasVentasRaw: List<VentaEntity>,
         users: Map<String, UsuarioEntity>,
-        vendedoresUids: Set<String>,
+        rutasDocs: List<com.google.firebase.firestore.DocumentSnapshot>,
         jornadas: Map<String, Boolean>,
         detallesMap: Map<String, List<com.gruposanangel.delivery.data.VentaDetalleEntity>>,
         catalog: Map<String, Pair<String, String>>
     ): DashboardUiState {
-        val resumen = vendedoresUids.mapNotNull { uid ->
-            val user = users[uid] ?: return@mapNotNull null
-            if (user.ultimaRutaNombre == "Sin Ruta") return@mapNotNull null
+        // 1. Crear un mapeo de Almacén -> Usuario y Ruta -> Almacén
+        val almacenToVendedor = mutableMapOf<String, String>() 
+        val rutaToAlmacen = mutableMapOf<String, String>()    
+        
+        rutasDocs.forEach { doc ->
+            val rutaName = doc.getString("nombre") ?: doc.id
+            val almRef = doc.getDocumentReference("almacenAsignado")
+            val vendRef = doc.getDocumentReference("vendedorAsignado")
+            
+            if (almRef != null) {
+                rutaToAlmacen[rutaName] = almRef.id
+                if (vendRef != null) {
+                    almacenToVendedor[almRef.id] = vendRef.id
+                }
+            }
+        }
 
-            val ventasVendedor = todasLasVentasRaw.filter { it.vendedorId == uid }
-            val ventasActivas = ventasVendedor.filter { it.estado != "CANCELADA" }
+        // 2. Identificar todas las unidades que debemos mostrar (Prioridad: Rutas configuradas)
+        val todasLasUnidadesAMostrar = rutaToAlmacen.keys.toMutableSet()
+        
+        // 3. Agrupar Ventas por RutaId (Nuevo) o AlmacenId (Legacy)
+        val ventasPorRutaFinal = todasLasVentasRaw.groupBy { v ->
+            val rId = v.rutaId
+            if (!rId.isNullOrEmpty()) {
+                // Si la venta ya trae el nombre de la ruta, lo usamos
+                v.rutaNombre ?: rId
+            } else {
+                // Fallback: Inferir el nombre de la ruta por el AlmacenId
+                rutaToAlmacen.entries.find { it.value == v.almacenId }?.key ?: (v.almacenId ?: "Sin Almacen")
+            }
+        }
+
+        // Asegurar que rutas con ventas pero no configuradas también aparezcan
+        ventasPorRutaFinal.keys.forEach { if (it != "Sin Almacen") todasLasUnidadesAMostrar.add(it) }
+
+        val resumen = todasLasUnidadesAMostrar.map { identificadorRuta ->
+            val ventasRuta = ventasPorRutaFinal[identificadorRuta] ?: emptyList()
+            val almacenIdAsociado = rutaToAlmacen[identificadorRuta]
+            
+            // Buscar al responsable según la ruta
+            val vendedorUid = almacenToVendedor[almacenIdAsociado]
+            val responsableActual = if (vendedorUid != null) users[vendedorUid] else null
+            
+            val ventasActivas = ventasRuta.filter { it.estado != "CANCELADA" }
             val totalVendido = ventasActivas.sumOf { it.total }
             val clientesConVentaReal = ventasActivas.map { it.clienteId }.distinct().size
             val promedio = if (ventasActivas.isNotEmpty()) totalVendido / ventasActivas.size else 0.0
 
-            // --- Calcular Breakdown ---
+            // Perfiles (Usamos los del responsable actual)
             val perfiles = mutableListOf<com.gruposanangel.delivery.data.PerfilVenta>()
-            try {
-                val json = user.perfilesVentaJson
-                if (!json.isNullOrBlank()) {
-                    val array = org.json.JSONArray(json)
-                    for (i in 0 until array.length()) {
-                        val obj = array.getJSONObject(i)
-                        val filtrosArr = obj.getJSONArray("filtros")
-                        val filtros = (0 until filtrosArr.length()).map { j ->
-                            val fObj = filtrosArr.getJSONObject(j)
-                            val catsArr = fObj.optJSONArray("categorias")
-                            val cats = if (catsArr != null) (0 until catsArr.length()).map { catsArr.getString(it) } else emptyList()
-                            com.gruposanangel.delivery.data.FiltroPerfil(fObj.getString("marca"), cats)
+            if (responsableActual != null) {
+                try {
+                    val json = responsableActual.perfilesVentaJson
+                    if (!json.isNullOrBlank()) {
+                        val array = org.json.JSONArray(json)
+                        for (i in 0 until array.length()) {
+                            val obj = array.getJSONObject(i)
+                            val filtrosArr = obj.getJSONArray("filtros")
+                            val filtros = (0 until filtrosArr.length()).map { j ->
+                                val fObj = filtrosArr.getJSONObject(j)
+                                val catsArr = fObj.optJSONArray("categorias")
+                                val cats = if (catsArr != null) (0 until catsArr.length()).map { catsArr.getString(it) } else emptyList()
+                                com.gruposanangel.delivery.data.FiltroPerfil(fObj.getString("marca"), cats)
+                            }
+                            perfiles.add(com.gruposanangel.delivery.data.PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros))
                         }
-                        perfiles.add(com.gruposanangel.delivery.data.PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros))
                     }
-                }
-            } catch (e: Exception) { }
+                } catch (e: Exception) { }
+            }
 
-            val todosLosDetallesVendedor = ventasActivas.flatMap { detallesMap[it.id] ?: emptyList() }
-            
+            val todosLosDetallesAlmacen = ventasActivas.flatMap { detallesMap[it.id] ?: emptyList() }
             val breakdown = perfiles.map { perfil ->
-                val detPerfil = todosLosDetallesVendedor.filter { d ->
-                    // 🔥 RECUPERACIÓN DE CLASIFICACIÓN (Si el detalle no tiene marca/categoria, usamos el catálogo)
-                    val realMarca = if (d.marca == "Delisa" && d.categoria == "General") {
-                        catalog[d.productoId]?.first ?: d.marca
-                    } else d.marca
-                    
-                    val realCat = if (d.marca == "Delisa" && d.categoria == "General") {
-                        catalog[d.productoId]?.second ?: d.categoria
-                    } else d.categoria
-
+                val detPerfil = todosLosDetallesAlmacen.filter { d ->
+                    val realMarca = if (d.marca == "Delisa" && d.categoria == "General") catalog[d.productoId]?.first ?: d.marca else d.marca
+                    val realCat = if (d.marca == "Delisa" && d.categoria == "General") catalog[d.productoId]?.second ?: d.categoria else d.categoria
                     perfil.filtros.any { f ->
                         val mMatch = realMarca.trim().equals(f.marca.trim(), ignoreCase = true)
                         val cMatch = if (f.categorias.isNotEmpty()) f.categorias.any { it.trim().equals(realCat.trim(), ignoreCase = true) } else true
@@ -341,16 +389,16 @@ class DashboardAdminViewModel(
             }
 
             SellerSummary(
-                uid = uid,
-                nombre = user.nombre,
-                rutaNombre = user.ultimaRutaNombre ?: "Ruta",
-                photoUrl = user.photoUrl ?: "",
+                uid = responsableActual?.uid ?: (almacenIdAsociado ?: identificadorRuta),
+                nombre = responsableActual?.nombre ?: identificadorRuta.replace("Vendedor ", ""),
+                rutaNombre = identificadorRuta,
+                photoUrl = responsableActual?.photoUrl ?: "",
                 totalVendido = totalVendido,
                 clientesConVenta = clientesConVentaReal,
                 ticketPromedio = promedio,
-                ventas = ventasVendedor,
+                ventas = ventasRuta,
                 totalTicketsActivos = ventasActivas.size,
-                estaEnRuta = jornadas[uid] ?: false,
+                estaEnRuta = jornadas[responsableActual?.uid] ?: false,
                 perfilesVenta = perfiles,
                 breakdown = breakdown
             )
@@ -371,6 +419,104 @@ class DashboardAdminViewModel(
             resumenVendedores = resumen,
             todasLasVentasHoy = todasLasVentasRaw
         )
+    }
+
+    fun resetMigrationMessage() {
+        _uiState.update { it.copy(migrationMessage = null) }
+    }
+
+    // 🔥 SANEAMIENTO 1: VINCULAR POR ALMACÉN
+    fun sanearPorAlmacen() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isMigrating = true, migrationProgress = "Escaneando por Almacén...", migrationMessage = null) }
+            try {
+                val rutasSnap = db.collection("rutas").get().await()
+                val mapAlmARuta = rutasSnap.documents.mapNotNull { doc ->
+                    val rNom = doc.getString("nombre") ?: doc.id
+                    val aRef = doc.getDocumentReference("almacenAsignado")
+                    if (aRef != null) aRef.id to rNom else null
+                }.toMap()
+
+                val ventasSnap = db.collection("ventas").get().await()
+                val paraCorregir = ventasSnap.documents.filter { doc ->
+                    val rId = doc.getString("rutaId")
+                    val aId = doc.getString("almacenId") ?: doc.getString("almacenVendedorId")
+                    rId.isNullOrEmpty() && !aId.isNullOrEmpty() && mapAlmARuta.containsKey(aId)
+                }
+
+                if (paraCorregir.isEmpty()) {
+                    _uiState.update { it.copy(isMigrating = false, migrationMessage = "No hay ventas para vincular por Almacén.") }
+                    return@launch
+                }
+
+                var count = 0
+                paraCorregir.chunked(500).forEach { batchDocs ->
+                    val batch = db.batch()
+                    batchDocs.forEach { doc ->
+                        val ruta = mapAlmARuta[doc.getString("almacenId") ?: doc.getString("almacenVendedorId")]
+                        batch.update(doc.reference, mapOf("rutaId" to ruta, "rutaNombre" to ruta))
+                    }
+                    batch.commit().await()
+                    count += batchDocs.size
+                    _uiState.update { it.copy(migrationProgress = "Corregidos $count de ${paraCorregir.size}...") }
+                }
+                _uiState.update { it.copy(isMigrating = false, migrationMessage = "✅ ÉXITO: $count ventas vinculadas por Almacén.") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isMigrating = false, migrationMessage = "❌ Error: ${e.message}") }
+            }
+        }
+    }
+
+    // 🔥 SANEAMIENTO 2: VINCULAR POR CLIENTE (PROFUNDO)
+    fun sanearPorCliente() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isMigrating = true, migrationProgress = "Mapeando Clientes...", migrationMessage = null) }
+            try {
+                val rutasSnap = db.collection("rutas").get().await()
+                val mapRutaAAlm = rutasSnap.documents.mapNotNull { doc ->
+                    val rNom = doc.getString("nombre") ?: doc.id
+                    val aRef = doc.getDocumentReference("almacenAsignado")
+                    if (aRef != null) rNom to aRef.id else null
+                }.toMap()
+
+                val clientesSnap = db.collection("clientes").get().await()
+                val mapCliARuta = clientesSnap.documents.associate { 
+                    it.id to (it.getString("rutaId") ?: it.getString("id_ruta") ?: "")
+                }
+
+                val ventasSnap = db.collection("ventas").get().await()
+                val paraCorregir = ventasSnap.documents.filter { doc ->
+                    val rId = doc.getString("rutaId")
+                    val cId = doc.getString("clienteId") ?: ""
+                    rId.isNullOrEmpty() && mapCliARuta.containsKey(cId) && mapCliARuta[cId]!!.isNotEmpty()
+                }
+
+                if (paraCorregir.isEmpty()) {
+                    _uiState.update { it.copy(isMigrating = false, migrationMessage = "No hay ventas para vincular por Cliente.") }
+                    return@launch
+                }
+
+                var count = 0
+                paraCorregir.chunked(500).forEach { batchDocs ->
+                    val batch = db.batch()
+                    batchDocs.forEach { doc ->
+                        val ruta = mapCliARuta[doc.getString("clienteId")]
+                        if (!ruta.isNullOrEmpty()) {
+                            val updates = mutableMapOf<String, Any>("rutaId" to ruta, "rutaNombre" to ruta)
+                            val alm = mapRutaAAlm[ruta]
+                            if (doc.getString("almacenId").isNullOrEmpty() && alm != null) updates["almacenId"] = alm
+                            batch.update(doc.reference, updates)
+                        }
+                    }
+                    batch.commit().await()
+                    count += batchDocs.size
+                    _uiState.update { it.copy(migrationProgress = "Vinculados $count de ${paraCorregir.size}...") }
+                }
+                _uiState.update { it.copy(isMigrating = false, migrationMessage = "✅ ÉXITO: $count ventas vinculadas por Cliente.") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isMigrating = false, migrationMessage = "❌ Error: ${e.message}") }
+            }
+        }
     }
 
     override fun onCleared() {

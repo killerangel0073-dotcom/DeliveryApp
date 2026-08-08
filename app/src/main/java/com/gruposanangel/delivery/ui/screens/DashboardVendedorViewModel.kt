@@ -346,6 +346,7 @@ class DashboardVendedorViewModel(
         }
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun observarVentasReactivo() {
         _uiState.update { it.copy(isLoading = true) }
         
@@ -378,108 +379,140 @@ class DashboardVendedorViewModel(
             // 🔥 OBSERVACIÓN COMBINADA: Ventas + Gastos + Usuario (para perfiles) + Detalles + Catálogo
             val calCalculo = Calendar.getInstance().apply { timeInMillis = ahoraReal }
             calCalculo.set(Calendar.HOUR_OF_DAY, 0); calCalculo.set(Calendar.MINUTE, 0); calCalculo.set(Calendar.SECOND, 0); calCalculo.set(Calendar.MILLISECOND, 0)
-            val iniDiaMillis = calCalculo.timeInMillis
 
-            combine(
-                ventaRepository.obtenerVentasPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000),
-                gastoRepository.obtenerGastosPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000),
-                usuarioRepository.getUsuarioActual(),
-                ventaRepository.obtenerDetallesPorPeriodoFlow(userId, iniDiaMillis, ahoraReal + 86400000),
-                inventarioRepository.obtenerProductosLocal()
-            ) { todasLasVentas, todosLosGastos, usuario, detallesHoy, catalog ->
+            usuarioRepository.getUsuarioActual().flatMapLatest { usuario ->
+                val almid = usuario?.ultimoAlmacenNombre ?: ""
+                val rNom = usuario?.ultimaRutaNombre ?: ""
+                val rId = usuario?.ultimaRutaId ?: ""
                 
-                val calCalc = Calendar.getInstance().apply { timeInMillis = ahoraReal }
-                calCalc.set(Calendar.HOUR_OF_DAY, 0); calCalc.set(Calendar.MINUTE, 0); calCalc.set(Calendar.SECOND, 0); calCalc.set(Calendar.MILLISECOND, 0)
-                val iniHoyCalc = calCalc.timeInMillis
-
-                val catalogMap = catalog.associate { it.productoId to (it.marca to it.categoria) }
-
-                // Parsear perfiles
-                val perfiles = mutableListOf<com.gruposanangel.delivery.data.PerfilVenta>()
-                try {
-                    val json = usuario?.perfilesVentaJson
-                    if (!json.isNullOrBlank()) {
-                        val array = org.json.JSONArray(json)
-                        for (i in 0 until array.length()) {
-                            val obj = array.getJSONObject(i)
-                            val filtrosArr = obj.getJSONArray("filtros")
-                            val filtros = (0 until filtrosArr.length()).map { j ->
-                                val fObj = filtrosArr.getJSONObject(j)
-                                val catsArr = fObj.optJSONArray("categorias")
-                                val cats = if (catsArr != null) (0 until catsArr.length()).map { catsArr.getString(it) } else emptyList()
-                                com.gruposanangel.delivery.data.FiltroPerfil(fObj.getString("marca"), cats)
-                            }
-                            perfiles.add(com.gruposanangel.delivery.data.PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros))
-                        }
-                    }
-                } catch (e: Exception) { }
-
-                // Calcular Desglose por Perfil
-                val breakdown = perfiles.map { perfil ->
-                    val detallesPerfil = detallesHoy.filter { detalle ->
-                        val info = catalogMap[detalle.productoId]
-                        val realMarca = if (detalle.marca == "Delisa" && detalle.categoria == "General") (info?.first ?: detalle.marca) else detalle.marca
-                        val realCat = if (detalle.marca == "Delisa" && detalle.categoria == "General") (info?.second ?: detalle.categoria) else detalle.categoria
-
-                        perfil.filtros.any { filtro ->
-                            val marcaMatch = realMarca.trim().equals(filtro.marca.trim(), ignoreCase = true)
-                            val catMatch = if (filtro.categorias.isNotEmpty()) {
-                                filtro.categorias.any { it.trim().equals(realCat.trim(), ignoreCase = true) }
-                            } else true
-                            
-                            marcaMatch && catMatch
-                        }
-                    }
-                    val totalVenta = detallesPerfil.sumOf { it.precio * it.cantidad }
-                    val totalUnidades = detallesPerfil.sumOf { it.cantidad }
+                combine(
+                    if (almid.isNotEmpty()) ventaRepository.obtenerVentasPorUnidadPeriodoFlow(almid, rNom, rId, inicioBloque, ahoraReal + 86400000)
+                    else ventaRepository.obtenerVentasPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000),
                     
-                    PerfilBreakdown(perfil.id, perfil.nombre, totalVenta, totalUnidades)
-                }
-
-                // Filtrado de Ventas
-                val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoyCalc && it.estado != "CANCELADA" }
-                val ventasSemana = todasLasVentas.filter { it.fecha >= iniSemana && it.estado != "CANCELADA" }
-                val totalVentaBloque = todasLasVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total }
-
-                // Filtrado de Gastos
-                val gastosHoy = todosLosGastos.filter { it.fecha >= iniHoyCalc }
-                val totalGastoHoy = gastosHoy.sumOf { it.monto }
-
-                // Gráfico (Lunes a Sábado)
-                val ventasPorDia = MutableList(6) { 0.0 }
-                val calDia = Calendar.getInstance()
-                ventasSemana.forEach { venta ->
-                    calDia.timeInMillis = venta.fecha
-                    val dayOfWeek = calDia.get(Calendar.DAY_OF_WEEK)
-                    val index = when (dayOfWeek) {
-                        Calendar.MONDAY -> 0; Calendar.TUESDAY -> 1; Calendar.WEDNESDAY -> 2
-                        Calendar.THURSDAY -> 3; Calendar.FRIDAY -> 4; Calendar.SATURDAY -> 5
-                        else -> -1
-                    }
-                    if (index != -1) ventasPorDia[index] += venta.total
-                }
-
-                val totalHoy = ventasHoy.sumOf { it.total }
-                val ticketPromedio = if (ventasHoy.isNotEmpty()) totalHoy / ventasHoy.size else 0.0
-
-                Log.d("DashboardVM", "Breakdown actualizado: ${breakdown.size} perfiles. Hoy: $totalHoy")
-
-                _uiState.update { it.copy(
-                    isLoading = false,
-                    ventaDia = totalHoy,
-                    clientesDia = ventasHoy.map { it.clienteId }.distinct().size,
-                    ticketPromedioDia = ticketPromedio,
-                    ventaSemana = ventasSemana.sumOf { it.total }, // ✅ Regresado a VENTA BRUTA
-                    ventaBloque = totalVentaBloque,              // ✅ Regresado a VENTA BRUTA
-                    ventasPorDiaSemana = ventasPorDia,
-                    ventasHoy = ventasHoy,
-                    gastosHoy = todosLosGastos.filter { it.fecha >= iniHoyCalc }.map { 
-                        Gasto(it.id, it.monto, it.categoria, it.descripcion, it.fecha, it.vendedorId, it.rutaNombre)
+                    gastoRepository.obtenerGastosPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000),
+                    
+                    // 🛡️ BÚSQUEDA ROBUSTA DE DETALLES: Usamos el mismo criterio que las ventas (por unidad o por vendedor)
+                    // para asegurar que el desglose por línea coincida con el total de venta mostrado.
+                    if (almid.isNotEmpty()) {
+                        ventaRepository.obtenerDetallesPorUnidadPeriodoFlow(almid, rNom, rId, inicioBloque, ahoraReal + 86400000)
+                    } else {
+                        ventaRepository.obtenerDetallesPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000)
                     },
-                    totalGastosHoy = totalGastoHoy,
-                    perfilesVenta = perfiles,
-                    ventasPorPerfil = breakdown
-                ) }
+                    
+                    inventarioRepository.obtenerProductosLocal()
+                ) { todasLasVentas, todosLosGastos, detallesBloque, catalog ->
+                    
+                    val calCalc = Calendar.getInstance().apply { timeInMillis = ahoraReal }
+                    calCalc.set(Calendar.HOUR_OF_DAY, 0); calCalc.set(Calendar.MINUTE, 0); calCalc.set(Calendar.SECOND, 0); calCalc.set(Calendar.MILLISECOND, 0)
+                    val iniHoyCalc = calCalc.timeInMillis
+
+                    val catalogMap = catalog.associate { it.productoId to (it.marca to it.categoria) }
+
+                    // Parsear perfiles
+                    val perfiles = mutableListOf<com.gruposanangel.delivery.data.PerfilVenta>()
+                    try {
+                        val json = usuario?.perfilesVentaJson
+                        if (!json.isNullOrBlank()) {
+                            val array = org.json.JSONArray(json)
+                            for (i in 0 until array.length()) {
+                                val obj = array.getJSONObject(i)
+                                val filtrosArr = obj.getJSONArray("filtros")
+                                val filtros = (0 until filtrosArr.length()).map { j ->
+                                    val fObj = filtrosArr.getJSONObject(j)
+                                    val catsArr = fObj.optJSONArray("categorias")
+                                    val cats = if (catsArr != null) (0 until catsArr.length()).map { catsArr.getString(it) } else emptyList()
+                                    com.gruposanangel.delivery.data.FiltroPerfil(fObj.getString("marca"), cats)
+                                }
+                                perfiles.add(com.gruposanangel.delivery.data.PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros))
+                            }
+                        }
+                    } catch (e: Exception) { }
+
+                    // 1. Filtrado de Ventas (Hoy, Semana, Bloque)
+                    val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoyCalc && it.estado != "CANCELADA" }
+                    val ventasSemana = todasLasVentas.filter { it.fecha >= iniSemana && it.estado != "CANCELADA" }
+                    val totalVentaBloque = todasLasVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total }
+
+                    // 2. Mapeo de Detalles para hoy (Sincronía total con las ventas del día)
+                    val ventasHoyIds = ventasHoy.map { it.id }.toSet()
+                    val detallesHoy = detallesBloque.filter { ventasHoyIds.contains(it.ventaId) }
+
+                    // 3. Calcular Desglose por Perfil (Lógica idéntica al Administrador)
+                    val breakdown = perfiles.map { perfil ->
+                        val detallesPerfil = detallesHoy.filter { detalle ->
+                            val info = catalogMap[detalle.productoId]
+                            
+                            // 🛡️ Clasificación Profunda: Si el detalle es genérico, preferimos la info del catálogo local.
+                            val realMarca = if (detalle.marca.equals("Delisa", true) && 
+                                               (detalle.categoria.equals("General", true) || detalle.categoria.isEmpty())) {
+                                info?.first ?: detalle.marca
+                            } else {
+                                detalle.marca
+                            }
+
+                            val realCat = if (detalle.marca.equals("Delisa", true) && 
+                                             (detalle.categoria.equals("General", true) || detalle.categoria.isEmpty())) {
+                                info?.second ?: detalle.categoria
+                            } else {
+                                detalle.categoria
+                            }
+
+                            perfil.filtros.any { filtro ->
+                                val marcaMatch = realMarca.trim().equals(filtro.marca.trim(), ignoreCase = true)
+                                val catMatch = if (filtro.categorias.isNotEmpty()) {
+                                    filtro.categorias.any { it.trim().equals(realCat.trim(), ignoreCase = true) }
+                                } else true
+                                
+                                marcaMatch && catMatch
+                            }
+                        }
+                        
+                        val totalVenta = detallesPerfil.sumOf { it.precio * it.cantidad }
+                        val totalUnidades = detallesPerfil.sumOf { it.cantidad }
+                        
+                        PerfilBreakdown(perfil.id, perfil.nombre, totalVenta, totalUnidades)
+                    }
+
+                    // 4. Filtrado de Gastos
+                    val gastosHoy = todosLosGastos.filter { it.fecha >= iniHoyCalc }
+                    val totalGastoHoy = gastosHoy.sumOf { it.monto }
+
+                    // 5. Gráfico de Barras (Lunes a Sábado)
+                    val ventasPorDia = MutableList(6) { 0.0 }
+                    val calDia = Calendar.getInstance()
+                    ventasSemana.forEach { venta ->
+                        calDia.timeInMillis = venta.fecha
+                        val dayOfWeek = calDia.get(Calendar.DAY_OF_WEEK)
+                        val index = when (dayOfWeek) {
+                            Calendar.MONDAY -> 0; Calendar.TUESDAY -> 1; Calendar.WEDNESDAY -> 2
+                            Calendar.THURSDAY -> 3; Calendar.FRIDAY -> 4; Calendar.SATURDAY -> 5
+                            else -> -1
+                        }
+                        if (index != -1) ventasPorDia[index] += venta.total
+                    }
+
+                    val totalHoy = ventasHoy.sumOf { it.total }
+                    val ticketPromedio = if (ventasHoy.isNotEmpty()) totalHoy / ventasHoy.size else 0.0
+
+                    Log.d("DashboardVM", "🔥 Sync: ${ventasHoy.size} ventas hoy. Details match: ${detallesHoy.size}. Profiles: ${breakdown.size}")
+
+                    _uiState.update { it.copy(
+                        isLoading = false,
+                        ventaDia = totalHoy,
+                        clientesDia = ventasHoy.map { it.clienteId }.distinct().size,
+                        ticketPromedioDia = ticketPromedio,
+                        ventaSemana = ventasSemana.sumOf { it.total },
+                        ventaBloque = totalVentaBloque,
+                        ventasPorDiaSemana = ventasPorDia,
+                        ventasHoy = ventasHoy,
+                        gastosHoy = todosLosGastos.filter { it.fecha >= iniHoyCalc }.map { 
+                            Gasto(it.id, it.monto, it.categoria, it.descripcion, it.fecha, it.vendedorId, it.rutaNombre)
+                        },
+                        totalGastosHoy = totalGastoHoy,
+                        perfilesVenta = perfiles,
+                        ventasPorPerfil = breakdown
+                    ) }
+                }
             }.collect()
         }
     }
@@ -492,6 +525,7 @@ class DashboardVendedorViewModel(
                 val puesto = user.puestoTrabajo?.trim() ?: ""
                 val esVendedor = puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta"
                 val idParaSync = if (esVendedor) userId else ""
+                val almid = user.ultimoAlmacenNombre ?: ""
 
                 val cal = Calendar.getInstance()
                 cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
@@ -503,13 +537,13 @@ class DashboardVendedorViewModel(
                     .whereGreaterThanOrEqualTo("fecha", inicio)
                 
                 if (esVendedor) {
-                    query = query.whereEqualTo("vendedorId", userId)
+                    query = query.whereEqualTo("almacenId", almid)
                 }
 
                 salesListener = query.addSnapshotListener { snapshot, _ ->
                     if (snapshot != null) {
                         viewModelScope.launch {
-                            ventaRepository.descargarVentasDia(idParaSync)
+                            ventaRepository.descargarVentasDia(idParaSync, almid)
                         }
                     }
                 }

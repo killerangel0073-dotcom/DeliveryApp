@@ -60,7 +60,8 @@ import java.util.*
 @Composable
 fun PantallaInventario(
     navController: NavController,
-    inventarioRepo: RepositoryInventario
+    inventarioRepo: RepositoryInventario,
+    isAdminOverride: Boolean? = null
 ) {
     val context = LocalContext.current
     val db = AppDatabase.getDatabase(context)
@@ -70,6 +71,13 @@ fun PantallaInventario(
     val viewModel: InventarioViewModel = viewModel(
         factory = InventarioViewModelFactory(inventarioRepo, repoUsuario)
     )
+
+    // 🔥 APLICAR SOBREESCRITURA DE ADMIN SI VIENE DESDE PANTALLA PRINCIPAL
+    LaunchedEffect(isAdminOverride) {
+        if (isAdminOverride != null) {
+            viewModel.sobreescribirAdmin(isAdminOverride)
+        }
+    }
 
     val uiState by viewModel.uiState.collectAsState()
 
@@ -122,7 +130,7 @@ fun PantallaInventarioContent(
                     onSelect = onAlmacenSelect,
                     onGlobal = onVistaGlobalClick
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(4.dp))
             }
 
             ResumenInventario(
@@ -133,22 +141,14 @@ fun PantallaInventarioContent(
                 titulo = if (verDanado) "DEVOLUCIONES/DAÑADOS" else (uiState.almacenSeleccionado ?: "MI INVENTARIO")
             )
 
-            // 🔹 SELECTOR DE PERFIL (Solo para vendedores o si no es vista global admin)
-            if (!uiState.isAdmin || (uiState.almacenSeleccionado?.startsWith("Vendedor") == true && !uiState.esVistaGlobal)) {
-                PerfilVentaSelector(
-                    perfiles = uiState.perfilesDisponibles,
-                    seleccionado = uiState.perfilSeleccionado,
-                    onSeleccionar = onPerfilSelect
-                )
-            }
-
             // 🔹 BOTÓN DE ARQUEO / LIQUIDACIÓN (Solo para Admins viendo a un Vendedor)
             if (uiState.isAdmin && uiState.almacenSeleccionado?.startsWith("Vendedor") == true && !uiState.esVistaGlobal) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Button(
                     onClick = {
                         val origen = uiState.almacenSeleccionado
-                        val destino = uiState.rutaAsignada ?: "Almacen Huasteca"
+                        // 🔥 MODIFICACIÓN: Siempre liquidar a Almacén Huasteca (Central)
+                        val destino = "Almacen Huasteca"
                         navController.navigate("LIQUIDACION_DIRECTA?origen=$origen&destino=$destino")
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -161,11 +161,23 @@ fun PantallaInventarioContent(
                 }
             }
 
+            // 🔹 SELECTOR DE PERFIL (Para todos si hay perfiles, o forzado para Admin en auditoría)
+            val mostrarSelectores = uiState.perfilesDisponibles.size > 1 || (uiState.isAdmin && !uiState.esVistaGlobal && uiState.almacenSeleccionado != null)
+            
+            if (mostrarSelectores) {
+                PerfilVentaSelector(
+                    perfiles = uiState.perfilesDisponibles,
+                    seleccionado = uiState.perfilSeleccionado,
+                    onSeleccionar = onPerfilSelect,
+                    siempreMostrar = uiState.isAdmin && !uiState.esVistaGlobal
+                )
+            }
+
             // 🔹 BOTÓN DE AJUSTE DE ALMACÉN (Solo para CEO/Gerente en un Almacén)
             val puestoAdmin = uiState.puestoTrabajo?.trim() ?: ""
             val esDirectivo = puestoAdmin == "CEO" || puestoAdmin == "Gerente General"
             if (esDirectivo && uiState.almacenSeleccionado?.startsWith("Almacen") == true && !uiState.esVistaGlobal) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Button(
                     onClick = {
                         val almacen = uiState.almacenSeleccionado
@@ -181,7 +193,7 @@ fun PantallaInventarioContent(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             // 🔹 SELECTOR DE TIPO (Bueno vs Dañado)
             if (!uiState.esVistaGlobal) {
@@ -191,7 +203,7 @@ fun PantallaInventarioContent(
                     label = labelInventario,
                     onToggle = { verDanado = it }
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(4.dp))
             }
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -203,14 +215,24 @@ fun PantallaInventarioContent(
                     val msg = if (verDanado) "Sin devoluciones registradas" else "Sin stock disponible"
                     Text(msg, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 } else {
+                    val productosPorCategoria = remember(productosAMostrar) {
+                        productosAMostrar.groupBy { it.categoria }
+                    }
+
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(), 
-                        verticalArrangement = Arrangement.spacedBy(10.dp), 
-                        contentPadding = PaddingValues(bottom = 80.dp)
+                        // verticalArrangement = Arrangement.spacedBy(10.dp), 
+                        contentPadding = PaddingValues(bottom = 20.dp)
                     ) {
-                        items(productosAMostrar, key = { it.id + (if (verDanado) "_bad" else "_good") }) { producto ->
-                            ItemProductoInventario(producto, esDanado = verDanado)
+                        productosPorCategoria.forEach { (categoria, productos) ->
+                            item(key = "header_${categoria}_${if (verDanado) "bad" else "good"}") {
+                                CategoryHeader(categoria)
+                            }
+                            items(productos, key = { it.id + (if (verDanado) "_bad" else "_good") }) { producto ->
+                                ItemProductoInventario(producto, esDanado = verDanado)
+                                Spacer(Modifier.height(10.dp))
+                            }
                         }
                     }
                 }
@@ -428,10 +450,10 @@ fun ResumenInventario(
         colors = CardDefaults.cardColors(containerColor = com.gruposanangel.delivery.ui.theme.DelisaRed), 
         modifier = Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(24.dp))
     ) {
-        Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(com.gruposanangel.delivery.ui.theme.DelisaRed, com.gruposanangel.delivery.ui.theme.DelisaRedDark))).padding(16.dp)) {
+        Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(com.gruposanangel.delivery.ui.theme.DelisaRed, com.gruposanangel.delivery.ui.theme.DelisaRedDark))).padding(horizontal = 16.dp, vertical = 10.dp)) {
             Column {
                 Text(titulo.uppercase(), color = Color.White.copy(0.8f), fontSize = 10.sp, fontWeight = FontWeight.Black)
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(4.dp))
                 
                 Row(
                     modifier = Modifier.fillMaxWidth(), 

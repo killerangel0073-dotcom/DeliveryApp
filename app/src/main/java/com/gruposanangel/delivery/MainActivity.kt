@@ -50,8 +50,7 @@ import com.gruposanangel.delivery.model.Plantilla_Producto
 import com.gruposanangel.delivery.SegundoPlano.LocationService
 import com.gruposanangel.delivery.SegundoPlano.scheduleSyncWorkers
 import com.gruposanangel.delivery.ui.screens.*
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
-import com.gruposanangel.delivery.ui.theme.ThemeConfig
+import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.FcmUtils
 import com.gruposanangel.delivery.utilidades.HardLockPermissionWrapper
 import com.gruposanangel.delivery.utilidades.hayInternet
@@ -82,8 +81,18 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         ThemeConfig.loadTheme(this)
         com.gruposanangel.delivery.utilidades.TimeManager.init(this)
         scheduleSyncWorkers(this)
-        FirebaseApp.initializeApp(this)
-        FirebaseAppCheck.getInstance().installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
+        try {
+            FirebaseApp.initializeApp(this)
+            if (com.gruposanangel.delivery.utilidades.GoogleServicesUtils.isGooglePlayServicesAvailable(this)) {
+                // En dispositivos con Google, podríamos usar PlayIntegrity en el futuro
+                FirebaseAppCheck.getInstance().installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
+            } else {
+                // En Huawei/Sin GMS, forzamos modo Debug o simplemente inicializamos sin Integrity para evitar crash
+                FirebaseAppCheck.getInstance().installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
+            }
+        } catch (e: Exception) {
+            Log.e("INIT", "⚠️ Error en inicialización de Firebase/AppCheck: ${e.message}")
+        }
 
         val db = AppDatabase.getDatabase(this)
         usuarioDao = db.usuarioDao(); repositoryUsuario = RepositoryUsuario(FirebaseDataSource(), usuarioDao)
@@ -96,6 +105,23 @@ class MainActivity : ComponentActivity(), SensorEventListener {
             DeliveryTheme {
                 val usuarioActual by repositoryUsuario.getUsuarioActual().collectAsState(initial = null)
                 val context = LocalContext.current; val sysUI = rememberSystemUiController()
+                
+                var initialCheckDone by remember { mutableStateOf(false) }
+                val firebaseUser = remember { FirebaseAuth.getInstance().currentUser }
+
+                // 🎯 Decisión de pantalla ultra-rápida y silenciosa
+                LaunchedEffect(usuarioActual) {
+                    if (usuarioActual != null) {
+                        initialCheckDone = true
+                    } else if (firebaseUser == null) {
+                        initialCheckDone = true
+                    } else {
+                        // El usuario existe en Firebase, esperamos a que Room lo cargue (máx 500ms)
+                        delay(500)
+                        initialCheckDone = true
+                    }
+                }
+
                 var navAction by remember { mutableStateOf<String?>(null) }
                 var navExtras by remember { mutableStateOf<Bundle?>(null) }
 
@@ -149,12 +175,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                         statusListener = FirebaseFirestore.getInstance().collection("users").document(uid)
                             .addSnapshotListener { snapshot, _ ->
                                 if (snapshot != null && snapshot.exists()) {
-                                    // 1. Sincronización proactiva del perfil en Room
                                     lifecycleScope.launch(Dispatchers.IO) {
                                         try { repositoryUsuario.syncUsuario(uid) } catch (_: Exception) {}
                                     }
 
-                                    // 2. Lógica de seguridad y bloqueos
                                     val activo = snapshot.getBoolean("activo") ?: true
                                     val status = snapshot.getString("status") ?: "ACTIVO"
                                     val estadoLicencia = snapshot.getString("licenciaEstado") ?: "VIGENTE"
@@ -178,30 +202,33 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 }
 
                 SideEffect { 
-                    sysUI.setSystemBarsColor(Color.Red, darkIcons = false)
+                    sysUI.setSystemBarsColor(if (initialCheckDone) DelisaRed else Color.White, darkIcons = !initialCheckDone)
                     sysUI.setNavigationBarColor(Color.Black, darkIcons = true) 
                 }
 
-                if (blockReason != null) {
+                if (!initialCheckDone) {
+                    // 🔹 Caja vacía para una transición invisible desde el splash del sistema
+                    Box(Modifier.fillMaxSize().background(Color.White))
+                } else if (blockReason != null) {
                     Box(Modifier.fillMaxSize().background(Color.Black), Alignment.Center) {
                         if (blockReason == "ACCOUNT_DISABLED" || blockReason == "GLOBAL_BLOCK") {
                             Image(painter = painterResource(id = R.drawable.appbloqueada), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
                         } else {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                                Icon(Icons.Default.Dangerous, null, tint = Color.Red, modifier = Modifier.size(100.dp))
+                                Icon(Icons.Default.Dangerous, null, tint = DelisaRed, modifier = Modifier.size(100.dp))
                                 Spacer(Modifier.height(24.dp))
                                 Text("LICENCIA VENCIDA", fontSize = 24.sp, fontWeight = FontWeight.Black, color = Color.White)
                                 Spacer(Modifier.height(16.dp))
                                 Text("Tu licencia de conducir ha expirado. Por seguridad y cumplimiento legal, no puedes iniciar jornada hasta que un administrador valide tu nueva licencia.", color = Color.LightGray, textAlign = TextAlign.Center, fontSize = 16.sp)
                                 Spacer(Modifier.height(40.dp))
-                                Text("Contacta a tu supervisor para la actualización.", color = Color.Red, fontWeight = FontWeight.Bold)
+                                Text("Contacta a tu supervisor para la actualización.", color = DelisaRed, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 } else if (showTimeError || (needsSync && usuarioActual != null)) {
                     Box(Modifier.fillMaxSize().background(Color.White), Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                            Icon(Icons.Default.HistoryToggleOff, null, tint = Color.Red, modifier = Modifier.size(80.dp))
+                            Icon(Icons.Default.HistoryToggleOff, null, tint = DelisaRed, modifier = Modifier.size(80.dp))
                             Spacer(Modifier.height(24.dp))
                             Text("CONFIGURACIÓN DE HORA INCORRECTA", fontWeight = FontWeight.Black, color = Color.Black, textAlign = TextAlign.Center)
                             Spacer(Modifier.height(16.dp))
@@ -210,11 +237,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                             Button(onClick = { 
                                 if (showTimeError) { context.startActivity(Intent(android.provider.Settings.ACTION_DATE_SETTINGS)) } 
                                 else { showTimeError = !timeManager.esHoraAutomaticaActivada(context); needsSync = timeManager.requiereSincronizacion(); if (!showTimeError && needsSync) iniciarSincronizacionInmediata() }
-                            }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red), shape = RoundedCornerShape(12.dp)) { Text(if (showTimeError) "IR A AJUSTES" else "REINTENTAR", fontWeight = FontWeight.Bold) }
+                            }, colors = ButtonDefaults.buttonColors(containerColor = DelisaRed), shape = RoundedCornerShape(12.dp)) { Text(if (showTimeError) "IR A AJUSTES" else "REINTENTAR", fontWeight = FontWeight.Bold) }
                         }
                     }
                 } else {
-                    Box(Modifier.fillMaxSize().background(Color.Red)) {
+                    Box(Modifier.fillMaxSize().background(DelisaRed)) {
                         HardLockPermissionWrapper(
                             onLockActive = {
                                 try { stopService(Intent(context, LocationService::class.java)) } catch (_: Exception) { }
@@ -268,7 +295,24 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     if (almacenId != null) {
                         pendientes.forEach { v ->
                             val prods = ventaRepository.obtenerDetallesDeVenta(v.id).map { Plantilla_Producto(it.productoId, it.nombre, it.precio, it.cantidad) }
-                            val (exito, msg) = ventaRepository.sincronizarConServidor(v.id, v.clienteId, v.clienteNombre, prods, v.metodoPago, v.vendedorId, nombreVendedor, almacenId, v.fotoEvidenciaVisita, v.fueraDeRango, v.latitudVenta, v.longitudVenta, v.fecha, v.motivoVisita)
+                            val (exito, msg) = ventaRepository.sincronizarConServidor(
+                                ventaLocalId = v.id, 
+                                clienteId = v.clienteId, 
+                                clienteNombre = v.clienteNombre, 
+                                productos = prods, 
+                                metodoPago = v.metodoPago, 
+                                vendedorId = v.vendedorId, 
+                                vendedorNombre = nombreVendedor, 
+                                almacenVendedorId = v.almacenId ?: almacenId, 
+                                rutaId = v.rutaId,
+                                rutaNombre = v.rutaNombre,
+                                fotoEvidenciaUrl = null, // 🔥 Sync rápido sin foto en el loop de primer plano
+                                fueraDeRango = v.fueraDeRango, 
+                                latitudVenta = v.latitudVenta, 
+                                longitudVenta = v.longitudVenta, 
+                                fecha = v.fecha, 
+                                motivoVisita = v.motivoVisita
+                            )
                             if (exito) { val fId = try { JSONObject(msg).optString("ventaId") } catch (_: Exception) { null }; if (!fId.isNullOrEmpty()) ventaRepository.marcarVentaConFirestoreId(v.id, fId) }
                         }
                     }
@@ -279,8 +323,12 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     }
 
     private fun startLocationService(puesto: String?) {
-        val p = puesto?.trim() ?: ""
-        if (p == "Vendedor de Ruta" || p == "Suplente de Ruta") {
+        val p = puesto?.trim()?.uppercase() ?: ""
+        // 🔥 Habilitado para Vendedores y puestos Administrativos (Para ver distancias en tiempo real)
+        val esVendedor = p == "VENDEDOR DE RUTA" || p == "SUPLENTE DE RUTA"
+        val esAdmin = p.contains("CEO") || p.contains("GERENTE") || p.contains("SUPERVISOR") || p.contains("ADMIN")
+        
+        if (esVendedor || esAdmin) {
             val hasLocation = ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
             if (hasLocation && !locationServiceStarted) {
                 try { ContextCompat.startForegroundService(this, Intent(this, LocationService::class.java).apply { action = LocationService.ACTION_START }); locationServiceStarted = true } catch (e: Exception) { }

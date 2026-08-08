@@ -60,25 +60,43 @@ class MapaViewModel(
     private val _uiState = MutableStateFlow(MapaUiState())
     val uiState: StateFlow<MapaUiState> = _uiState.asStateFlow()
 
-    // 🌊 Canal de eventos de cámara (para animaciones automáticas)
     private val _cameraEvents = MutableSharedFlow<CameraEvent>()
     val cameraEvents = _cameraEvents.asSharedFlow()
 
-    // 📍 Persistencia de la cámara entre pantallas
     val cameraPositionState = CameraPositionState(
         position = CameraPosition.fromLatLngZoom(LatLng(19.4768, -96.5897), 12f)
     )
 
     private val RTDB_URL = "https://appventas--san-angel-default-rtdb.firebaseio.com/"
     private val db = FirebaseFirestore.getInstance()
-    private val rtdb = FirebaseDatabase.getInstance(RTDB_URL).reference // 🚀 RTDB con URL explícita
-    private var locationsListener: ListenerRegistration? = null
+    private val rtdb = FirebaseDatabase.getInstance(RTDB_URL).reference
     private var liveTrackingListener: ValueEventListener? = null
+    
+    // 🔥 CACHÉ ESTATICO: Para no leer Firestore cada 2 segundos (Ahorro de batería y datos)
+    private var cacheUsuariosActivos: Map<String, com.google.firebase.firestore.DocumentSnapshot> = emptyMap()
 
     init {
         if (repositoryCliente != null) {
             cargarDatosUsuario()
+            preCargarUsuarios() // 🔥 Carga inicial para velocidad
         }
+    }
+
+    private fun preCargarUsuarios() {
+        db.collection("users")
+            .whereEqualTo("activo", true)
+            .get()
+            .addOnSuccessListener { snapshot ->
+                cacheUsuariosActivos = snapshot.documents.associateBy { it.id }
+            }
+    }
+
+    fun sobreescribirAdmin(esAdmin: Boolean) {
+        val puestoFake = if (esAdmin) "Supervisor" else "Vendedor"
+        _uiState.update { it.copy(puestoTrabajo = puestoFake) }
+        cargarClientes(triggerCenter = false)
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        escucharUbicacionesVendedores(uid, puestoFake, _uiState.value.miRuta)
     }
 
     private fun cargarDatosUsuario() {
@@ -87,21 +105,17 @@ class MapaViewModel(
             try {
                 val doc = db.collection("users").document(uid).get().await()
                 val puesto = doc.getString("puestoTrabajo") ?: ""
-                val esAdmin = puesto.trim() in listOf("CEO", "Gerente General", "Supervisor", "Administración")
-
-                val rutaRef = doc.getDocumentReference("rutaAsignada")
-                var rutaNombre: String? = null
-                if (rutaRef != null) {
-                    rutaNombre = rutaRef.id // Ej: "Ruta 2 Delisa"
-                }
                 
+                val rRef = doc.getDocumentReference("rutaAsignada")
+                val rNom = doc.getString("ultimaRutaNombre")
+                val rutaNombre = rRef?.id ?: rNom
+
                 _uiState.update { it.copy(puestoTrabajo = puesto, miRuta = rutaNombre) }
                 
-                if (esAdmin) {
+                if (puesto.trim() in listOf("CEO", "Gerente General", "Supervisor", "Administración", "Gerente")) {
                     cargarListaRutas()
                 }
 
-                // 🚀 Una vez que sabemos quién es, activamos la escucha correcta
                 escucharUbicacionesVendedores(uid, puesto, rutaNombre)
             } catch (e: Exception) {
                 Log.e("MapaVM", "Error cargando datos de usuario", e)
@@ -115,9 +129,7 @@ class MapaViewModel(
                 val snapshot = db.collection("rutas").get().await()
                 val rutas = snapshot.documents.mapNotNull { it.getString("nombre") }.sorted()
                 _uiState.update { it.copy(listaRutas = listOf("Todas las Rutas") + rutas) }
-            } catch (e: Exception) {
-                Log.e("MapaVM", "Error cargando rutas", e)
-            }
+            } catch (e: Exception) { }
         }
     }
 
@@ -131,51 +143,56 @@ class MapaViewModel(
     private fun escucharUbicacionesVendedores(uid: String, puesto: String, miRuta: String?) {
         liveTrackingListener?.let { rtdb.removeEventListener(it) }
 
-        val p = puesto.trim()
-        val esAdmin = p == "CEO" || p == "Gerente General" || p == "Supervisor" || p == "Administración"
+        val p = puesto.trim().uppercase()
+        val esAdmin = p == "CEO" || p.contains("GERENTE") || p.contains("SUPERVISOR") || p.contains("ADMIN") || p.contains("DIRECCION")
         val query = if (esAdmin) rtdb.child("vendedores_en_vivo") else rtdb.child("vendedores_en_vivo").child(uid)
-
-        Log.d("MapaVM", "📡 RTDB: Iniciando escucha para $puesto (Admin: $esAdmin)")
 
         liveTrackingListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 viewModelScope.launch(Dispatchers.IO) {
-                    if (esAdmin) {
-                        // --- LÓGICA ADMIN: CRUZAR DATOS ---
-                        val vendedoresMaestros = try {
-                            db.collection("users")
-                                .whereIn("puestoTrabajo", listOf("Vendedor de Ruta", "Suplente de Ruta"))
-                                .whereEqualTo("activo", true)
-                                .get().await().documents.mapNotNull { doc ->
-                                    val rRef = doc.getDocumentReference("rutaAsignada")
-                                    // 🛡️ FILTRO: Solo considerar vendedores que tengan una ruta asignada
-                                    if (rRef != null) {
-                                        Pair(doc.id, rRef.id)
-                                    } else {
-                                        null
-                                    }
-                                }
-                        } catch (e: Exception) { emptyList() }
-
-                        val liveMap = snapshot.children.associateBy { it.key }
-                        val listaFinal = vendedoresMaestros.map { (vUid, nRuta) ->
-                            val liveDoc = liveMap[vUid]
-                            mapearVendedor(nRuta, liveDoc)
+                    try {
+                        // 🚀 OPTIMIZACIÓN: Usar caché si está disponible, si no, cargar una vez.
+                        if (cacheUsuariosActivos.isEmpty()) {
+                            val usersSnap = db.collection("users").get().await()
+                            cacheUsuariosActivos = usersSnap.documents.filter { it.getBoolean("activo") == true }.associateBy { it.id }
                         }
-                        _uiState.update { it.copy(vendedores = listaFinal.sortedBy { it.ruta }) }
-                    } else {
-                        // --- LÓGICA VENDEDOR: SOLO ÉL MISMO ---
-                        val miInfoLive = mapearVendedor(miRuta ?: "Mi Ruta", snapshot)
-                        _uiState.update { it.copy(vendedores = listOf(miInfoLive)) }
-                    }
+                        
+                        val todosLosUsuarios = cacheUsuariosActivos
+
+                        val liveMap = if (esAdmin) {
+                            snapshot.children.associateBy { it.key }
+                        } else {
+                            mapOf(uid to snapshot)
+                        }
+
+                        val rutasAgrupadas = mutableMapOf<String, VendedorUbicacion>()
+                        val uidsAMostrar = (liveMap.keys + todosLosUsuarios.keys).distinct()
+
+                        uidsAMostrar.forEach { vUid ->
+                            val userDoc = todosLosUsuarios[vUid]
+                            val liveDoc = liveMap[vUid]
+                            val rRefRaw = userDoc?.get("rutaAsignada")
+                            val rRefId = when (rRefRaw) {
+                                is com.google.firebase.firestore.DocumentReference -> rRefRaw.id
+                                is String -> rRefRaw.split("/").last()
+                                else -> null
+                            }
+                            
+                            if (rRefId != null) {
+                                val infoVendedor = mapearVendedor(rRefId, liveDoc)
+                                val existente = rutasAgrupadas[rRefId]
+                                if (existente == null || (infoVendedor.status == "ONLINE" && existente.status != "ONLINE")) {
+                                    rutasAgrupadas[rRefId] = infoVendedor
+                                }
+                            }
+                        }
+                        val listaFinal = rutasAgrupadas.values.toList().sortedBy { it.ruta }
+                        _uiState.update { it.copy(vendedores = listaFinal) }
+                    } catch (e: Exception) { }
                 }
             }
-
-            override fun onCancelled(error: DatabaseError) {
-                Log.e("MapaVM", "Error RTDB Live Tracking", error.toException())
-            }
+            override fun onCancelled(error: DatabaseError) { }
         }
-
         query.addValueEventListener(liveTrackingListener!!)
     }
 
@@ -189,56 +206,31 @@ class MapaViewModel(
             val status = doc.child("status").getValue(String::class.java) ?: "ONLINE"
             val tsLong = doc.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
             
-            VendedorUbicacion(
-                ruta = nombreRuta,
-                lat = lat,
-                lng = lng,
-                accuracy = acc,
-                speed = speed,
-                battery = battery,
-                status = status,
-                timestamp = com.google.firebase.Timestamp(java.util.Date(tsLong))
-            )
+            VendedorUbicacion(nombreRuta, lat, lng, acc, speed, battery, status, com.google.firebase.Timestamp(java.util.Date(tsLong)))
         } else {
-            VendedorUbicacion(
-                ruta = nombreRuta,
-                lat = 0.0,
-                lng = 0.0,
-                accuracy = 0f,
-                speed = 0.0,
-                battery = 0,
-                status = "OFFLINE",
-                timestamp = com.google.firebase.Timestamp.now()
-            )
+            VendedorUbicacion(nombreRuta, 0.0, 0.0, 0f, 0.0, 0, "OFFLINE", com.google.firebase.Timestamp.now())
         }
     }
 
     fun toggleMarkersVisible() {
         val currentVisible = _uiState.value.markersVisible
         val nextVisible = !currentVisible
-        
         if (nextVisible) {
-            if (_uiState.value.clientes.isEmpty()) {
-                cargarClientes(triggerCenter = true)
-            } else {
-                viewModelScope.launch { _cameraEvents.emit(CameraEvent.CenterOnClients) }
-            }
+            if (_uiState.value.clientes.isEmpty()) cargarClientes(triggerCenter = true)
+            else viewModelScope.launch { _cameraEvents.emit(CameraEvent.CenterOnClients) }
         }
-        
         _uiState.update { it.copy(markersVisible = nextVisible) }
     }
 
     private fun cargarClientes(triggerCenter: Boolean = false) {
         _uiState.update { it.copy(isLoading = true) }
-
         val p = _uiState.value.puestoTrabajo?.trim() ?: ""
-        val esAdmin = p in listOf("CEO", "Gerente General", "Supervisor", "Administración")
+        val esAdmin = p in listOf("CEO", "Gerente General", "Supervisor", "Administración", "Gerente")
         val miRuta = _uiState.value.miRuta
         val filtroRuta = _uiState.value.filtroRuta
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // 🔥 CAMBIO A OFFLINE-FIRST CON FLOW LOCAL
                 repositoryCliente?.obtenerClientesLocal()?.collect { entidades ->
                     val filtrados = entidades.filter { ent ->
                         val cumpleActivo = ent.activo
@@ -249,25 +241,11 @@ class MapaViewModel(
                         }
                         cumpleActivo && cumpleRuta
                     }
-
                     val lista = filtrados.map { ent ->
-                        Cliente(
-                            id = ent.id,
-                            nombreNegocio = ent.nombreNegocio,
-                            ubicacionLat = ent.ubicacionLat,
-                            ubicacionLng = ent.ubicacionLon,
-                            valor = ent.valorCliente,
-                            nombreDueno = ent.nombreDueno,
-                            telefono = ent.telefono,
-                            fotoUrl = ent.fotografiaUrl
-                        )
+                        Cliente(ent.id, ent.nombreNegocio, ent.ubicacionLat, ent.ubicacionLon, ent.valorCliente, ent.nombreDueno, ent.telefono, ent.fotografiaUrl)
                     }
-
                     _uiState.update { it.copy(clientes = lista, isLoading = false) }
-                    
-                    if (triggerCenter && lista.isNotEmpty()) {
-                        _cameraEvents.emit(CameraEvent.CenterOnClients)
-                    }
+                    if (triggerCenter && lista.isNotEmpty()) _cameraEvents.emit(CameraEvent.CenterOnClients)
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
@@ -293,16 +271,12 @@ class MapaViewModel(
 
     fun toggleSeguirVendedor(ruta: String) {
         val actual = _uiState.value.seguirVendedor
-        if (actual == ruta) {
-            _uiState.update { it.copy(seguirVendedor = null, vendedorSeleccionadoRuta = null) }
-        } else {
-            _uiState.update { it.copy(seguirVendedor = ruta, vendedorSeleccionadoRuta = ruta, selectedCliente = null) }
-        }
+        if (actual == ruta) _uiState.update { it.copy(seguirVendedor = null, vendedorSeleccionadoRuta = null) }
+        else _uiState.update { it.copy(seguirVendedor = ruta, vendedorSeleccionadoRuta = ruta, selectedCliente = null) }
     }
 
     override fun onCleared() {
         super.onCleared()
-        locationsListener?.remove()
         liveTrackingListener?.let { rtdb.child("vendedores_en_vivo").removeEventListener(it) }
         repositoryCliente?.stopEscuchaFirebase()
     }

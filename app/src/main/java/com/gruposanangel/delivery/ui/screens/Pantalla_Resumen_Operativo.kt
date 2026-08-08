@@ -7,9 +7,24 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.AutoMode
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,8 +55,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
+import com.gruposanangel.delivery.data.GastoEntity
 import android.graphics.pdf.PdfDocument
 import android.os.Environment
 import java.io.File
@@ -66,6 +84,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.rounded.ShoppingCart
 import com.gruposanangel.delivery.ui.theme.*
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.gruposanangel.delivery.R
 
 data class ProdVendidoReporte(
     val nombre: String,
@@ -73,13 +95,44 @@ data class ProdVendidoReporte(
     val total: Double
 )
 
+data class SellerEarnings(
+    val uid: String,
+    val nombre: String,
+    val photoUrl: String,
+    val base: Double,
+    val comision: Double,
+    val totalVendido: Double,
+    val totalGanado: Double,
+    val periodicidad: String = "DIARIO",
+    val puesto: String = "",
+    val montoOriginal: Double = 0.0 // 🔥 Nuevo: Para mostrar el sueldo base configurado
+)
+
 data class ResumenOperativoUiState(
     val productos: List<Map<String, Any>> = emptyList(),
     val stockGlobal: Map<String, Int> = emptyMap(),
-    val ventas15Dias: List<ProdVendidoReporte> = emptyList(),
+    val ventasPeriodo: List<ProdVendidoReporte> = emptyList(),
+    val gastosFijos: List<GastoEntity> = emptyList(),
     val isLoading: Boolean = true,
     val isFetchingVentas: Boolean = false,
-    val isCalculatingPurchase: Boolean = false
+    
+    // Métricas Financieras
+    val ventaBruta: Double = 0.0,
+    val costoMercancia: Double = 0.0,
+    val nominaVentas: Double = 0.0,      
+    val nominaProduccion: Double = 0.0,  
+    val gastosFijosMonto: Double = 0.0,    // 🔥 Separado
+    val gastosVariablesMonto: Double = 0.0, // 🔥 Separado
+    val utilidadNeta: Double = 0.0,
+    val diasPeriodo: Int = 1,
+    val nominaDetallada: List<SellerEarnings> = emptyList(),
+    val nominaProduccionLista: List<SellerEarnings> = emptyList(), // 🔥 Renombrada para evitar conflicto
+    val gastosVariables: List<GastoEntity> = emptyList(), // 🔥 Nuevos: Gasolina, Papelería, etc.
+    
+    // Configuración de Nómina
+    val configSueldoBase: Double = 300.0,
+    val configComision: Double = 3.0,
+    val totalVendedoresActivos: Int = 0
 )
 
 data class SugerenciaCompra(
@@ -100,24 +153,52 @@ data class SugerenciaCompra(
     val aFabricar: Int = 0
 )
 
-class ResumenOperativoViewModel(private val inventarioRepo: RepositoryInventario) : ViewModel() {
+class ResumenOperativoViewModel(
+    private val inventarioRepo: RepositoryInventario,
+    private val gastoRepo: com.gruposanangel.delivery.data.RepositoryGasto,
+    private val ventaRepo: com.gruposanangel.delivery.VentaRepository
+) : ViewModel() {
     private val _uiState = MutableStateFlow(ResumenOperativoUiState())
     val uiState: StateFlow<ResumenOperativoUiState> = _uiState.asStateFlow()
 
+    private var currentStartDate: Date = Date()
+    private var currentEndDate: Date = Date()
+
     init {
-        cargarDatos()
+        cargarDatosBase()
+        escucharGastosFijos()
     }
 
-    fun cargarDatos() {
+    private fun escucharGastosFijos() {
+        gastoRepo.obtenerGastosFijosActivos()
+            .onEach { fijos -> 
+                _uiState.update { it.copy(gastosFijos = fijos) }
+                recalcularTodo() 
+            }
+            .launchIn(viewModelScope)
+    }
+
+    fun cargarDatosBase() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
+            _uiState.update { it.copy(isLoading = true) }
             try {
+                gastoRepo.descargarGastosFijos()
                 val db = FirebaseFirestore.getInstance()
-                val result = db.collection("producto")
-                    .whereEqualTo("activo", true)
-                    .get()
-                    .await()
                 
+                // 1. Cargar Configuración de Pagos
+                val configSnap = db.collection("config").document("pagos").get().await()
+                val base = configSnap.getDouble("sueldo_base") ?: 300.0
+                val comi = configSnap.getDouble("comision_porcentaje") ?: 3.0
+                
+                // 2. Contar Vendedores con Ruta Asignada
+                val usersSnap = db.collection("users")
+                    .whereEqualTo("activo", true)
+                    .get().await()
+                val countVendedores = usersSnap.documents.count { 
+                    it.get("rutaAsignada") != null
+                }
+
+                val result = db.collection("producto").whereEqualTo("activo", true).get().await()
                 val productos = result.documents.mapNotNull { doc ->
                     val data = doc.data?.toMutableMap() ?: return@mapNotNull null
                     data["id"] = doc.id 
@@ -125,10 +206,255 @@ class ResumenOperativoViewModel(private val inventarioRepo: RepositoryInventario
                 }
                 val stockGlobal = inventarioRepo.obtenerStockGlobal()
                 
-                _uiState.value = _uiState.value.copy(productos = productos, stockGlobal = stockGlobal, isLoading = false)
+                _uiState.update { it.copy(
+                    productos = productos, 
+                    stockGlobal = stockGlobal, 
+                    isLoading = false,
+                    configSueldoBase = base,
+                    configComision = comi,
+                    totalVendedoresActivos = countVendedores
+                ) }
+                
+                // Cargar por defecto hoy (Desde el primer segundo del día)
+                val hoy = Calendar.getInstance()
+                val inicioHoy = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }.time
+                actualizarPeriodo(inicioHoy, hoy.time)
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false)
+                _uiState.update { it.copy(isLoading = false) }
             }
+        }
+    }
+
+    fun actualizarPeriodo(inicio: Date, fin: Date) {
+        currentStartDate = inicio
+        currentEndDate = fin
+        
+        val diff = Math.abs(fin.time - inicio.time)
+        val dias = (diff / (24 * 60 * 60 * 1000)).toInt() + 1
+        _uiState.update { it.copy(diasPeriodo = dias, isFetchingVentas = true) }
+
+        viewModelScope.launch {
+            val db = FirebaseFirestore.getInstance()
+            val calFin = Calendar.getInstance().apply {
+                time = fin
+                set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59)
+            }
+            val result = db.collection("ventas")
+                .whereGreaterThanOrEqualTo("fecha", com.google.firebase.Timestamp(inicio))
+                .whereLessThanOrEqualTo("fecha", com.google.firebase.Timestamp(calFin.time))
+                .get()
+                .await()
+
+            // 1. Procesar Ventas por Producto
+            val docs = result.documents
+            
+            // 2. Procesar Nómina Detallada
+            val baseDiaria = _uiState.value.configSueldoBase
+            val pctComision = _uiState.value.configComision / 100.0
+            
+            // 2. Procesar Nómina Detallada
+            val baseGral = _uiState.value.configSueldoBase
+            val pctComisionGral = _uiState.value.configComision / 100.0
+            
+            // Traer configuraciones individuales
+            val configNominas = db.collection("config_nominas").get().await()
+                .documents.associate { it.id to it }
+
+            // Traer todos los usuarios activos
+            val allUsers = db.collection("users").whereEqualTo("activo", true).get().await().documents
+            val usersMap = allUsers.associate { it.id to it }
+
+            val ventasPorVendedor = docs.groupBy { it.getString("vendedorId") ?: "Desconocido" }
+            
+            // Función auxiliar para contar días de trabajo (Lunes a Sábado) en el rango
+            fun contarDiasLaborales(start: Date, end: Date): Int {
+                val c = Calendar.getInstance(); c.time = start
+                var count = 0
+                while (!c.time.after(end)) {
+                    if (c.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) count++
+                    c.add(Calendar.DAY_OF_MONTH, 1)
+                }
+                return count
+            }
+            
+            val diasLaboralesPeriodo = contarDiasLaborales(inicio, currentEndDate)
+            
+            val listaVentas = mutableListOf<SellerEarnings>()
+            val listaProduccion = mutableListOf<SellerEarnings>()
+
+            allUsers.forEach { userDoc ->
+                val uid = userDoc.id
+                val pNom = userDoc.getString("nombre") ?: "Sin Nombre"
+                val pPuesto = userDoc.getString("puestoTrabajo") ?: ""
+                val pFoto = userDoc.getString("photo_url") ?: ""
+                val esVentas = userDoc.get("rutaAsignada") != null
+                
+                val config = configNominas[uid]
+                val sueldoBaseDefinido = config?.getDouble("sueldo_base") ?: (if(esVentas) baseGral else 0.0)
+                val periodicidadDefinida = config?.getString("periodicidad") ?: (if(esVentas) "DIARIO" else "QUINCENAL")
+                
+                // 🔥 CÁLCULO BASADO EN 6 DÍAS LABORALES
+                // Mensual = 24 días, Quincenal = 12 días
+                val baseDiaria = when(periodicidadDefinida) {
+                    "MENSUAL" -> sueldoBaseDefinido / 24.0
+                    "QUINCENAL" -> sueldoBaseDefinido / 12.0
+                    else -> sueldoBaseDefinido // DIARIO
+                }
+
+                val sueldoBaseFinal = baseDiaria * diasLaboralesPeriodo
+
+                val ventaTotalUser = ventasPorVendedor[uid]?.filter { 
+                    val est = it.getString("estado")?.lowercase() ?: ""
+                    est == "pagada" || est == "finalizada" || est == "venta"
+                }?.sumOf { (it.get("total") as? Number)?.toDouble() ?: 0.0 } ?: 0.0
+                
+                val comision = if (esVentas) ventaTotalUser * pctComisionGral else 0.0
+                
+                val data = SellerEarnings(
+                    uid = uid,
+                    nombre = pNom,
+                    photoUrl = pFoto,
+                    base = sueldoBaseFinal,
+                    comision = comision,
+                    totalVendido = ventaTotalUser,
+                    totalGanado = sueldoBaseFinal + comision,
+                    periodicidad = periodicidadDefinida,
+                    puesto = pPuesto,
+                    montoOriginal = sueldoBaseDefinido
+                )
+
+                if (esVentas) listaVentas.add(data) else listaProduccion.add(data)
+            }
+
+            // 🔥 3. PROCESAR GASTOS VARIABLES (OPERATIVOS DE RUTA)
+            val gastosSnap = db.collection("gastos")
+                .whereGreaterThanOrEqualTo("timestamp", com.google.firebase.Timestamp(inicio))
+                .whereLessThanOrEqualTo("timestamp", com.google.firebase.Timestamp(calFin.time))
+                .get().await()
+
+            val listaVariables = gastosSnap.documents.mapNotNull { gDoc ->
+                val monto = (gDoc.get("monto") as? Number)?.toDouble() ?: 0.0
+                if (monto <= 0) return@mapNotNull null
+                
+                GastoEntity(
+                    id = gDoc.id,
+                    monto = monto,
+                    categoria = gDoc.getString("categoria") ?: "Otros",
+                    descripcion = gDoc.getString("descripcion") ?: "Gasto de Ruta",
+                    fecha = (gDoc.get("timestamp") as? com.google.firebase.Timestamp)?.toDate()?.time ?: 0L,
+                    vendedorId = gDoc.getString("vendedorId") ?: "",
+                    vendedorNombre = gDoc.getString("vendedorNombre") ?: "",
+                    rutaNombre = gDoc.getString("rutaNombre") ?: "",
+                    sincronizado = true,
+                    esFijo = false
+                )
+            }
+            
+            val ventasProds = obtenerVentasPeriodo(inicio, fin)
+
+            _uiState.update { it.copy(
+                ventasPeriodo = ventasProds, 
+                nominaDetallada = listaVentas,
+                nominaProduccionLista = listaProduccion,
+                gastosVariables = listaVariables, // 🔥 Guardamos los gastos de ruta
+                isFetchingVentas = false 
+            ) }
+            recalcularTodo()
+        }
+    }
+
+    fun actualizarSueldoUsuario(uid: String, monto: Double, peri: String) {
+        viewModelScope.launch {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("config_nominas").document(uid).set(mapOf(
+                "sueldo_base" to monto,
+                "periodicidad" to peri,
+                "last_update" to com.google.firebase.Timestamp.now()
+            )).await()
+            // Recargar datos para ver el impacto
+            actualizarPeriodo(currentStartDate, currentEndDate)
+        }
+    }
+
+    private fun recalcularTodo() {
+        val state = _uiState.value
+        val ventas = state.ventasPeriodo
+        val prods = state.productos
+        val fijos = state.gastosFijos
+        val dias = state.diasPeriodo
+
+        // 1. Venta Bruta
+        val vBruta = ventas.sumOf { it.total }
+
+        // 2. Costo Mercancía (COGS)
+        var cMercancia = 0.0
+        ventas.forEach { v ->
+            val pInfo = prods.find { it["nombre"] == v.nombre }
+            val costoUnit = pInfo?.get("precioCompra")?.toString()?.toDoubleOrNull() ?: 0.0
+            val gBolsa = pInfo?.get("cantidadUnitario")?.toString()?.toDoubleOrNull() ?: 1.0
+            val gVenta = pInfo?.get("gramosVenta")?.toString()?.toDoubleOrNull() ?: 1.0
+            
+            // Costo por bolsita = (Costo Display / Gramos Display) * Gramos Bolsita
+            val costoRealBolsita = if (gBolsa > 0) (costoUnit / gBolsa) * gVenta else 0.0
+            cMercancia += (v.cantidad * costoRealBolsita)
+        }
+
+        // 3. Nómina Vendedores (Basado en el cálculo individual ya realizado)
+        val nVentas = state.nominaDetallada.sumOf { it.totalGanado }
+
+        // 4. Nómina Producción (Suma de empleados sin ruta + gastos fijos de nómina)
+        var nProduccion = state.nominaProduccionLista.sumOf { it.base }
+        
+        // 5. Gastos Operativos (Fijos prorrateados + Variables de Ruta)
+        var gFijosSum = 0.0
+        val gVariablesSum = state.gastosVariables.sumOf { it.monto }
+
+        fijos.forEach { g ->
+            val montoMensual = when(g.periodicidad) {
+                "MENSUAL" -> g.monto
+                "QUINCENAL" -> g.monto * 2
+                else -> g.monto 
+            }
+            val prorrateo = (montoMensual / 30.0) * dias
+            
+            if (g.categoria == "NÓMINA") {
+                nProduccion += prorrateo
+            } else {
+                gFijosSum += prorrateo
+            }
+        }
+
+        _uiState.update { it.copy(
+            ventaBruta = vBruta,
+            costoMercancia = cMercancia,
+            nominaVentas = nVentas,
+            nominaProduccion = nProduccion,
+            gastosFijosMonto = gFijosSum,
+            gastosVariablesMonto = gVariablesSum,
+            utilidadNeta = vBruta - (cMercancia + nVentas + nProduccion + gFijosSum + gVariablesSum)
+        ) }
+    }
+
+    fun agregarGastoFijo(desc: String, monto: Double, peri: String, cat: String) {
+        viewModelScope.launch {
+            gastoRepo.guardarGastoFijo(desc, monto, peri, cat)
+        }
+    }
+
+    fun eliminarGastoFijo(id: String) {
+        viewModelScope.launch {
+            gastoRepo.eliminarGastoFijo(id)
+            // actualizarPeriodo disparará la recarga
+            actualizarPeriodo(currentStartDate, currentEndDate)
+        }
+    }
+
+    fun editarGastoFijo(id: String, desc: String, monto: Double, peri: String) {
+        viewModelScope.launch {
+            gastoRepo.actualizarGastoFijo(id, desc, monto, peri)
+            actualizarPeriodo(currentStartDate, currentEndDate)
         }
     }
 
@@ -340,51 +666,68 @@ class ResumenOperativoViewModel(private val inventarioRepo: RepositoryInventario
 @Composable
 fun PantallaResumenOperativo(navController: NavController) {
     val context = LocalContext.current; val scope = rememberCoroutineScope()
+    val db = AppDatabase.getDatabase(context)
     val viewModel: ResumenOperativoViewModel = viewModel(factory = object : androidx.lifecycle.ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            val db = AppDatabase.getDatabase(context)
-            val repo = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
-            return ResumenOperativoViewModel(repo) as T
+            val repoInv = RepositoryInventario(FirebaseDataSource(), db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
+            val repoGasto = com.gruposanangel.delivery.data.RepositoryGasto(db.gastoDao())
+            val repoVenta = com.gruposanangel.delivery.VentaRepository(db.VentaDao(), db.productoDao())
+            return ResumenOperativoViewModel(repoInv, repoGasto, repoVenta) as T
         }
     })
     val uiState by viewModel.uiState.collectAsState()
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
 
-    var showDatePicker by remember { mutableStateOf(false) }; var showPurchaseDialog by remember { mutableStateOf(false) }
-    var isGeneratingPdf by remember { mutableStateOf(false) }; var processingMessage by remember { mutableStateOf("PROCESANDO REPORTE") }
-    var startDate by remember { mutableStateOf(Date()) }; var endDate by remember { mutableStateOf(Date()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showPurchaseDialog by remember { mutableStateOf(false) }
+    var showAddGastoDialog by remember { mutableStateOf(false) }
+    var showRentabilidad by remember { mutableStateOf(false) }
+    
+    var showEditSalaryDialog by remember { mutableStateOf<SellerEarnings?>(null) }
+    var showEditGastoDialog by remember { mutableStateOf<GastoEntity?>(null) }
+    
+    var isGeneratingPdf by remember { mutableStateOf(false) }
+    var processingMessage by remember { mutableStateOf("PROCESANDO REPORTE") }
+    
+    val hoyInicio = remember { Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0) }.time }
+    var startDate by remember { mutableStateOf(hoyInicio) }
+    var endDate by remember { mutableStateOf(Date()) }
 
-    if (showPurchaseDialog) {
-        var budgetInput by remember { mutableStateOf("45000") }
-        AlertDialog(onDismissRequest = { showPurchaseDialog = false }, title = { Text("Asistente de Compra Inteligente", fontWeight = FontWeight.Black) },
-            text = {
-                Column {
-                    Text("¿Cuánto deseas invertir en total?", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(16.dp))
-                    OutlinedTextField(value = budgetInput, onValueChange = { if (it.all { c -> c.isDigit() }) budgetInput = it }, label = { Text("Presupuesto de Inversión") }, prefix = { Text("$ ") }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Text("* El sistema comprará cajas completas priorizando los productos con menos días de stock.", fontSize = 10.sp, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    val pres = budgetInput.toDoubleOrNull() ?: 0.0; showPurchaseDialog = false
-                    scope.launch { processingMessage = "CALCULANDO PLAN DE COMPRA"; isGeneratingPdf = true
-                        try { val plan = viewModel.generarPlanCompra(pres)
-                            if (plan.isNotEmpty()) { val file = generarPdfSugerenciaCompra(context, plan, pres, viewModel.uiState.value.productos)
-                                abrirPdfResumen(context, file)
-                            } else Toast.makeText(context, "Presupuesto insuficiente", Toast.LENGTH_SHORT).show()
-                        } catch (e: Exception) { Toast.makeText(context, "Error al generar plan", Toast.LENGTH_SHORT).show() }
-                        finally { isGeneratingPdf = false; processingMessage = "PROCESANDO REPORTE" }
-                    }
-                }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) { Text("GENERAR PLAN", fontWeight = FontWeight.Bold) }
-            }, dismissButton = { TextButton(onClick = { showPurchaseDialog = false }) { Text("CANCELAR") } }
+    if (showAddGastoDialog) {
+        DialogoNuevoGastoFijo(
+            onDismiss = { showAddGastoDialog = false },
+            onConfirm = { desc, monto, peri, cat -> 
+                viewModel.agregarGastoFijo(desc, monto, peri, cat)
+                showAddGastoDialog = false
+            }
+        )
+    }
+
+    if (showEditSalaryDialog != null) {
+        DialogoEditarSueldo(
+            usuario = showEditSalaryDialog!!,
+            onDismiss = { showEditSalaryDialog = null },
+            onConfirm = { monto, peri ->
+                viewModel.actualizarSueldoUsuario(showEditSalaryDialog!!.uid, monto, peri)
+                showEditSalaryDialog = null
+            }
+        )
+    }
+
+    if (showEditGastoDialog != null) {
+        DialogoEditarGasto(
+            gasto = showEditGastoDialog!!,
+            onDismiss = { showEditGastoDialog = null },
+            onConfirm = { desc, monto, peri ->
+                viewModel.editarGastoFijo(showEditGastoDialog!!.id, desc, monto, peri)
+                showEditGastoDialog = null
+            }
         )
     }
 
     if (showDatePicker) {
         val dateRangePickerState = rememberDateRangePickerState(initialSelectedStartDateMillis = startDate.time, initialSelectedEndDateMillis = endDate.time)
-        val isDark = ThemeConfig.isActuallyDark
-        
-        DeliveryTheme(darkTheme = isDark) {
+        DeliveryTheme(darkTheme = ThemeConfig.isActuallyDark) {
             DatePickerDialog(
                 onDismissRequest = { showDatePicker = false }, 
                 confirmButton = {
@@ -395,86 +738,493 @@ fun PantallaResumenOperativo(navController: NavController) {
                             val sDate = Calendar.getInstance().apply { set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 0, 0, 0) }.time
                             val eDate = if (endMillis != null) { cal.timeInMillis = endMillis; Calendar.getInstance().apply { set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 23, 59, 59) }.time } else sDate
                             startDate = sDate; endDate = eDate; showDatePicker = false
-                            scope.launch { isGeneratingPdf = true
-                                try { val ventas = viewModel.obtenerVentasPeriodo(sDate, eDate)
-                                    if (ventas.isNotEmpty()) { val file = generarPdfVentasPeriodo(context, ventas, sDate, eDate); abrirPdfResumen(context, file)
-                                    } else Toast.makeText(context, "No hay ventas", Toast.LENGTH_SHORT).show()
-                                } catch (e: Exception) { } finally { isGeneratingPdf = false }
-                            }
+                            viewModel.actualizarPeriodo(sDate, eDate)
                         }
                     }) { Text("ACEPTAR", fontWeight = FontWeight.Bold, color = DelisaRed) }
                 }, 
-                dismissButton = { 
-                    TextButton(onClick = { showDatePicker = false }) { 
-                        Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant) 
-                    } 
-                },
-                colors = DatePickerDefaults.colors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+                dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("CANCELAR") } }
             ) {
-                DateRangePicker(
-                    state = dateRangePickerState,
-                    modifier = Modifier.height(500.dp),
-                    title = { Text("Seleccionar Periodo", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) },
-                    headline = { Text("Filtro de Reporte", modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.onSurface) },
-                    colors = DatePickerDefaults.colors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                        headlineContentColor = DelisaRed,
-                        selectedDayContainerColor = DelisaRed,
-                        selectedDayContentColor = Color.White,
-                        todayContentColor = DelisaRed,
-                        todayDateBorderColor = DelisaRed,
-                        dayInSelectionRangeContainerColor = DelisaRed.copy(alpha = 0.15f),
-                        dayInSelectionRangeContentColor = DelisaRed,
-                        navigationContentColor = MaterialTheme.colorScheme.onSurface,
-                        weekdayContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        subheadContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        yearContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        currentYearContentColor = DelisaRed,
-                        selectedYearContainerColor = DelisaRed,
-                        selectedYearContentColor = Color.White
-                    )
-                )
+                DateRangePicker(state = dateRangePickerState, modifier = Modifier.height(500.dp))
             }
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Scaffold(topBar = {
-            TopAppBar(title = { Text("RESUMEN OPERATIVO", fontWeight = FontWeight.Black, fontSize = 16.sp) }, navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) } }, actions = {
-                if (!uiState.isLoading) {
-                    IconButton(onClick = { showPurchaseDialog = true }) { Icon(Icons.Rounded.ShoppingCart, null, tint = DelisaBlue) }
-                    IconButton(onClick = { showDatePicker = true }) { Icon(Icons.Rounded.BarChart, null, tint = DelisaGreen) }
-                    IconButton(onClick = { scope.launch { isGeneratingPdf = true; try { val file = generarPdfInventarioGlobal(context, uiState.productos, uiState.stockGlobal); abrirPdfResumen(context, file) } finally { isGeneratingPdf = false } } }) { Icon(Icons.Rounded.PictureAsPdf, null, tint = DelisaRed) }
+    if (showPurchaseDialog) {
+        var budgetInput by remember { mutableStateOf("45000") }
+        AlertDialog(
+            onDismissRequest = { showPurchaseDialog = false }, 
+            title = { Text("Asistente de Compra Inteligente", fontWeight = FontWeight.Black) },
+            text = {
+                Column {
+                    Text("¿Cuánto deseas invertir en total?", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = budgetInput, 
+                        onValueChange = { if (it.all { c -> c.isDigit() }) budgetInput = it }, 
+                        label = { Text("Presupuesto de Inversión") }, 
+                        prefix = { Text("$ ") }, 
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), 
+                        singleLine = true, 
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("* El sistema comprará cajas completas priorizando los productos con menos días de stock.", fontSize = 10.sp, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
                 }
-            }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface))
-        }, containerColor = MaterialTheme.colorScheme.background) { padding ->
-            if (uiState.isLoading) { Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
-            } else {
-                val margins = uiState.productos.map { calcularMargen(it) }
-                val maxMargen = if (margins.isNotEmpty()) margins.maxOrNull() ?: 0.0 else 0.0
-                val minMargen = if (margins.isNotEmpty()) margins.minOrNull() ?: 0.0 else 0.0
-                LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    item { ResumenGeneralFinanzas(uiState.productos) }
-                    item { Text("Análisis de Rentabilidad", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 8.dp)) }
-                    items(uiState.productos.sortedByDescending { calcularMargen(it) }) { prod -> CardProductoFinanzas(prod, formatoMoneda, minMargen, maxMargen) }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val pres = budgetInput.toDoubleOrNull() ?: 0.0; showPurchaseDialog = false
+                    scope.launch { 
+                        processingMessage = "CALCULANDO PLAN DE COMPRA"; isGeneratingPdf = true
+                        try { 
+                            val plan = viewModel.generarPlanCompra(pres)
+                            if (plan.isNotEmpty()) { 
+                                val file = generarPdfSugerenciaCompra(context, plan, pres, uiState.productos)
+                                abrirPdfResumen(context, file)
+                            } else Toast.makeText(context, "Presupuesto insuficiente", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) { Toast.makeText(context, "Error al generar plan", Toast.LENGTH_SHORT).show() }
+                        finally { isGeneratingPdf = false; processingMessage = "PROCESANDO REPORTE" }
+                    }
+                }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) { Text("GENERAR PLAN", fontWeight = FontWeight.Bold) }
+            }, 
+            dismissButton = { TextButton(onClick = { showPurchaseDialog = false }) { Text("CANCELAR") } }
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { 
+                    Text(
+                        text = "RESUMEN FINANCIERO", 
+                        fontWeight = FontWeight.Black, 
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    ) 
+                },
+                navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) } },
+                actions = {
+                    if (!uiState.isLoading) {
+                        // 1. Asistente de Compra (Azul)
+                        IconButton(onClick = { showPurchaseDialog = true }) { 
+                            Icon(Icons.Default.ShoppingCart, null, tint = DelisaBlue) 
+                        }
+                        // 2. Reporte de Ventas (Verde)
+                        IconButton(onClick = { 
+                            scope.launch { 
+                                isGeneratingPdf = true
+                                try {
+                                    val ventas = viewModel.obtenerVentasPeriodo(startDate, endDate)
+                                    if (ventas.isNotEmpty()) {
+                                        val file = generarPdfVentasPeriodo(context, ventas, startDate, endDate)
+                                        abrirPdfResumen(context, file)
+                                    } else Toast.makeText(context, "No hay ventas en este periodo", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) { } finally { isGeneratingPdf = false }
+                            }
+                        }) { 
+                            Icon(Icons.Default.BarChart, null, tint = DelisaGreen) 
+                        }
+                        // 3. Inventario Global (Rojo)
+                        IconButton(onClick = { 
+                            scope.launch { 
+                                isGeneratingPdf = true
+                                try { 
+                                    val file = generarPdfInventarioGlobal(context, uiState.productos, uiState.stockGlobal)
+                                    abrirPdfResumen(context, file) 
+                                } finally { 
+                                    isGeneratingPdf = false 
+                                } 
+                            } 
+                        }) { 
+                            Icon(Icons.Default.PictureAsPdf, null, tint = DelisaRed) 
+                        }
+                        // 4. Filtro Calendario (Rojo)
+                        IconButton(onClick = { showDatePicker = true }) { 
+                            Icon(Icons.Default.DateRange, null, tint = DelisaRed) 
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+            )
+        },
+        containerColor = MaterialTheme.colorScheme.background
+    ) { padding ->
+        if (uiState.isLoading) {
+            Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item {
+                    TableroGananciasPremium(
+                        vBruta = uiState.ventaBruta,
+                        cMercancia = uiState.costoMercancia,
+                        nominaVentas = uiState.nominaVentas,
+                        nominaApoyo = uiState.nominaProduccion,
+                        gFijos = uiState.gastosFijosMonto,
+                        gVariables = uiState.gastosVariablesMonto,
+                        uNeta = uiState.utilidadNeta,
+                        formato = formatoMoneda
+                    )
+                }
+
+                // --- SECCIÓN NÓMINA ---
+                item {
+                    Text("NÓMINA Y PERSONAL", fontWeight = FontWeight.Black, fontSize = 14.sp, color = DelisaBlueDark, modifier = Modifier.padding(top = 8.dp))
+                }
+                
+                // Item automático de vendedores
+                item {
+                    ItemNominaAuto(
+                        vendedores = uiState.totalVendedoresActivos,
+                        base = uiState.configSueldoBase,
+                        comision = uiState.configComision,
+                        dias = uiState.diasPeriodo,
+                        formato = formatoMoneda
+                    )
+                }
+
+                // 🔥 LISTA DETALLADA DE VENDEDORES
+                items(uiState.nominaDetallada) { info ->
+                    ItemVendedorDetalleFinanzas(info, formatoMoneda, onEdit = {
+                        showEditSalaryDialog = info
+                    })
+                }
+
+                // --- SECCIÓN PRODUCCIÓN ---
+                item {
+                    Text("EQUIPO DE PRODUCCIÓN Y APOYO", fontWeight = FontWeight.Black, fontSize = 14.sp, color = WarningOrange, modifier = Modifier.padding(top = 16.dp))
+                }
+
+                items(uiState.nominaProduccionLista) { info ->
+                    ItemVendedorDetalleFinanzas(info, formatoMoneda, onEdit = {
+                        showEditSalaryDialog = info
+                    })
+                }
+
+                items(uiState.gastosFijos.filter { it.categoria == "NÓMINA" }) { gasto ->
+                    ItemGastoFijo(gasto, formatoMoneda, onEdit = { showEditGastoDialog = gasto }, onDelete = { viewModel.eliminarGastoFijo(gasto.id) })
+                }
+
+                // --- SECCIÓN GASTOS FIJOS ---
+                item {
+                    Row(Modifier.fillMaxWidth().padding(top = 12.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                        Text("GASTOS FIJOS (ESTABLECIMIENTO)", fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.Gray)
+                        TextButton(onClick = { showAddGastoDialog = true }) {
+                            Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+                            Text("AGREGAR FIJO")
+                        }
+                    }
+                }
+
+                items(uiState.gastosFijos.filter { it.categoria != "NÓMINA" }) { gasto ->
+                    ItemGastoFijo(gasto, formatoMoneda, onEdit = { showEditGastoDialog = gasto }, onDelete = { viewModel.eliminarGastoFijo(gasto.id) })
+                }
+
+                // --- SECCIÓN GASTOS VARIABLES (RUTA) ---
+                if (uiState.gastosVariables.isNotEmpty()) {
+                    item {
+                        Text("GASTOS DE OPERACIÓN (RUTA/VARIABLE)", fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
+                    }
+
+                    items(uiState.gastosVariables) { gasto ->
+                        ItemGastoVariable(gasto, formatoMoneda)
+                    }
+                }
+
+                item {
+                    Button(
+                        onClick = { showRentabilidad = !showRentabilidad },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(if (showRentabilidad) "OCULTAR RENTABILIDAD" else "VER RENTABILIDAD POR PRODUCTO", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+
+                if (showRentabilidad) {
+                    val margins = uiState.productos.map { calcularMargen(it) }
+                    val maxM = if (margins.isNotEmpty()) margins.maxOrNull() ?: 0.0 else 0.0
+                    val minM = if (margins.isNotEmpty()) margins.minOrNull() ?: 0.0 else 0.0
+                    items(uiState.productos.sortedByDescending { calcularMargen(it) }) { prod ->
+                        CardProductoFinanzas(prod, formatoMoneda, minM, maxM)
+                    }
                 }
             }
         }
+
         if (isGeneratingPdf) {
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable(enabled = false){}, contentAlignment = Alignment.Center) {
-                Card(modifier = Modifier.padding(32.dp), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(16.dp)) {
-                    Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        Box(contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(80.dp), DelisaRed, 6.dp, trackColor = DelisaRed.copy(0.1f)); Icon(Icons.Rounded.PictureAsPdf, null, tint = DelisaRed, modifier = Modifier.size(32.dp)) }
-                        Spacer(Modifier.height(24.dp)); Text(processingMessage, fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, letterSpacing = 1.sp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable(enabled = false) {}, 
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    modifier = Modifier.padding(32.dp), 
+                    shape = RoundedCornerShape(24.dp), 
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
+                    elevation = CardDefaults.cardElevation(16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp), 
+                        horizontalAlignment = Alignment.CenterHorizontally, 
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Box(contentAlignment = Alignment.Center) { 
+                            CircularProgressIndicator(Modifier.size(80.dp), DelisaRed, 6.dp, trackColor = DelisaRed.copy(0.1f))
+                            Icon(Icons.Rounded.PictureAsPdf, null, tint = DelisaRed, modifier = Modifier.size(32.dp)) 
+                        }
+                        Spacer(Modifier.height(24.dp))
+                        Text(processingMessage, fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, letterSpacing = 1.sp)
                         Text("Estamos analizando las ventas y\nconstruyendo tu documento...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+fun TableroGananciasPremium(vBruta: Double, cMercancia: Double, nominaVentas: Double, nominaApoyo: Double, gFijos: Double, gVariables: Double, uNeta: Double, formato: NumberFormat) {
+    val pctCosto = if (vBruta > 0) (cMercancia / vBruta) * 100 else 0.0
+    val pctNomVenta = if (vBruta > 0) (nominaVentas / vBruta) * 100 else 0.0
+    val pctNomProd = if (vBruta > 0) (nominaApoyo / vBruta) * 100 else 0.0
+    val pctGastosF = if (vBruta > 0) (gFijos / vBruta) * 100 else 0.0
+    val pctGastosV = if (vBruta > 0) (gVariables / vBruta) * 100 else 0.0
+    val pctUtilidad = if (vBruta > 0) (uNeta / vBruta) * 100 else 0.0
+
+    Card(
+        shape = RoundedCornerShape(28.dp), 
+        modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(28.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(24.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("UTILIDAD NETA REAL", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        if (vBruta > 0) {
+                            Text(" ${String.format(Locale.US, "%.1f", pctUtilidad)}%", color = if(uNeta >= 0) DelisaGreenDark else Color.Red, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+                    Text(formato.format(uNeta), color = if(uNeta >= 0) DelisaBlueDark else Color.Red, fontSize = 36.sp, fontWeight = FontWeight.Black)
+                }
+                Surface(
+                    color = if(uNeta >= 0) DelisaGreen.copy(0.1f) else Color.Red.copy(0.1f),
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        if(uNeta >= 0) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
+                        null, 
+                        tint = if(uNeta >= 0) DelisaGreenDark else Color.Red,
+                        modifier = Modifier.padding(12.dp).size(28.dp)
+                    )
+                }
+            }
+            
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+            Spacer(Modifier.height(24.dp))
+
+            // Cascada de Flujo (3 Filas de 2 items cada una para equilibrio visual)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MetricFlowItem("INGRESOS", formato.format(vBruta), DelisaGreenDark)
+                MetricFlowItem("COSTO PRODUCTO", "- ${formato.format(cMercancia)}", Color.Gray, pctCosto)
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MetricFlowItem("NOM. VENTAS", "- ${formato.format(nominaVentas)}", DelisaBlueDark, pctNomVenta)
+                MetricFlowItem("NOM. PRODUCCIÓN", "- ${formato.format(nominaApoyo)}", WarningOrange, pctNomProd)
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MetricFlowItem("GASTOS FIJOS", "- ${formato.format(gFijos)}", DelisaRed, pctGastosF)
+                MetricFlowItem("GASTOS RUTA", "- ${formato.format(gVariables)}", DelisaRed.copy(alpha = 0.6f), pctGastosV)
+            }
+        }
+    }
+}
+
+@Composable
+fun MetricFlowItem(label: String, value: String, color: Color, percentage: Double? = null) {
+    Column(Modifier.width(140.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Black)
+            if (percentage != null && percentage > 0) {
+                Text(" ${String.format(Locale.US, "%.1f", percentage)}%", color = color.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        Text(value, color = color, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+fun ItemNominaAuto(vendedores: Int, base: Double, comision: Double, dias: Int, formato: NumberFormat) {
+    Card(
+        Modifier.fillMaxWidth(), 
+        shape = RoundedCornerShape(16.dp), 
+        colors = CardDefaults.cardColors(containerColor = DelisaBlue.copy(alpha = 0.05f)),
+        border = BorderStroke(1.dp, DelisaBlue.copy(alpha = 0.1f))
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(Modifier.size(40.dp), shape = CircleShape, color = DelisaBlue.copy(0.1f)) {
+                Icon(Icons.Default.Group, null, tint = DelisaBlueDark, modifier = Modifier.padding(10.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("EQUIPO DE VENTAS ($vendedores)", fontWeight = FontWeight.Black, fontSize = 14.sp, color = DelisaBlueDark)
+                Text("Base $${base.toInt()} + ${comision.toInt()}% comision", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            // El valor total ya está incluido en el Dashboard superior, aquí solo mostramos la info de la regla
+            Icon(Icons.Default.AutoMode, null, tint = DelisaBlue.copy(0.3f), modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+fun ItemVendedorDetalleFinanzas(info: SellerEarnings, formato: NumberFormat, onEdit: () -> Unit) {
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp), 
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 🔥 Foto del Vendedor
+                AsyncImage(
+                    model = info.photoUrl,
+                    contentDescription = null,
+                    placeholder = painterResource(R.drawable.repartidor),
+                    error = painterResource(R.drawable.repartidor),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                )
+                
+                Spacer(Modifier.width(12.dp))
+                
+                Column(Modifier.weight(1f)) {
+                    Text(info.nombre.uppercase(), fontWeight = FontWeight.Black, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(info.puesto, fontSize = 9.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                }
+
+                IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Settings, null, tint = Color.LightGray, modifier = Modifier.size(16.dp))
+                }
+                
+                Spacer(Modifier.width(8.dp))
+                val colorMonto = if (info.totalVendido > 0) DelisaBlueDark else WarningOrange
+                Text(formato.format(info.totalGanado), fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = colorMonto)
+            }
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider(Modifier.padding(horizontal = 8.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.05f))
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("BASE (${info.periodicidad})", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                    Text(formato.format(info.montoOriginal), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                }
+                Box(Modifier.width(1.dp).height(20.dp).background(Color.LightGray.copy(0.3f)))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val baseDiaria = when(info.periodicidad) {
+                        "MENSUAL" -> info.montoOriginal / 24.0
+                        "QUINCENAL" -> info.montoOriginal / 12.0
+                        else -> info.montoOriginal
+                    }
+                    Text("BASE DIARIA (L-S)", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                    Text(formato.format(baseDiaria), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                }
+                if (info.comision > 0) {
+                    Box(Modifier.width(1.dp).height(20.dp).background(Color.LightGray.copy(0.3f)))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("COMISIÓN (3%)", fontSize = 7.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text(formato.format(info.comision), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ItemGastoFijo(gasto: com.gruposanangel.delivery.data.GastoEntity, formato: NumberFormat, onEdit: () -> Unit, onDelete: () -> Unit) {
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(gasto.periodicidad, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = DelisaRed)
+                Text(gasto.descripcion.lowercase(), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(formato.format(gasto.monto), fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+            
+            Spacer(Modifier.width(8.dp))
+            
+            IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Edit, null, tint = Color.LightGray.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+            }
+            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Delete, null, tint = DelisaRed.copy(alpha = 0.3f), modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun DialogoNuevoGastoFijo(onDismiss: () -> Unit, onConfirm: (String, Double, String, String) -> Unit) {
+    var desc by remember { mutableStateOf("") }
+    var monto by remember { mutableStateOf("") }
+    var peri by remember { mutableStateOf("MENSUAL") }
+    val options = listOf("MENSUAL", "QUINCENAL", "UNICO")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { 
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("NUEVO GASTO FIJO", fontWeight = FontWeight.Black) 
+            }
+        },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text("Descripción (ej: Renta Local)") }, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(value = monto, onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) monto = it }, label = { Text("Monto ($)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal))
+                Spacer(Modifier.height(16.dp))
+                
+                Text("PERIODICIDAD:", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color.Gray)
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), Arrangement.SpaceEvenly) {
+                    options.forEach { opt ->
+                        FilterChip(selected = peri == opt, onClick = { peri = opt }, label = { Text(opt, fontSize = 10.sp) })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                Button(
+                    onClick = { onConfirm(desc, monto.toDoubleOrNull() ?: 0.0, peri, "FIJO") }, 
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("GUARDAR REGISTRO")
+                }
+            }
+        },
+        dismissButton = {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                TextButton(onClick = onDismiss) { Text("CANCELAR", color = Color.Gray) }
+            }
+        }
+    )
 }
 
 @Composable
@@ -676,6 +1426,89 @@ fun generarPdfVentasPeriodo(context: Context, ventas: List<ProdVendidoReporte>, 
     } catch (e: Exception) { }
     pSubTitle.color = android.graphics.Color.GRAY; pSubTitle.textAlign = Paint.Align.RIGHT; canvas.drawText("DOCUMENTO GENERADO POR SISTEMA DE INTELIGENCIA COMERCIAL DELISA", pageWidth - 40f, footerY + 20f, pSubTitle); canvas.drawText("PROPIEDAD PRIVADA - GRUPO SAN ANGEL", pageWidth - 40f, footerY + 35f, pSubTitle)
     pdfDocument.finishPage(page); val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Ventas_Periodo_${System.currentTimeMillis()}.pdf"); pdfDocument.writeTo(FileOutputStream(file)); pdfDocument.close(); return file
+}
+
+@Composable
+fun DialogoEditarGasto(gasto: com.gruposanangel.delivery.data.GastoEntity, onDismiss: () -> Unit, onConfirm: (String, Double, String) -> Unit) {
+    var desc by remember { mutableStateOf(gasto.descripcion) }
+    var monto by remember { mutableStateOf(gasto.monto.toString()) }
+    var peri by remember { mutableStateOf(gasto.periodicidad) }
+    val options = listOf("MENSUAL", "QUINCENAL", "UNICO")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("EDITAR GASTO FIJO", fontWeight = FontWeight.Black) },
+        text = {
+            Column {
+                OutlinedTextField(value = desc, onValueChange = { desc = it }, label = { Text("Descripción") }, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(value = monto, onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) monto = it }, label = { Text("Monto ($)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal))
+                Spacer(Modifier.height(12.dp))
+                Text("Periodicidad:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
+                    options.forEach { opt ->
+                        FilterChip(selected = peri == opt, onClick = { peri = opt }, label = { Text(opt, fontSize = 10.sp) })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(desc, monto.toDoubleOrNull() ?: 0.0, peri) }, colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)) {
+                Text("GUARDAR CAMBIOS")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCELAR") } }
+    )
+}
+
+@Composable
+fun ItemGastoVariable(gasto: GastoEntity, formato: NumberFormat) {
+    Card(
+        Modifier.fillMaxWidth(), 
+        shape = RoundedCornerShape(16.dp), 
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(gasto.categoria.uppercase(), fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text("${gasto.descripcion.lowercase()} • ${gasto.vendedorNombre}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(formato.format(gasto.monto), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.Gray)
+        }
+    }
+}
+
+@Composable
+fun DialogoEditarSueldo(usuario: SellerEarnings, onDismiss: () -> Unit, onConfirm: (Double, String) -> Unit) {
+    var monto by remember { mutableStateOf("") }
+    var peri by remember { mutableStateOf(usuario.periodicidad) }
+    val options = listOf("DIARIO", "QUINCENAL", "MENSUAL")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("CONFIGURAR SUELDO", fontWeight = FontWeight.Black) },
+        text = {
+            Column {
+                Text(usuario.nombre.uppercase(), fontWeight = FontWeight.Bold, color = DelisaRed)
+                Text(usuario.puesto, fontSize = 10.sp, color = Color.Gray)
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(value = monto, onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) monto = it }, label = { Text("Monto Sueldo Base ($)") }, modifier = Modifier.fillMaxWidth(), keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal))
+                Spacer(Modifier.height(12.dp))
+                Text("Periodicidad:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
+                    options.forEach { opt ->
+                        FilterChip(selected = peri == opt, onClick = { peri = opt }, label = { Text(opt, fontSize = 10.sp) })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(monto.toDoubleOrNull() ?: 0.0, peri) }, colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)) {
+                Text("GUARDAR CAMBIOS")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCELAR") } }
+    )
 }
 
 fun generarPdfSugerenciaCompra(context: Context, plan: List<SugerenciaCompra>, presupuesto: Double, productosCatalogo: List<Map<String, Any>>): File {

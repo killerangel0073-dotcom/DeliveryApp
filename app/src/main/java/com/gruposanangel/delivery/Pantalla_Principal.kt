@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -125,6 +126,40 @@ fun Pantalla_Principal(
         }
     }
 
+    // 🔥 MODO DUAL PERSISTENTE (INCLUSO TRAS CERRAR LA APP)
+    val prefs = remember { context.getSharedPreferences("admin_prefs", android.content.Context.MODE_PRIVATE) }
+    var adminModoVendedor by remember { 
+        mutableStateOf(prefs.getBoolean("admin_modo_vendedor", false)) 
+    }
+    
+    // Guardar el estado permanentemente cada vez que cambie
+    LaunchedEffect(adminModoVendedor) {
+        prefs.edit().putBoolean("admin_modo_vendedor", adminModoVendedor).apply()
+    }
+
+    val tieneRutaAsignada = usuarioActual?.ultimoAlmacenNombre != null
+    
+    // 🎯 ROL EFECTIVO: Si el Admin activa modo Ruta, tratamos toda la sesión como Vendedor
+    val effectivelyAdmin = isAdmin && !adminModoVendedor
+
+    // 🔥 SINCRONIZACIÓN MAESTRA (90 DÍAS) POR RUTA
+    LaunchedEffect(usuarioActual?.uid, adminModoVendedor) {
+        val uid = usuarioActual?.uid ?: return@LaunchedEffect
+        val dbRoom = AppDatabase.getDatabase(context)
+        
+        val syncManager = SyncManager(
+            ventaRepository = VentaRepository(dbRoom.VentaDao(), dbRoom.productoDao()),
+            gastoRepository = com.gruposanangel.delivery.data.RepositoryGasto(dbRoom.gastoDao()),
+            clienteRepository = com.gruposanangel.delivery.data.RepositoryCliente(dbRoom.clienteDao()),
+            inventarioRepository = inventarioRepo,
+            context = context
+        )
+        
+        // Ejecutar descarga masiva de 90 días en segundo plano
+        // Se dispara al iniciar o al cambiar entre modo Admin/Ruta
+        syncManager.ejecutarSincronizacionMaestra(uid, effectivelyAdmin)
+    }
+
     Scaffold(
         bottomBar = {
             Column(modifier = Modifier.background(com.gruposanangel.delivery.ui.theme.DelisaRed)) {
@@ -146,6 +181,30 @@ fun Pantalla_Principal(
                 Spacer(Modifier.navigationBarsPadding())
             }
         },
+        floatingActionButton = {
+            // Solo mostrar si es Admin, tiene ruta y estamos en la pantalla de Inicio
+            if (isAdmin && tieneRutaAsignada && selectedScreen == Screen.Inicio) {
+                ExtendedFloatingActionButton(
+                    onClick = { adminModoVendedor = !adminModoVendedor },
+                    containerColor = if (adminModoVendedor) Color(0xFF1A1C1E) else com.gruposanangel.delivery.ui.theme.DelisaRed,
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = FloatingActionButtonDefaults.elevation(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (adminModoVendedor) Icons.Default.AdminPanelSettings else Icons.Default.AltRoute,
+                        contentDescription = null
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = if (adminModoVendedor) "ADMIN" else "RUTA",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+        },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Column(
@@ -159,20 +218,26 @@ fun Pantalla_Principal(
             if (mostrarHeader) {
                 ModernProfileHeader(
                     nombre = usuarioActual?.nombre ?: (if(isPreview) "Admin Test" else "Cargando..."),
-                    puesto = puestoActual.ifEmpty { "Cargando..." },
+                    puesto = if (isAdmin && tieneRutaAsignada && adminModoVendedor) "VENDEDOR (MODO RUTA)" else puestoActual.ifEmpty { "Cargando..." },
                     photoUrl = usuarioActual?.photoUrl ?: "",
                     enRuta = usuarioActual?.ultimoAlmacenNombre != null,
                     onLogout = onLogout,
                     onProfileClick = { navController.navigate("perfil_usuario") }
                 )
-                Spacer(Modifier.height(8.dp))
+                // 🔥 Eliminado Spacer de 8dp para subir todo el contenido
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
                 when (selectedScreen) {
                     Screen.Inicio -> {
                         when {
-                            isAdmin -> Pantalla_Dashboard_Admin(navController, impresoraBluetooth, onImpresoraSeleccionada)
+                            isAdmin -> {
+                                if (tieneRutaAsignada && adminModoVendedor) {
+                                    PantallaDashboardVendedor(navController, impresoraBluetooth, onImpresoraSeleccionada)
+                                } else {
+                                    Pantalla_Dashboard_Admin(navController, impresoraBluetooth, onImpresoraSeleccionada)
+                                }
+                            }
                             esVendedor -> PantallaDashboardVendedor(navController, impresoraBluetooth, onImpresoraSeleccionada)
                             esProduccion -> {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -187,7 +252,7 @@ fun Pantalla_Principal(
                         }
                     }
                     Screen.AlmacenGeneral, Screen.Inventario -> {
-                        PantallaInventario(navController, inventarioRepo)
+                        PantallaInventario(navController, inventarioRepo, effectivelyAdmin)
                     }
                     Screen.CargasVendedores -> {
                         MovimientosInventarioScreen(
@@ -200,14 +265,14 @@ fun Pantalla_Principal(
                     Screen.HistorialAlmacen -> {
                         PantallaHistorialCargas(navController = navController)
                     }
-                    Screen.Clientes -> repository?.let { PantallaClientes(navController, it, isAdmin) }
-                    Screen.Ruta -> PaginaVentaScreen(navController, ventaRepository)
+                    Screen.Clientes -> repository?.let { PantallaClientes(navController, it, effectivelyAdmin) }
+                    Screen.Ruta -> PaginaVentaScreen(navController, ventaRepository, effectivelyAdmin)
                     Screen.Mapa -> {
                         if (repository != null) {
                             val mapaVm: com.gruposanangel.delivery.ui.screens.MapaViewModel = viewModel(
                                 factory = com.gruposanangel.delivery.ui.screens.MapaViewModelFactory(repository)
                             )
-                            com.gruposanangel.delivery.ui.screens.MapaScreen(navController = navController, viewModel = mapaVm)
+                            com.gruposanangel.delivery.ui.screens.MapaScreen(navController = navController, viewModel = mapaVm, isAdminOverride = effectivelyAdmin)
                         } else {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(color = Color.Red)
@@ -230,15 +295,31 @@ fun ModernProfileHeader(
     val isDark = ThemeConfig.isActuallyDark
 
     Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).shadow(8.dp, RoundedCornerShape(24.dp)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp) // 🔥 Reducido de 8dp a 4dp
+            .shadow(6.dp, RoundedCornerShape(24.dp)), // 🔥 Sombra más ligera para ganar espacio visual
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { // 🔥 Padding interno reducido
             Box(contentAlignment = Alignment.BottomEnd, modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.clip(CircleShape).clickable(interactionSource = interactionSource, indication = null, onClick = onProfileClick)) {
                 Surface(modifier = Modifier.size(52.dp).border(2.dp, com.gruposanangel.delivery.ui.theme.DelisaRed.copy(0.1f), CircleShape), shape = CircleShape, color = MaterialTheme.colorScheme.background) {
-                    if (photoUrl.isNotEmpty()) AsyncImage(model = photoUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    else Image(painter = painterResource(R.drawable.repartidor), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    if (photoUrl.isNotEmpty()) {
+                        AsyncImage(
+                            model = coil.request.ImageRequest.Builder(LocalContext.current)
+                                .data(photoUrl)
+                                .crossfade(200)
+                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .build(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Image(painter = painterResource(R.drawable.repartidor), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    }
                 }
                 Box(Modifier.size(14.dp).background(MaterialTheme.colorScheme.surface, CircleShape).padding(2.dp)) {
                     Box(Modifier.fillMaxSize().background(if (enRuta) com.gruposanangel.delivery.ui.theme.DelisaGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), CircleShape))

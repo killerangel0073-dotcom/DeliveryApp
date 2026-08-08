@@ -105,11 +105,11 @@ fun MedidorDeMetaPremium(
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Card(
-            modifier = Modifier.fillMaxWidth(0.95f).wrapContentHeight().shadow(12.dp, RoundedCornerShape(28.dp), ambientColor = DelisaRed.copy(0.4f)),
-            shape = RoundedCornerShape(28.dp),
+            modifier = Modifier.fillMaxWidth(0.95f).wrapContentHeight().shadow(8.dp, RoundedCornerShape(24.dp), ambientColor = DelisaRed.copy(0.3f)),
+            shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface)
         ) {
-            Column(modifier = Modifier.background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark))).padding(18.dp)) {
+            Column(modifier = Modifier.background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark))).padding(12.dp)) { // 🔥 Padding reducido de 18 a 12
                 // HEADER
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -117,36 +117,36 @@ fun MedidorDeMetaPremium(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text("PROGRESO DEL DÍA", color = Color.White.copy(0.7f), fontSize = 14.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+                        Text("PROGRESO DEL DÍA", color = Color.White.copy(0.7f), fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp) // 🔥 Título más pequeño
                         Text(
                             currencyFormat.format(avance),
-                            color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Black,
+                            color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black, // 🔥 Monto reducido de 32 a 28
                             style = androidx.compose.ui.text.TextStyle(
-                                shadow = Shadow(color = Color.White.copy(alpha = glowAlpha), blurRadius = 15f)
+                                shadow = Shadow(color = Color.White.copy(alpha = glowAlpha), blurRadius = 10f)
                             )
                         )
                     }
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.scale(pulseScale)) {
-                        Canvas(modifier = Modifier.size(52.dp)) {
-                            drawArc(Color.White.copy(0.2f), 0f, 360f, false, style = Stroke(8f))
-                            drawArc(Color.White, -90f, 360f * animatedProgress.value, false, style = Stroke(8f, cap = StrokeCap.Round))
+                        Canvas(modifier = Modifier.size(46.dp)) { // 🔥 Círculo reducido de 52 a 46
+                            drawArc(Color.White.copy(0.2f), 0f, 360f, false, style = Stroke(6f))
+                            drawArc(Color.White, -90f, 360f * animatedProgress.value, false, style = Stroke(6f, cap = StrokeCap.Round))
                         }
-                        Text("${(porcentajeObjetivo * 100).toInt()}%", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                        Text("${(porcentajeObjetivo * 100).toInt()}%", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(10.dp)) // 🔥 Spacer reducido de 20 a 10
 
                 // BARRA DE PROGRESO
                 Column {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Box(modifier = Modifier.clickable { showMetaDialog = true }) {
-                            Text(currencyFormat.format(metaDelDia), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                            Text("META: ${currencyFormat.format(metaDelDia)}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
-                        Text("RESTA: ${currencyFormat.format(falta)}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                        Text("FALTA: ${currencyFormat.format(falta)}", color = Color.White.copy(0.9f), fontSize = 11.sp, fontWeight = FontWeight.Black)
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Box(modifier = Modifier.fillMaxWidth().height(22.dp).clip(CircleShape).background(Color.Black.copy(0.2f))) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(modifier = Modifier.fillMaxWidth().height(14.dp).clip(CircleShape).background(Color.Black.copy(0.2f))) { // 🔥 Altura reducida de 22 a 14
                         Box(
                             modifier = Modifier.fillMaxWidth(animatedProgress.value).fillMaxHeight().clip(CircleShape)
                                 .background(Brush.horizontalGradient(listOf(Color.White.copy(0.7f), Color.White, Color.White.copy(0.7f))))
@@ -163,21 +163,21 @@ fun MedidorDeMetaPremium(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp)) // 🔥 Spacer reducido de 16 a 12
 
                 // PANEL DE ESTADÍSTICAS
                 Row(
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Color.White.copy(0.12f)).padding(vertical = 16.dp),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White.copy(0.12f)).padding(vertical = 8.dp), // 🔥 Padding vertical reducido de 16 a 8
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(modifier = Modifier.weight(1f).clickable { showClientesDialog = true }) {
                         StatItem("CLIENTES", "$clientesVisitados/$totalClientes")
                     }
-                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color.White.copy(0.2f)))
+                    Box(modifier = Modifier.width(1.dp).height(20.dp).background(Color.White.copy(0.2f)))
                     Box(modifier = Modifier.weight(1f)) {
                         StatItem("TICKET PROM.", currencyFormat.format(ticketPromedio))
                     }
-                    Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color.White.copy(0.2f)))
+                    Box(modifier = Modifier.width(1.dp).height(20.dp).background(Color.White.copy(0.2f)))
                     Box(modifier = Modifier.weight(1f)) {
                         if (avance >= metaDelDia) StatItem("ESTADO", "LOGRADO", isSuccess = true)
                         else StatItem("OBJETIVO", currencyFormat.format(ticketNecesario), isWarning = true)
@@ -207,9 +207,9 @@ fun StatItem(label: String, value: String, isSuccess: Boolean = false, isWarning
         else -> Color.White
     }
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = Color.White.copy(0.8f), fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(value, color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, maxLines = 1)
+        Text(label, color = Color.White.copy(0.8f), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center) // 🔥 Fuente de 14 a 10
+        Spacer(modifier = Modifier.height(2.dp)) // 🔥 Spacer de 4 a 2
+        Text(value, color = textColor, fontSize = 13.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center, maxLines = 1) // 🔥 Fuente de 16 a 13
     }
 }
 

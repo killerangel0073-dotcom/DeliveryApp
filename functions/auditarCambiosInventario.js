@@ -1,12 +1,12 @@
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const admin = require('firebase-admin');
-const db = admin.firestore();
 
 /**
  * Cloud Function para Auditar cambios en el catálogo de inventario.
  * Detecta cambios en precios y stock realizados manualmente (fuera de ventas).
  */
 exports.auditarCambiosInventario = onDocumentUpdated('inventarioStock/{stockId}', async (event) => {
+    const db = admin.firestore();
     const dataAntes = event.data.before.data();
     const dataDespues = event.data.after.data();
     const stockId = event.params.stockId;

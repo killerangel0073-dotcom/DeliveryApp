@@ -6,7 +6,8 @@ import java.util.Date
 data class ProductoTicketDetalle(
     val nombre: String,
     val cantidad: Int,
-    val precio: Double
+    val precio: Double,
+    val categoria: String = "General"
 ) : Parcelable
 
 @Parcelize
@@ -22,5 +23,7 @@ data class TicketVentaCompleto(
     val fueraDeRango: Boolean = false,
     val fotoEvidenciaUrl: String? = null,
     val estado: String = "pagada",
-    val motivoCancelacion: String? = null
+    val motivoCancelacion: String? = null,
+    val motivoVisita: String? = null,
+    val origenDatos: String = "NUBE" // 🔥 Nuevo: "LOCAL" o "NUBE"
 ) : Parcelable

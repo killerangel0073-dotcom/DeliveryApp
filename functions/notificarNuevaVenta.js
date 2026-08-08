@@ -2,9 +2,8 @@ const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 
-const db = getFirestore();
-
 exports.notificarNuevaVenta = onDocumentCreated("ventas/{ventaId}", async (event) => {
+    const db = getFirestore();
     const ventaIdFirestore = event.params.ventaId;
     const nuevaVenta = event.data.data();
 

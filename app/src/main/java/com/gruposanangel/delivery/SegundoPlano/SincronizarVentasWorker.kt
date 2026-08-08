@@ -47,12 +47,25 @@ class SincronizarVentasWorker(
                 }
             }
 
-            // 🔥 2. Consulta Eficiente en Lote (Batch)
-            val pendientes = ventaRepo.obtenerVentasPendientes()
-            if (pendientes.isEmpty()) return Result.success()
+            // 🔥 2. Consulta Eficiente de Pendientes
+            val pendientes = db.VentaDao().obtenerVentasPendientes()
+            
+            // 🔥 2.1. También buscar ventas ya sincronizadas pero sin foto (Post-Sync)
+            val ventasSinFoto = db.VentaDao().obtenerVentasPorPeriodo(uidVendedor, System.currentTimeMillis() - 86400000, System.currentTimeMillis())
+                .filter { it.sincronizado && !it.fotoSincronizada && !it.fotoEvidenciaVisita.isNullOrEmpty() }
 
-            // 🔥 3. Subida en Ráfaga con Manejo de Intermitencia
+            if (pendientes.isEmpty() && ventasSinFoto.isEmpty()) return Result.success()
+
+            // 🔥 2.2. Procesar Actualización de Fotos Pendientes
+            for (v in ventasSinFoto) {
+                if (isStopped) return Result.retry()
+                val exito = ventaRepo.actualizarFotoEvidencia(v.id, v.firestoreId!!, v.fotoEvidenciaVisita!!)
+                if (exito) db.VentaDao().marcarFotoSincronizada(v.id)
+            }
+
+            // 🔥 3. Subida en Ráfaga de Ventas Nuevas
             for (venta in pendientes) {
+                // ... (resto del código igual)
                 // Detener si el Worker ha sido cancelado
                 if (isStopped) return Result.retry()
 
@@ -76,6 +89,8 @@ class SincronizarVentasWorker(
                 }
 
                 val (exitoServidor, mensaje) = try {
+                    // 🔥 SINCRONIZACIÓN INSTANTÁNEA (DATOS PRIMERO)
+                    // Ya no esperamos a la foto en este paso para que el reporte sea veloz.
                     ventaRepo.sincronizarConServidor(
                         ventaLocalId = venta.id,
                         clienteId = venta.clienteId,
@@ -85,15 +100,19 @@ class SincronizarVentasWorker(
                         vendedorId = venta.vendedorId,
                         vendedorNombre = nombreVendedor,
                         almacenVendedorId = almacenId,
-                        fotoEvidenciaLocal = venta.fotoEvidenciaVisita,
+                        rutaId = venta.rutaId,
+                        rutaNombre = venta.rutaNombre,
+                        fotoEvidenciaUrl = null, // La enviamos vacía inicialmente
                         fueraDeRango = venta.fueraDeRango,
                         latitudVenta = venta.latitudVenta,
                         longitudVenta = venta.longitudVenta,
-                        fecha = venta.fecha, // 🔥 Pasamos la hora original capturada
+                        fecha = venta.fecha,
                         motivoVisita = venta.motivoVisita
                     )
                 } catch (e: Exception) {
-                    Log.e("SyncWorker", "Error de red al sincronizar ticket ${venta.id}", e)
+                    val errorMsg = e.message ?: "Error de conexión"
+                    Log.e("SyncWorker", "Error de red al sincronizar ticket ${venta.id}: $errorMsg")
+                    db.VentaDao().registrarIntentoFallido(venta.id, errorMsg)
                     return Result.retry()
                 }
 
@@ -105,10 +124,21 @@ class SincronizarVentasWorker(
 
                     if (firestoreId.isNotEmpty()) {
                         ventaRepo.marcarVentaConFirestoreId(venta.id, firestoreId)
+                        
+                        // 🔥 INTENTO DE SUBIDA DE FOTO INMEDIATA (Post-Registro)
+                        if (!venta.fotoEvidenciaVisita.isNullOrEmpty()) {
+                            val exitoFoto = ventaRepo.actualizarFotoEvidencia(venta.id, firestoreId, venta.fotoEvidenciaVisita)
+                            if (exitoFoto) db.VentaDao().marcarFotoSincronizada(venta.id)
+                        } else {
+                            db.VentaDao().marcarFotoSincronizada(venta.id) // No hay foto que subir
+                        }
+
                         Log.d("SyncWorker", "Ticket ${venta.id} sincronizado OK")
                     }
                 } else {
                     Log.e("SyncWorker", "Servidor rechazó ticket ${venta.id}: $mensaje")
+                    // 🔥 Registramos el error del servidor para el "Semáforo"
+                    db.VentaDao().registrarIntentoFallido(venta.id, mensaje)
                 }
             }
 

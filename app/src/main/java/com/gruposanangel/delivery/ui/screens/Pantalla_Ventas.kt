@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -77,7 +78,8 @@ fun PantallaVentas(
     repository: RepositoryCliente? = null,
     inventarioRepo: RepositoryInventario? = null,
     impresoraBluetooth: BluetoothDevice? = null,
-    origen: String? = "Clientes"
+    origen: String? = "Clientes",
+    isAdminOverride: Boolean? = null
 ) {
     val context = LocalContext.current
     val isPreview = LocalInspectionMode.current
@@ -92,6 +94,14 @@ fun PantallaVentas(
             repoUsuario
         )
     )
+    
+    // 🔥 SINCRONIZAR CON EL MODO (ADMIN/RUTA)
+    LaunchedEffect(isAdminOverride) {
+        if (isAdminOverride != null) {
+            ventaViewModel.sobreescribirAdmin(isAdminOverride)
+        }
+    }
+
     val uiState by ventaViewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var cliente by remember { mutableStateOf<ClienteEntity?>(null) }
@@ -129,6 +139,8 @@ fun PantallaVentas(
             clienteNombre = cliente?.nombreNegocio ?: "Negocio", 
             clienteFotoUrl = cliente?.fotografiaUrl, 
             metodoPago = "Efectivo",
+            rutaId = cliente?.rutaId,
+            rutaNombre = cliente?.rutaId, // De momento usamos el ID como nombre si no tenemos el mapeo a la mano
             fotoEvidenciaUrl = fotoPath,
             motivoVisita = motivo
         ) { exito, msg, idDeVentaGenerado ->
@@ -244,7 +256,7 @@ fun PantallaVentas(
             onSeleccionarPerfil = { ventaViewModel.seleccionarPerfil(it) },
             onVerImagenFull = { showImageFull = true },
             onVerHistorial = { 
-                if (cliente != null) navController.navigate("historial_cliente/${cliente!!.id}") 
+                if (cliente != null) navController.navigate("historial_cliente/${cliente!!.id}?isAdminOverride=${isAdminOverride ?: true}")
             },
             snackbarHostState = snackbarHostState
         )
@@ -336,10 +348,27 @@ fun PantallaVentasContent(
     
     val listState = rememberLazyListState()
 
-    // 🔥 AUTO-SCROLL AL CAMBIAR DE PERFIL O BÚSQUEDA
-    LaunchedEffect(uiState.perfilSeleccionado) {
+    // 🔥 FIX DEFINITIVO: Estado local puro para el buscador.
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(uiState.searchQuery)) }
+    
+    // 🔥 AUTO-SCROLL INTELIGENTE: Al precargar, cambiar de perfil o limpiar búsqueda
+    var yaScrolledPrecarga by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uiState.perfilSeleccionado, uiState.searchQuery) {
         if (uiState.productosEnCarrito.isNotEmpty()) {
             listState.animateScrollToItem(0)
+        }
+    }
+
+    LaunchedEffect(uiState.cantidades) {
+        // Si detectamos que hay productos (por precarga) y aún no hemos hecho el scroll inicial
+        if (uiState.cantidades.isNotEmpty() && !yaScrolledPrecarga) {
+            listState.animateScrollToItem(0)
+            yaScrolledPrecarga = true
+        }
+        // Si el carrito se vacía, reseteamos el flag por si vuelve a haber una precarga (raro, pero posible)
+        if (uiState.cantidades.isEmpty()) {
+            yaScrolledPrecarga = false
         }
     }
 
@@ -380,7 +409,13 @@ fun PantallaVentasContent(
                         seleccionado = uiState.perfilSeleccionado,
                         onSeleccionar = onSeleccionarPerfil
                     )
-                    SearchBarVentas(query = uiState.searchQuery, onQueryChange = onSearchQueryChanged)
+                    SearchBarVentas(
+                        value = textFieldValue, 
+                        onValueChange = {
+                            textFieldValue = it
+                            onSearchQueryChanged(it.text)
+                        }
+                    )
                 }
 
                 if (!uiState.enRuta) {
@@ -551,7 +586,7 @@ fun ModernSalesHeader(cliente: ClienteEntity?, distanciaMetros: Float, estaEnRan
     ) {
         Row(
             modifier = Modifier
-                .padding(start = 8.dp, end = 16.dp, top = 12.dp, bottom = 8.dp) 
+                .padding(start = 8.dp, end = 16.dp, top = 12.dp, bottom = 8.dp)
                 .fillMaxWidth(), 
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -808,18 +843,18 @@ fun SeccionHeader(titulo: String, onAction: (() -> Unit)? = null) {
 }
 
 @Composable
-fun SearchBarVentas(query: String, onQueryChange: (String) -> Unit) {
+fun SearchBarVentas(value: TextFieldValue, onValueChange: (TextFieldValue) -> Unit) {
     OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
+        value = value,
+        onValueChange = onValueChange,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 8.dp), // 🔥 Pegado al componente superior
         placeholder = { Text("Buscar producto...", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
         leadingIcon = { Icon(Icons.Default.Search, null, tint = DelisaRed) },
         trailingIcon = {
-            if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }) {
+            if (value.text.isNotEmpty()) {
+                IconButton(onClick = { onValueChange(TextFieldValue("")) }) {
                     Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
