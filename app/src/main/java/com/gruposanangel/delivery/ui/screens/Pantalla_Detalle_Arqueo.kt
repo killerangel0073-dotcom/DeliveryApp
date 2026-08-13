@@ -83,7 +83,8 @@ fun PantallaDetalleArqueo(
                 TopAppBar(
                     title = { 
                         Column {
-                            Text("RESUMEN DE AUDITORÍA", fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                            val titulo = if (uiState.metodoAuditoria == "LIQUIDACION") "RESUMEN DE LIQUIDACIÓN" else "RESUMEN DE AUDITORÍA"
+                            Text(titulo, fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
                             val fechaLong = uiState.fecha
                             if (fechaLong != null) {
                                 Text(
@@ -152,22 +153,25 @@ fun PantallaDetalleArqueo(
                             }
                             Spacer(Modifier.width(16.dp))
                             Column {
+                                val etiqueta = when {
+                                    uiState.metodoAuditoria == "LIQUIDACION" -> "ESTADO FINAL (LIQUIDADO)"
+                                    totalDiferenciaDinero < 0 -> "DISCREPANCIA (FALTANTE)"
+                                    totalDiferenciaDinero > 0 -> "DISCREPANCIA (SOBRANTE)"
+                                    else -> "INVENTARIO CONCILIADO"
+                                }
                                 Text(
-                                    text = when {
-                                        totalDiferenciaDinero < 0 -> "DISCREPANCIA (FALTANTE)"
-                                        totalDiferenciaDinero > 0 -> "DISCREPANCIA (SOBRANTE)"
-                                        else -> "INVENTARIO CONCILIADO"
-                                    },
+                                    text = etiqueta,
                                     fontWeight = FontWeight.Black,
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = if (totalDiferenciaDinero == 0.0) "Inventario Cuadrado" 
+                                    text = if (totalDiferenciaDinero == 0.0 && uiState.metodoAuditoria != "LIQUIDACION") "Inventario Cuadrado" 
                                            else "${formatoMoneda.format(totalDiferenciaDinero)} ($totalDiferenciaPiezas piezas)",
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = when {
+                                        uiState.metodoAuditoria == "LIQUIDACION" -> Color.Black
                                         totalDiferenciaDinero < 0 -> DelisaRed
                                         totalDiferenciaDinero > 0 -> DelisaBlue
                                         else -> DelisaGreenDark

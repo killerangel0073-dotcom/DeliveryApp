@@ -157,7 +157,8 @@ class ClienteViewModel(
                 distanciaTexto = distTexto,
                 rutaId = dbItem.rutaId,
                 visitadoAnteriormente = idsVisitadosAnteriormente.contains(dbItem.id),
-                montoCompraPasada = mapaVentasPasadas[dbItem.id] ?: 0.0
+                montoCompraPasada = mapaVentasPasadas[dbItem.id] ?: 0.0,
+                valor = dbItem.valorCliente
             )
         }
 

@@ -2,6 +2,7 @@ package com.gruposanangel.delivery.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -70,7 +72,9 @@ data class Notificacion(
     val aceptada: Boolean = false,
     val estado: String = "PENDIENTE",
     val monto: Double = 0.0, // 🔥 NUEVO: Para ver el valor de la carga
-    val motivo: String? = null // 🔥 NUEVO: Para el motivo de cancelación
+    val motivo: String? = null, // 🔥 NUEVO: Para el motivo de cancelación
+    val esEmergencia: Boolean = false, // 🔥 NUEVO
+    val esLiquidacion: Boolean = false // 🔥 NUEVO
 )
 
 /**
@@ -307,8 +311,10 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
     
     val statusColor = when {
         esCancelada -> WarningOrange
-        esAceptada -> DelisaGreen
-        else -> DelisaRed
+        noti.esEmergencia -> DelisaRed
+        noti.esLiquidacion -> Color.Black
+        noti.esCarga -> DelisaBlue
+        else -> WarningOrange // Arqueo por defecto
     }
 
     Card(
@@ -321,8 +327,8 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
             }
             .shadow(if (isPressed) 2.dp else 4.dp, RoundedCornerShape(20.dp))
             .border(
-                width = if (esAceptada) 0.dp else 2.dp,
-                color = if (esAceptada) Color.Transparent else statusColor,
+                width = if (esAceptada && !noti.esEmergencia && !noti.esLiquidacion) 0.dp else 1.5.dp,
+                color = if (esAceptada && !noti.esEmergencia && !noti.esLiquidacion) Color.Transparent else statusColor.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(20.dp)
             )
             .clickable(
@@ -331,35 +337,40 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                 onClick = onClick
             ),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(
+            containerColor = if (noti.esLiquidacion) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surface
+        )
     ) {
         Box {
-            // Barra de acento lateral (Sutil)
+            // Barra de acento lateral
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .fillMaxHeight()
-                    .width(4.dp)
+                    .width(6.dp)
                     .background(statusColor)
             )
 
             Row(
                 modifier = Modifier
                     .padding(16.dp)
-                    .padding(start = 8.dp) // Espacio para la barra lateral
+                    .padding(start = 12.dp) 
                     .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Icono Circular Minimalista
+                // Icono Circular Dinámico
                 Box(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .background(statusColor.copy(alpha = 0.08f)),
+                        .background(statusColor.copy(alpha = 0.1f)),
                     contentAlignment = Alignment.Center
                 ) {
                     val icon = when {
                         esCancelada -> Icons.Default.Cancel
+                        noti.esEmergencia -> Icons.Default.FlashOn
+                        noti.esLiquidacion -> Icons.Default.Warehouse
+                        !noti.esCarga -> Icons.AutoMirrored.Filled.FactCheck
                         esAceptada -> Icons.Default.CheckCircle
                         else -> Icons.Default.Inventory
                     }
@@ -369,25 +380,11 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                 Spacer(Modifier.width(16.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = noti.titulo.uppercase(),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, letterSpacing = 1.sp),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f)
-                        )
-                        // Etiqueta de estado pequeña y limpia
-                        Text(
-                            text = when {
-                                esCancelada -> "ANULADA"
-                                esAceptada -> "RECIBIDA"
-                                else -> "PENDIENTE"
-                            },
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Black,
-                            color = statusColor
-                        )
-                    }
+                    Text(
+                        text = noti.titulo.uppercase(),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, letterSpacing = 1.sp),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
 
                     Spacer(Modifier.height(4.dp))
 
@@ -398,7 +395,7 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                             textDecoration = if (esCancelada) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
                         ),
                         color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
 
@@ -409,6 +406,39 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                             color = DelisaRed.copy(alpha = 0.7f),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    
+                    Spacer(Modifier.height(6.dp))
+
+                    // Etiqueta Unificada Estilo Historial
+                    val tagText = when {
+                        noti.esEmergencia -> "EMERGENCIA"
+                        noti.esLiquidacion -> "LIQUIDACIÓN"
+                        !noti.esCarga -> "ARQUEO"
+                        else -> "CARGA NORMAL"
+                    }
+                    val estadoVisible = if (noti.esLiquidacion) "COMPLETADA" else noti.estado
+                    
+                    // 🔥 Blindaje visual: Solo poner el punto si el estado no está en blanco
+                    val textoEtiqueta = if (estadoVisible.isNotBlank()) {
+                        "$tagText • $estadoVisible"
+                    } else {
+                        tagText
+                    }
+                    
+                    Surface(
+                        color = statusColor.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(0.5.dp, statusColor.copy(alpha = 0.15f))
+                    ) {
+                        Text(
+                            text = textoEtiqueta.uppercase(),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (esCancelada) Color.Gray else statusColor,
+                            letterSpacing = 0.5.sp
                         )
                     }
 

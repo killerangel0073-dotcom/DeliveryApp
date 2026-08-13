@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
@@ -29,6 +30,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -48,9 +52,15 @@ fun PantallaHistorialCargas(
     val context = LocalContext.current
     val db = com.gruposanangel.delivery.data.AppDatabase.getDatabase(context)
     val repoUsuario = com.gruposanangel.delivery.RepositoryUsuario(com.gruposanangel.delivery.data.FirebaseDataSource(), db.usuarioDao())
+    val repoInventario = com.gruposanangel.delivery.data.RepositoryInventario(
+        com.gruposanangel.delivery.data.FirebaseDataSource(),
+        db.productoDao(),
+        db.VentaDao(),
+        db.movimientoInventarioDao()
+    )
     
     val vm: HistorialCargasViewModel = viewModel(
-        factory = HistorialCargasViewModelFactory(repoUsuario)
+        factory = HistorialCargasViewModelFactory(repoUsuario, repoInventario)
     )
     val uiState by vm.uiState.collectAsState()
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
@@ -146,8 +156,8 @@ fun PantallaHistorialCargas(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("RUTA / DESTINO", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(uiState.filtroVendedor, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = DelisaRed, maxLines = 1)
+                            Text("RUTA / DESTINO", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            Text(uiState.filtroVendedor, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = DelisaRed, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Icon(Icons.Default.FilterList, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -200,49 +210,52 @@ fun PantallaHistorialCargas(
         if (listaActual.isNotEmpty() && !uiState.isLoading) {
             val listaFiltrada = if (tabIndex == 0) listaActual.filter { it.estado != "CANCELADA" } else listaActual
             
-            val totalMonto = if (tabIndex == 0) listaFiltrada.sumOf { it.montoTotal } else 0.0
+            val totalMonto = listaFiltrada.sumOf { it.montoTotal }
             val totalPiezas = if (tabIndex == 0) listaFiltrada.sumOf { it.totalPiezas } else listaActual.sumOf { it.totalPiezas }
             
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .shadow(12.dp, RoundedCornerShape(24.dp)),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface)
-            ) {
-                Box(
+            BoxWithConstraints(modifier = Modifier.padding(horizontal = 16.dp)) {
+                val constraints = this
+                val isSmallScreen = constraints.maxWidth < 360.dp
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark)))
-                        .padding(vertical = 20.dp, horizontal = 12.dp)
+                        .shadow(12.dp, RoundedCornerShape(24.dp)),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.onSurface)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark)))
+                            .padding(vertical = if (isSmallScreen) 16.dp else 20.dp, horizontal = 12.dp)
                     ) {
-                        // 1. IZQUIERDA: CANTIDAD DE EVENTOS
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(if (tabIndex == 0) "CARGAS" else "ARQUEOS", color = Color.White.copy(0.6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "${if (tabIndex == 0) listaFiltrada.size else listaActual.size}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                        }
-                        
-                        Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            // 1. IZQUIERDA: CANTIDAD DE EVENTOS
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                Text(if (tabIndex == 0) "CARGAS" else "ARQUEOS", color = Color.White.copy(0.6f), fontSize = if (isSmallScreen) 8.sp else 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text(text = "${if (tabIndex == 0) listaFiltrada.size else listaActual.size}", color = Color.White, fontSize = if (isSmallScreen) 18.sp else 20.sp, fontWeight = FontWeight.Black)
+                            }
+                            
+                            Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
 
-                        // 2. CENTRO: VALOR MONETARIO O PIEZAS NETAS
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1.5f)) {
-                            Text(if (tabIndex == 0) "TOTAL PERIODO" else "RESULTADO NETO", color = Color.White.copy(0.6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            val valorTexto = if (tabIndex == 0) formatoMoneda.format(totalMonto) else "$totalPiezas pzas"
-                            Text(text = valorTexto, color = if (totalPiezas < 0 && tabIndex == 1) Color.Yellow else Color.White, fontSize = if (tabIndex == 0) 24.sp else 22.sp, fontWeight = FontWeight.Black)
-                        }
-                        
-                        Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
+                            // 2. CENTRO: VALOR MONETARIO O DIFERENCIA
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1.5f)) {
+                                Text(if (tabIndex == 0) "TOTAL PERIODO" else "DIFERENCIA NETA", color = Color.White.copy(0.6f), fontSize = if (isSmallScreen) 8.sp else 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                val valorTexto = formatoMoneda.format(totalMonto)
+                                Text(text = valorTexto, color = if (totalMonto < 0 && tabIndex == 1) Color.Yellow else Color.White, fontSize = if (isSmallScreen) 20.sp else 22.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            
+                            Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
 
-                        // 3. DERECHA: TOTAL PIEZAS
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text("PIEZAS", color = Color.White.copy(0.6f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "${if (tabIndex == 0) totalPiezas else listaActual.sumOf { it.productos.size }}", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                            // 3. DERECHA: PRODUCTOS AUDITADOS
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                Text(if (tabIndex == 0) "PIEZAS" else "PRODS AUDIT.", color = Color.White.copy(0.6f), fontSize = if (isSmallScreen) 8.sp else 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text(text = "${if (tabIndex == 0) totalPiezas else listaActual.sumOf { it.productos.size }}", color = Color.White, fontSize = if (isSmallScreen) 18.sp else 20.sp, fontWeight = FontWeight.Black)
+                            }
                         }
                     }
                 }
@@ -274,7 +287,17 @@ fun PantallaHistorialCargas(
                             navController.navigate("LISTA PRODUCTOS?editOrderId=${item.id}")
                         },
                         onClick = {
-                            val objCarga = Plantila_carga(id = item.id, nombreCarga = if (tabIndex == 0) "Carga a ${item.destino}" else "Arqueo de ${item.destino}", aceptada = true, plantillaProductos = item.productos)
+                            val objCarga = Plantila_carga(
+                                id = item.id, 
+                                nombreCarga = when {
+                                    item.metodoAuditoria == "LIQUIDACION" -> "Liquidación de ${item.destino}"
+                                    tabIndex == 1 -> "Arqueo de ${item.destino}"
+                                    item.esEmergencia -> "Carga Emergencia"
+                                    else -> "Carga a ${item.destino}"
+                                }, 
+                                aceptada = true, 
+                                plantillaProductos = item.productos
+                            )
                             navController.currentBackStackEntry?.savedStateHandle?.set("carga", objCarga)
                             if (tabIndex == 1) {
                                 navController.navigate("DETALLE_ARQUEO")
@@ -441,11 +464,16 @@ fun ItemHistorialCarga(
     
     val esCancelada = carga.estado == "CANCELADA"
     val esPendiente = carga.estado == "PENDIENTE"
+    val esLiquidacion = carga.metodoAuditoria == "LIQUIDACION"
     
-    val statusColor = when (carga.estado) { 
-        "ACEPTADA", "ARQUEADO", "COMPLETADA" -> DelisaGreen
-        "PENDIENTE" -> WarningOrange
-        "CANCELADA" -> DelisaRed
+    val statusColor = when {
+        esCancelada -> WarningOrange
+        carga.esEmergencia -> DelisaRed
+        esLiquidacion -> Color.Black
+        carga.estado == "ACEPTADA" || carga.estado == "ARQUEADO" || carga.estado == "COMPLETADA" -> {
+            if (carga.origen.contains("AUDITORÍA")) WarningOrange else DelisaBlue
+        }
+        esPendiente -> WarningOrange
         else -> MaterialTheme.colorScheme.onSurfaceVariant 
     }
 
@@ -454,78 +482,167 @@ fun ItemHistorialCarga(
             .fillMaxWidth()
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .shadow(if (isPressed) 1.dp else 4.dp, RoundedCornerShape(24.dp))
+            .border(
+                width = 1.dp,
+                color = statusColor.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(24.dp)
+            )
             .clickable(
                 interactionSource = interactionSource, 
-                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = DelisaRed.copy(alpha = 0.1f)), 
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = statusColor.copy(alpha = 0.1f)), 
                 onClick = onClick
             ), 
         shape = RoundedCornerShape(24.dp), 
         colors = CardDefaults.cardColors(
-            containerColor = if (esCancelada) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+            containerColor = when {
+                esCancelada -> MaterialTheme.colorScheme.surfaceVariant
+                esLiquidacion -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
+                else -> MaterialTheme.colorScheme.surface
+            }
         )
     ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(52.dp).clip(CircleShape).background(statusColor.copy(0.08f)).border(0.5.dp, statusColor.copy(0.15f), CircleShape), contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = when(carga.estado) {
-                        "PENDIENTE" -> Icons.Default.Inventory
-                        "CANCELADA" -> Icons.Default.Cancel
-                        else -> Icons.Default.CheckCircle
-                    }, 
-                    contentDescription = null, 
-                    tint = statusColor, 
-                    modifier = Modifier.size(26.dp)
-                )
-            }
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = carga.destino, 
-                    fontWeight = FontWeight.Black, 
-                    fontSize = 15.sp, 
-                    color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
-                )
-                Text(text = carga.fechaFormateada, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(6.dp))
-                Surface(color = statusColor.copy(0.1f), shape = RoundedCornerShape(8.dp)) { 
-                    Text(text = carga.estado, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = statusColor) 
-                }
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = "${carga.totalPiezas} pzas", 
-                    fontWeight = FontWeight.Bold, 
-                    fontSize = 13.sp, 
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
-                )
-                if (carga.montoTotal > 0) {
-                    Text(
-                        text = formato.format(carga.montoTotal), 
-                        fontWeight = FontWeight.Black, 
-                        fontSize = 17.sp, 
-                        color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else DelisaRed,
-                        style = if (esCancelada) androidx.compose.ui.text.TextStyle(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else androidx.compose.ui.text.TextStyle.Default
+        Column {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.size(52.dp).clip(CircleShape).background(statusColor.copy(0.08f)).border(0.5.dp, statusColor.copy(0.15f), CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = when {
+                            carga.esEmergencia -> Icons.Default.FlashOn
+                            esCancelada -> Icons.Default.Cancel
+                            esLiquidacion -> Icons.Default.Warehouse
+                            carga.origen.contains("AUDITORÍA") -> Icons.AutoMirrored.Filled.FactCheck
+                            esPendiente -> Icons.Default.Inventory
+                            else -> Icons.Default.CheckCircle
+                        }, 
+                        contentDescription = null, 
+                        tint = statusColor, 
+                        modifier = Modifier.size(26.dp)
                     )
                 }
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = carga.destino, 
+                        fontWeight = FontWeight.Black, 
+                        fontSize = 16.sp, 
+                        color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = if (esCancelada) TextStyle(textDecoration = TextDecoration.LineThrough) else TextStyle.Default
+                    )
+                    Text(text = carga.fechaFormateada, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    // Etiqueta Unificada y Elegante
+                    val tagText = when {
+                        carga.esEmergencia -> "EMERGENCIA"
+                        esLiquidacion -> "LIQUIDACIÓN"
+                        carga.origen.contains("AUDITORÍA") -> "ARQUEO"
+                        else -> "CARGA NORMAL"
+                    }
+                    val estadoVisible = if (esLiquidacion) "COMPLETADA" else carga.estado
+                    
+                    // 🔥 Blindaje visual: Solo poner el punto si el estado no está en blanco
+                    val textoEtiqueta = if (estadoVisible.isNotBlank()) {
+                        "$tagText • $estadoVisible"
+                    } else {
+                        tagText
+                    }
+                    
+                    Surface(
+                        color = statusColor.copy(alpha = 0.08f), 
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(0.5.dp, statusColor.copy(alpha = 0.15f))
+                    ) { 
+                        Text(
+                            text = textoEtiqueta.uppercase(), 
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp), 
+                            fontSize = 9.sp, 
+                            fontWeight = FontWeight.Black, 
+                            color = if (esCancelada) Color.Gray else statusColor, 
+                            maxLines = 1,
+                            letterSpacing = 0.5.sp
+                        ) 
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Column(horizontalAlignment = Alignment.End, modifier = Modifier.widthIn(min = 60.dp)) {
+                    Text(
+                        text = "${carga.productos.size} prods", 
+                        fontWeight = FontWeight.Bold, 
+                        fontSize = 12.sp, 
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        style = if (esCancelada) TextStyle(textDecoration = TextDecoration.LineThrough) else TextStyle.Default
+                    )
+                    if (carga.montoTotal != 0.0 || !carga.origen.contains("AUDITORÍA")) {
+                        Text(
+                            text = formato.format(carga.montoTotal), 
+                            fontWeight = FontWeight.Black, 
+                            fontSize = 16.sp, 
+                            color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else if (carga.montoTotal < 0) DelisaRed else DelisaGreen,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = if (esCancelada) TextStyle(textDecoration = TextDecoration.LineThrough) else TextStyle.Default
+                        )
+                    }
+                }
+
+                Icon(
+                    imageVector = Icons.Default.ChevronRight, 
+                    contentDescription = null, 
+                    tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), 
+                    modifier = Modifier.padding(start = 12.dp).size(20.dp)
+                )
             }
 
             if (esPendiente) {
-                Row {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     if (puedeEditar) {
-                        IconButton(onClick = onEdit) {
-                            Icon(Icons.Default.Edit, "Editar", tint = DelisaBlue)
+                        TextButton(
+                            onClick = onEdit,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = DelisaBlue.copy(alpha = 0.08f), 
+                                contentColor = DelisaBlue
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("MODIFICAR", fontSize = 11.sp, fontWeight = FontWeight.Black)
                         }
                     }
+                    if (esAdmin && puedeEditar) {
+                        Spacer(Modifier.width(16.dp))
+                    }
                     if (esAdmin) {
-                        IconButton(onClick = onCancel) {
-                            Icon(Icons.Default.DeleteForever, null, tint = DelisaRed)
+                        TextButton(
+                            onClick = onCancel,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = DelisaRed.copy(alpha = 0.08f), 
+                                contentColor = DelisaRed
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.DeleteForever, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("ANULAR", fontSize = 11.sp, fontWeight = FontWeight.Black)
                         }
                     }
                 }
-            } else {
-                Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), modifier = Modifier.padding(start = 12.dp).size(20.dp))
             }
         }
     }

@@ -44,6 +44,7 @@ import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.VentaEntity
 import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.data.PerfilVenta
+import com.gruposanangel.delivery.ui.components.delisaGlowBorder
 import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.PantallaSeleccionImpresora
 import java.text.NumberFormat
@@ -100,6 +101,43 @@ fun DashboardSkeleton() {
         Box(Modifier.width(180.dp).height(24.dp).clip(RoundedCornerShape(4.dp)).background(brush))
         Box(Modifier.fillMaxWidth().height(140.dp).clip(RoundedCornerShape(20.dp)).background(brush))
         Box(Modifier.fillMaxWidth().height(140.dp).clip(RoundedCornerShape(20.dp)).background(brush))
+    }
+}
+
+@Composable
+fun VendedorSkeleton() {
+    val brush = shimmerBrush()
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(20.dp)),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(brush))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Box(Modifier.width(120.dp).height(18.dp).clip(RoundedCornerShape(4.dp)).background(brush))
+                    Spacer(Modifier.height(6.dp))
+                    Box(Modifier.width(80.dp).height(10.dp).clip(RoundedCornerShape(2.dp)).background(brush))
+                }
+                Box(Modifier.width(80.dp).height(24.dp).clip(RoundedCornerShape(6.dp)).background(brush))
+            }
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.05f))
+            Spacer(Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                repeat(3) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.width(40.dp).height(10.dp).clip(RoundedCornerShape(2.dp)).background(brush))
+                        Spacer(Modifier.height(6.dp))
+                        Box(Modifier.width(50.dp).height(16.dp).clip(RoundedCornerShape(4.dp)).background(brush))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -307,11 +345,14 @@ fun DashboardContent(
                             onDateRangeSelected(sDate, eDate)
                         }
                         showDatePicker = false
-                    }) { Text("ACEPTAR", fontWeight = FontWeight.Bold, color = DelisaRed) }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("ACEPTAR", fontWeight = FontWeight.Black, color = Color.White) }
                 },
                 dismissButton = {
                     TextButton(onClick = { showDatePicker = false }) {
-                        Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                     }
                 },
                 colors = DatePickerDefaults.colors(containerColor = MaterialTheme.colorScheme.surface)
@@ -526,90 +567,121 @@ fun DashboardContent(
     }
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (uiState.isLoading) {
-            Box(Modifier.fillMaxSize().padding(16.dp)) { DashboardSkeleton() }
-        } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp), 
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 🔥 FECHA FLEXIBLE: El weight(1f) asegura que no empuje a los iconos
+            Text(
+                text = textoFecha, 
+                style = MaterialTheme.typography.labelMedium, 
+                fontWeight = FontWeight.Black, 
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp), 
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp) // Espaciado controlado
             ) {
-                // 🔥 FECHA FLEXIBLE: El weight(1f) asegura que no empuje a los iconos
-                Text(
-                    text = textoFecha, 
-                    style = MaterialTheme.typography.labelMedium, 
-                    fontWeight = FontWeight.Black, 
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
+                var showMaintMenu by remember { mutableStateOf(false) }
                 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp) // Espaciado controlado
-                ) {
-                    var showMaintMenu by remember { mutableStateOf(false) }
-                    
-                    // 🚀 BOTÓN DE MANTENIMIENTO (SANEAMIENTO)
-                    Box {
-                        IconButton(onClick = { showMaintMenu = true }, modifier = Modifier.size(32.dp)) {
-                            Icon(imageVector = Icons.Default.Build, contentDescription = "Mantenimiento", tint = Color(0xFF9C27B0), modifier = Modifier.size(22.dp))
-                        }
-                        DropdownMenu(expanded = showMaintMenu, onDismissRequest = { showMaintMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Sanear por Almacén", fontWeight = FontWeight.Bold) },
-                                leadingIcon = { Icon(Icons.Default.Warehouse, null, tint = DelisaRed) },
-                                onClick = { showMaintMenu = false; onSanearAlmacen() }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Sanear por Cliente", fontWeight = FontWeight.Bold) },
-                                leadingIcon = { Icon(Icons.Default.PersonSearch, null, tint = DelisaRed) },
-                                onClick = { showMaintMenu = false; onSanearCliente() }
-                            )
-                        }
+                // 🚀 BOTÓN DE MANTENIMIENTO (SANEAMIENTO)
+                Box {
+                    IconButton(onClick = { showMaintMenu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(imageVector = Icons.Default.Build, contentDescription = "Mantenimiento", tint = Color(0xFF9C27B0), modifier = Modifier.size(22.dp))
                     }
-
-                    Spacer(Modifier.width(12.dp))
-
-                    IconButton(onClick = { showRankingDialog = true }, modifier = Modifier.size(34.dp)) { Icon(imageVector = Icons.Default.Stars, contentDescription = "Configurar Ranking", tint = WarningOrange, modifier = Modifier.size(20.dp)) }
-                    IconButton(onClick = { showFinanceDialog = true }, modifier = Modifier.size(34.dp)) { Icon(imageVector = Icons.Default.AccountBalanceWallet, contentDescription = "Configurar Pagos", tint = DelisaGreen, modifier = Modifier.size(20.dp)) }
-                    IconButton(onClick = { showSpeedDialog = true }, modifier = Modifier.size(34.dp)) { Icon(imageVector = Icons.Default.Speed, contentDescription = "Configurar Velocidad", tint = DelisaRed, modifier = Modifier.size(20.dp)) }
-                    IconButton(onClick = {
-                        val hasPermission = bluetoothPermissions.all { androidx.core.content.ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
-                        if (hasPermission) { pairedDevices = bluetoothAdapter?.bondedDevices?.toList() ?: emptyList(); showPrinterDialog = true } else { bluetoothLauncher.launch(bluetoothPermissions) }
-                    }, modifier = Modifier.size(34.dp)) { Icon(imageVector = Icons.Default.Print, contentDescription = "Impresora", tint = if (impresoraBluetooth != null) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp)) }
-                    IconButton(onClick = { showDatePicker = true }, modifier = Modifier.size(34.dp)) { Icon(Icons.Default.CalendarToday, contentDescription = "Fecha", tint = DelisaRed, modifier = Modifier.size(18.dp)) }
-                }
-            }
-
-            if (showPrinterDialog) {
-                PantallaSeleccionImpresora(pairedDevices = pairedDevices, onImpresoraSeleccionada = { onImpresoraSeleccionada(it); showPrinterDialog = false }, onCancelar = { showPrinterDialog = false })
-            }
-
-            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp, start = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                item { ResumenTotalCard(total = uiState.totalVentasDia, tickets = uiState.totalTicketsDia, promedio = uiState.ticketPromedioGlobal, formato = formatoMoneda, onClick = { onAnalyticsClick(startDate.time, endDate.time) }) }
-                item {
-                    LazyRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        item { AccionCard("Productos", Icons.Default.Inventory, Color(0xFF00AAFF), Modifier.width(100.dp)) { onNavigate("PRODUCTOS") } }
-                        item { AccionCard("Finanzas", Icons.Default.AccountBalanceWallet, Color(0xFF4CAF50), Modifier.width(100.dp)) { showPasswordDialog = true } }
-                        item { AccionCard("Cargas", Icons.Default.Category, Color(0xFF607D8B), Modifier.width(100.dp)) { onNavigate("LISTA PRODUCTOS") } }
-                        item { AccionCard("Arqueo", Icons.Default.Analytics, Color(0xFFE91E63), Modifier.width(100.dp)) { onNavigate("PANTALLA_ARQUEO") } }
-                        item { AccionCard("Rutas", Icons.AutoMirrored.Filled.AltRoute, Color(0xFFFF9800), Modifier.width(100.dp)) { onNavigate("ADMIN_RUTAS") } }
-                        item { AccionCard("Usuarios", Icons.Default.People, Color(0xFF9C27B0), Modifier.width(100.dp)) { onNavigate("ADMIN_USUARIOS") } }
-                        item { AccionCard("Almacenes", Icons.Default.Warehouse, Color(0xFFFF5722), Modifier.width(100.dp)) { onNavigate("ADMIN_ALMACENES") } }
-                        item { AccionCard("Auditorías", Icons.Default.FactCheck, Color(0xFF607D8B), Modifier.width(100.dp)) { onNavigate("HISTORIAL_CARGAS") } }
+                    DropdownMenu(expanded = showMaintMenu, onDismissRequest = { showMaintMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Sanear por Almacén", fontWeight = FontWeight.Bold) },
+                            leadingIcon = { Icon(Icons.Default.Warehouse, null, tint = DelisaRed) },
+                            onClick = { showMaintMenu = false; onSanearAlmacen() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Sanear por Cliente", fontWeight = FontWeight.Bold) },
+                            leadingIcon = { Icon(Icons.Default.PersonSearch, null, tint = DelisaRed) },
+                            onClick = { showMaintMenu = false; onSanearCliente() }
+                        )
                     }
                 }
-                item { Text("Desempeño por Ruta", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 8.dp)) }
+
+                Spacer(Modifier.width(12.dp))
+
+                IconButton(onClick = { showRankingDialog = true }, modifier = Modifier.size(34.dp)) { Icon(imageVector = Icons.Default.Stars, contentDescription = "Configurar Ranking", tint = WarningOrange, modifier = Modifier.size(20.dp)) }
+                IconButton(onClick = { showFinanceDialog = true }, modifier = Modifier.size(34.dp)) { Icon(imageVector = Icons.Default.AccountBalanceWallet, contentDescription = "Configurar Pagos", tint = DelisaGreen, modifier = Modifier.size(20.dp)) }
+                IconButton(onClick = { showSpeedDialog = true }, modifier = Modifier.size(34.dp)) { Icon(imageVector = Icons.Default.Speed, contentDescription = "Configurar Velocidad", tint = DelisaRed, modifier = Modifier.size(20.dp)) }
+                IconButton(onClick = {
+                    val hasPermission = bluetoothPermissions.all { androidx.core.content.ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED }
+                    if (hasPermission) { pairedDevices = bluetoothAdapter?.bondedDevices?.toList() ?: emptyList(); showPrinterDialog = true } else { bluetoothLauncher.launch(bluetoothPermissions) }
+                }, modifier = Modifier.size(34.dp)) { Icon(imageVector = Icons.Default.Print, contentDescription = "Impresora", tint = if (impresoraBluetooth != null) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp)) }
+                IconButton(onClick = { showDatePicker = true }, modifier = Modifier.size(34.dp)) { Icon(Icons.Default.CalendarToday, contentDescription = "Fecha", tint = DelisaRed, modifier = Modifier.size(18.dp)) }
+            }
+        }
+
+        if (showPrinterDialog) {
+            PantallaSeleccionImpresora(pairedDevices = pairedDevices, onImpresoraSeleccionada = { onImpresoraSeleccionada(it); showPrinterDialog = false }, onCancelar = { showPrinterDialog = false })
+        }
+
+        LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp, start = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            item { 
+                ResumenTotalCard(
+                    total = uiState.totalVentasDia, 
+                    tickets = uiState.totalTicketsDia, 
+                    promedio = uiState.ticketPromedioGlobal, 
+                    formato = formatoMoneda, 
+                    onClick = { onAnalyticsClick(startDate.time, endDate.time) },
+                    modifier = Modifier.delisaGlowBorder(uiState.isLoading, shape = RoundedCornerShape(24.dp))
+                ) 
+            }
+            item {
+                LazyRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    item { AccionCard("Productos", Icons.Default.Inventory, Color(0xFF00AAFF), Modifier.width(100.dp)) { onNavigate("PRODUCTOS") } }
+                    item { AccionCard("Finanzas", Icons.Default.AccountBalanceWallet, Color(0xFF4CAF50), Modifier.width(100.dp)) { showPasswordDialog = true } }
+                    item { AccionCard("Cargas", Icons.Default.Category, Color(0xFF607D8B), Modifier.width(100.dp)) { onNavigate("LISTA PRODUCTOS") } }
+                    item { AccionCard("Arqueo", Icons.Default.Analytics, Color(0xFFE91E63), Modifier.width(100.dp)) { onNavigate("PANTALLA_ARQUEO") } }
+                    item { AccionCard("Rutas", Icons.AutoMirrored.Filled.AltRoute, Color(0xFFFF9800), Modifier.width(100.dp)) { onNavigate("ADMIN_RUTAS") } }
+                    item { AccionCard("Usuarios", Icons.Default.People, Color(0xFF9C27B0), Modifier.width(100.dp)) { onNavigate("ADMIN_USUARIOS") } }
+                    item { AccionCard("Almacenes", Icons.Default.Warehouse, Color(0xFFFF5722), Modifier.width(100.dp)) { onNavigate("ADMIN_ALMACENES") } }
+                    item { AccionCard("Auditorías", Icons.Default.FactCheck, Color(0xFF607D8B), Modifier.width(100.dp)) { onNavigate("HISTORIAL_CARGAS") } }
+                }
+            }
+            item { Text("Desempeño por Ruta", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 8.dp)) }
+            
+            if (uiState.isLoading && uiState.resumenVendedores.isEmpty()) {
+                // 🔥 SKELETONS MIENTRAS CARGA (Para que no se vea vacío)
+                items(3) { VendedorSkeleton() }
+            } else {
                 items(uiState.resumenVendedores, key = { it.uid }) { seller ->
-                    VendedorCard(seller = seller, formato = formatoMoneda, onClick = { sellerSeleccionado = seller; showSheet = true }, onPhotoClick = { uid -> onNavigate("REPORTE_SEMANAL?userId=$uid") })
+                    VendedorCard(
+                        seller = seller, 
+                        formato = formatoMoneda, 
+                        onClick = { sellerSeleccionado = seller; showSheet = true }, 
+                        onPhotoClick = { uid -> onNavigate("REPORTE_SEMANAL?userId=$uid") },
+                        modifier = Modifier.delisaGlowBorder(uiState.isLoading, shape = RoundedCornerShape(20.dp))
+                    )
                 }
-                if (uiState.resumenVendedores.isEmpty()) { item { Text("No se encontraron rutas activas con transacciones.", color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp)) } }
-                item { Text("Últimas Ventas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) }
-                if (uiState.todasLasVentasHoy.isEmpty()) { item { Text("No hay transacciones registradas hoy.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp)) } }
-                items(uiState.todasLasVentasHoy.sortedByDescending { it.fecha }) { venta -> CardVentaAdmin(venta, formatoMoneda, formatoFecha) { onNavigate("detalle_venta_admin/${venta.id}") } }
+                if (uiState.resumenVendedores.isEmpty()) { 
+                    item { Text("No se encontraron rutas activas con transacciones.", color = Color.Gray, modifier = Modifier.padding(vertical = 12.dp)) } 
+                }
+            }
+            item { Text("Últimas Ventas", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) }
+            
+            if (uiState.isLoading && uiState.todasLasVentasHoy.isEmpty()) {
+                items(3) {
+                    val brush = shimmerBrush()
+                    Box(Modifier.fillMaxWidth().height(60.dp).clip(RoundedCornerShape(12.dp)).background(brush))
+                }
+            } else {
+                if (uiState.todasLasVentasHoy.isEmpty()) { 
+                    item { Text("No hay transacciones registradas hoy.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp)) } 
+                }
+                items(uiState.todasLasVentasHoy.sortedByDescending { it.fecha }) { venta -> 
+                    CardVentaAdmin(venta, formatoMoneda, formatoFecha) { onNavigate("detalle_venta_admin/${venta.id}") } 
+                }
             }
         }
     }
@@ -626,11 +698,11 @@ fun AccionCard(titulo: String, icon: ImageVector, color: Color, modifier: Modifi
 }
 
 @Composable
-fun ResumenTotalCard(total: Double, tickets: Int, promedio: Double, formato: NumberFormat, onClick: () -> Unit) {
+fun ResumenTotalCard(total: Double, tickets: Int, promedio: Double, formato: NumberFormat, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(targetValue = if (isPressed) 0.97f else 1f, animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow), label = "totalCardScale")
-    Card(modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }.shadow(8.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).clickable(interactionSource = interactionSource, indication = rememberRipple(bounded = true, color = Color.White), onClick = onClick), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = DelisaRed)) {
+    Card(modifier = modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }.shadow(8.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).clickable(interactionSource = interactionSource, indication = rememberRipple(bounded = true, color = Color.White), onClick = onClick), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = DelisaRed)) {
         Box(modifier = Modifier.fillMaxWidth().background(Brush.verticalGradient(colors = listOf(DelisaRed, DelisaRedDark))).padding(24.dp)) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.TrendingUp, null, tint = Color.White, modifier = Modifier.size(32.dp)); Text("VENTA TOTAL DEL DÍA", color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp, fontWeight = FontWeight.Bold); Text(formato.format(total), color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Black); Spacer(Modifier.height(16.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
@@ -644,11 +716,11 @@ fun ResumenTotalCard(total: Double, tickets: Int, promedio: Double, formato: Num
 }
 
 @Composable
-fun VendedorCard(seller: SellerSummary, formato: NumberFormat, onClick: () -> Unit, onPhotoClick: (String) -> Unit) {
+fun VendedorCard(seller: SellerSummary, formato: NumberFormat, onClick: () -> Unit, onPhotoClick: (String) -> Unit, modifier: Modifier = Modifier) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(targetValue = if (isPressed) 0.98f else 1f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy), label = "vendedorCardScale")
-    Card(modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }.shadow(4.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp)).clickable(interactionSource = interactionSource, indication = rememberRipple(bounded = true, color = DelisaRed.copy(alpha = 0.1f)), onClick = onClick), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    Card(modifier = modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }.shadow(4.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp)).clickable(interactionSource = interactionSource, indication = rememberRipple(bounded = true, color = DelisaRed.copy(alpha = 0.1f)), onClick = onClick), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val photoInteractionSource = remember { MutableInteractionSource() }

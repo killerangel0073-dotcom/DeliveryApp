@@ -15,6 +15,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -244,6 +245,7 @@ fun PantallaVentas(
             onRestar = { p -> 
                 if (p.cantidad > 0) ventaViewModel.actualizarCantidad(p.id, p.cantidad - 1) 
             },
+            onToggleConsolidado = { ventaViewModel.toggleModoConsolidado() },
             onLimpiarCarrito = { ventaViewModel.limpiarCarrito() },
             onFinalizar = { motivo ->
                 if (uiState.requiereFotoEvidencia) {
@@ -334,6 +336,7 @@ fun PantallaVentasContent(
     onSearchQueryChanged: (String) -> Unit,
     onSumar: (Plantilla_Producto) -> Unit, 
     onRestar: (Plantilla_Producto) -> Unit, 
+    onToggleConsolidado: () -> Unit,
     onLimpiarCarrito: () -> Unit,
     onVerImagenFull: () -> Unit,
     onSeleccionarPerfil: (PerfilVenta) -> Unit,
@@ -385,6 +388,8 @@ fun PantallaVentasContent(
                     CardTotalVentaPro(
                         total = uiState.totalVenta, 
                         formato = formatoMoneda, 
+                        subtotales = uiState.subtotalesPorPerfil,
+                        modoConsolidado = uiState.modoConsolidado,
                         onFinalizar = { 
                             if (uiState.totalVenta > 0) mostrarConfirm = true 
                             else mostrarMotivos = true
@@ -404,11 +409,37 @@ fun PantallaVentasContent(
                 )
 
                 if (uiState.enRuta) {
-                    PerfilVentaSelector(
-                        perfiles = uiState.perfilesDisponibles,
-                        seleccionado = uiState.perfilSeleccionado,
-                        onSeleccionar = onSeleccionarPerfil
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            PerfilVentaSelector(
+                                perfiles = uiState.perfilesDisponibles,
+                                seleccionado = uiState.perfilSeleccionado,
+                                onSeleccionar = onSeleccionarPerfil
+                            )
+                        }
+                        
+                        // 🔥 BOTÓN DE CONSOLIDACIÓN (TICKET ÚNICO)
+                        Surface(
+                            onClick = onToggleConsolidado,
+                            modifier = Modifier.padding(start = 8.dp, top = 6.dp).size(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (uiState.modoConsolidado) DelisaRed else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            border = BorderStroke(1.dp, if (uiState.modoConsolidado) DelisaRed else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (uiState.modoConsolidado) Icons.Default.LibraryAddCheck else Icons.Default.LibraryAdd,
+                                    contentDescription = "Modo Consolidado",
+                                    tint = if (uiState.modoConsolidado) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                    
                     SearchBarVentas(
                         value = textFieldValue, 
                         onValueChange = {
@@ -447,14 +478,45 @@ fun PantallaVentasContent(
                                                 onAction = onLimpiarCarrito
                                             ) 
                                         }
-                                        itemsIndexed(seleccionados, key = { _, p -> "sel_${p.id}" }) { _, producto ->
-                                            ItemVentaProductoModerno(producto, formatoMoneda, { onSumar(producto) }, { onRestar(producto) })
+                                        
+                                        val seleccionadosPorCategoria = seleccionados.groupBy { it.categoria }
+                                        seleccionadosPorCategoria.forEach { (cat, prods) ->
+                                            item(key = "header_sel_$cat") {
+                                                Text(
+                                                    text = cat.uppercase(),
+                                                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = DelisaRed.copy(alpha = 0.6f)
+                                                )
+                                            }
+                                            items(prods, key = { p -> "sel_${p.id}" }) { producto ->
+                                                ItemVentaProductoModerno(producto, formatoMoneda, { onSumar(producto) }, { onRestar(producto) })
+                                            }
                                         }
-                                        if (resto.isNotEmpty()) item { SeccionHeader("CATÁLOGO DISPONIBLE") }
+                                        
+                                        if (resto.isNotEmpty()) {
+                                            item { Spacer(Modifier.height(16.dp)) }
+                                            item { SeccionHeader("CATÁLOGO DISPONIBLE") }
+                                        }
                                     }
 
-                                    itemsIndexed(if (mostrarHeaders) resto else uiState.productosEnCarrito, key = { _, p -> p.id }) { _, producto ->
-                                        ItemVentaProductoModerno(producto, formatoMoneda, { onSumar(producto) }, { onRestar(producto) })
+                                    val baseLista = if (mostrarHeaders) resto else uiState.productosEnCarrito
+                                    
+                                    if (mostrarHeaders) {
+                                        val porCategoria = baseLista.groupBy { it.categoria }
+                                        porCategoria.forEach { (cat, prods) ->
+                                            item(key = "header_$cat") {
+                                                SeccionHeader(titulo = cat.uppercase())
+                                            }
+                                            items(prods, key = { p -> p.id }) { producto ->
+                                                ItemVentaProductoModerno(producto, formatoMoneda, { onSumar(producto) }, { onRestar(producto) })
+                                            }
+                                        }
+                                    } else {
+                                        items(baseLista, key = { p -> p.id }) { producto ->
+                                            ItemVentaProductoModerno(producto, formatoMoneda, { onSumar(producto) }, { onRestar(producto) })
+                                        }
                                     }
                                 }
                             }
@@ -736,7 +798,7 @@ fun ItemVentaProductoModerno(producto: Plantilla_Producto, formato: NumberFormat
 }
 
 @Composable
-fun CardTotalVentaPro(total: Double, formato: NumberFormat, onFinalizar: () -> Unit) {
+fun CardTotalVentaPro(total: Double, formato: NumberFormat, subtotales: Map<String, Double> = emptyMap(), modoConsolidado: Boolean = false, onFinalizar: () -> Unit) {
     val esSoloVisita = total == 0.0
     val isDark = isSystemInDarkTheme()
     
@@ -749,49 +811,89 @@ fun CardTotalVentaPro(total: Double, formato: NumberFormat, onFinalizar: () -> U
         shape = RoundedCornerShape(24.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp), 
-            horizontalArrangement = Arrangement.SpaceBetween, 
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = onFinalizar, 
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (esSoloVisita) MaterialTheme.colorScheme.onSurface else DelisaRed, 
-                    contentColor = if (esSoloVisita) MaterialTheme.colorScheme.surface else Color.White
-                ), 
-                shape = RoundedCornerShape(16.dp), 
-                modifier = Modifier.height(54.dp).weight(1f), 
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
-            ) {
-                Icon(
-                    imageVector = if (esSoloVisita) Icons.Default.Info else Icons.AutoMirrored.Filled.ReceiptLong, 
-                    contentDescription = null, 
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = if (esSoloVisita) "REGISTRAR VISITA" else "FINALIZAR VENTA", 
-                    fontWeight = FontWeight.ExtraBold, 
-                    fontSize = 13.sp, 
-                    letterSpacing = 0.5.sp
-                )
+        Column(modifier = Modifier.padding(16.dp)) {
+            // 🔥 DESGLOSE POR PERFIL SI ESTÁ EN MODO CONSOLIDADO (Diseño Mejorado)
+            if (modoConsolidado && subtotales.size > 1) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    subtotales.entries.forEachIndexed { index, entry ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = entry.key.uppercase(), 
+                                fontSize = 10.sp, 
+                                fontWeight = FontWeight.Black, 
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                text = formato.format(entry.value), 
+                                fontSize = 14.sp, 
+                                fontWeight = FontWeight.ExtraBold, 
+                                color = DelisaRed,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        
+                        if (index < subtotales.size - 1) {
+                            VerticalDivider(
+                                modifier = Modifier.height(24.dp), 
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                        }
+                    }
+                }
             }
-            if (!esSoloVisita) {
-                Spacer(Modifier.width(16.dp))
-                Column(horizontalAlignment = Alignment.End) { 
-                    Text(
-                        text = "TOTAL COBRO", 
-                        fontSize = 10.sp, 
-                        fontWeight = FontWeight.Black, 
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+
+            Row(
+                modifier = Modifier.fillMaxWidth(), 
+                horizontalArrangement = Arrangement.SpaceBetween, 
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = onFinalizar, 
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (esSoloVisita) MaterialTheme.colorScheme.onSurface else DelisaRed, 
+                        contentColor = if (esSoloVisita) MaterialTheme.colorScheme.surface else Color.White
+                    ), 
+                    shape = RoundedCornerShape(16.dp), 
+                    modifier = Modifier.height(54.dp).weight(1f), 
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = if (esSoloVisita) Icons.Default.Info else Icons.AutoMirrored.Filled.ReceiptLong, 
+                        contentDescription = null, 
+                        modifier = Modifier.size(20.dp)
                     )
+                    Spacer(Modifier.width(10.dp))
                     Text(
-                        text = formato.format(total), 
-                        fontSize = 24.sp, 
-                        fontWeight = FontWeight.Black, 
-                        color = if (isDark) Color.White else DelisaRed
+                        text = if (esSoloVisita) "REGISTRAR VISITA" else "FINALIZAR VENTA", 
+                        fontWeight = FontWeight.ExtraBold, 
+                        fontSize = 13.sp, 
+                        letterSpacing = 0.5.sp
                     )
+                }
+                if (!esSoloVisita) {
+                    Spacer(Modifier.width(16.dp))
+                    Column(horizontalAlignment = Alignment.End) { 
+                        Text(
+                            text = if (modoConsolidado) "VENTA ÚNICA TOTAL" else "TOTAL COBRO", 
+                            fontSize = 10.sp, 
+                            fontWeight = FontWeight.Black, 
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = formato.format(total), 
+                            fontSize = 24.sp, 
+                            fontWeight = FontWeight.Black, 
+                            color = if (isDark) Color.White else DelisaRed
+                        )
+                    }
                 }
             }
         }

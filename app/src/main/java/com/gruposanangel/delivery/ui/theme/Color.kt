@@ -18,6 +18,8 @@ val DelisaGreen = Color(0xFF4CAF50)
 val DelisaGreenDark = Color(0xFF2E7D32)
 val DelisaGreenLight = Color(0xFFE8F5E9)
 
+val DelisaYellow = Color(0xFFFFEB3B)
+
 // Colores de Soporte / Estado
 val WarningOrange = Color(0xFFFF9800)
 val ErrorRed = Color(0xFFD32F2F)

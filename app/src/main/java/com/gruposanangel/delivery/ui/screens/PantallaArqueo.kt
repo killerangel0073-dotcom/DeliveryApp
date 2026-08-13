@@ -90,8 +90,8 @@ fun PantallaArqueo(navController: NavController) {
                 TopAppBar(
                     title = { 
                         Column {
-                            Text("ARQUEO SEMANAL", fontWeight = FontWeight.Black, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
-                            Text("Auditoría y Cierre", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("ARQUEO: ${uiState.almacenAuditado}", fontWeight = FontWeight.Black, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Vendedor: ${uiState.nombreVendedor}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
                     navigationIcon = {
@@ -100,6 +100,9 @@ fun PantallaArqueo(navController: NavController) {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { viewModel.refrescarDatos() }) {
+                            Icon(Icons.Rounded.Refresh, "Refrescar", tint = DelisaRed)
+                        }
                         if (tabIndex == 2) {
                             IconButton(onClick = { 
                                 val yaEstaAutocompletado = uiState.productosArqueo.all { it.stockReal == it.stockTeorico.toString() }

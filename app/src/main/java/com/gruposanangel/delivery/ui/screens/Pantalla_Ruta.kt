@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -79,9 +80,8 @@ fun PaginaVentaScreen(
             clienteDao = db.clienteDao()
         )
     )
-    val uiState by viewModel.uiState.collectAsState()
-    val ticketsHoy by viewModel.ticketsHoyFlow.collectAsState()
-    var isRefreshing by remember { mutableStateOf(false) }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val ticketsHoy by viewModel.ticketsHoyFlow.collectAsStateWithLifecycle()
 
     val isDark = ThemeConfig.isActuallyDark
 
@@ -93,13 +93,20 @@ fun PaginaVentaScreen(
         }
     }
 
+    // 🛡️ RESET PROACTIVO AL SALIR DE LA PANTALLA
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.resetFiltro()
+        }
+    }
+
     DeliveryTheme(darkTheme = isDark) {
         PaginaVentaContent(
             ticketsHoy = ticketsHoy, 
-            isLoading = isRefreshing && ticketsHoy.isEmpty(),
             uiState = uiState,
             onTicketClick = { navController.navigate("detalle_venta_admin/${it.id}") },
-            onFiltroRutaChanged = { viewModel.cambiarFiltroRuta(it) }
+            onFiltroRutaChanged = { viewModel.cambiarFiltroRuta(it) },
+            onDateRangeSelected = { inicio, fin -> viewModel.actualizarRangoFechas(inicio, fin) }
         )
     }
 }
@@ -108,17 +115,76 @@ fun PaginaVentaScreen(
 @Composable
 fun PaginaVentaContent(
     ticketsHoy: List<TicketVenta>, 
-    isLoading: Boolean = false, 
     uiState: VentaUiState,
     onTicketClick: (TicketVenta) -> Unit,
-    onFiltroRutaChanged: (String) -> Unit
+    onFiltroRutaChanged: (String) -> Unit,
+    onDateRangeSelected: (Long, Long) -> Unit
 ) {
     val context = LocalContext.current; val fmtMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     val fmtFecha = SimpleDateFormat("EEEE d 'de' MMMM, hh:mm a", Locale.forLanguageTag("es-MX"))
     val prefs = remember { PreferenciasMetas(context) }; val metaVals = remember { prefs.obtenerValores(6500.0, 30) }
     var meta by remember { mutableStateOf(metaVals.first) }; var cliTarget by remember { mutableStateOf(metaVals.second) }
-    val totalHoy = ticketsHoy.filter { it.estado != "CANCELADA" }.sumOf { it.total }
-    val visitasHoy = ticketsHoy.count { it.estado != "CANCELADA" }
+    
+    // 🔥 USAMOS VALORES DEL VIEWMODEL PARA EVITAR PARPADEOS
+    val totalPeriodo = uiState.totalVentaPeriodo
+    val visitasPeriodo = uiState.visitasCount
+    
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    if (showDatePicker) {
+        val dateRangePickerState = rememberDateRangePickerState(
+            initialSelectedStartDateMillis = if (uiState.fechaInicio > 0) uiState.fechaInicio else System.currentTimeMillis(),
+            initialSelectedEndDateMillis = if (uiState.fechaFin > 0) uiState.fechaFin else System.currentTimeMillis()
+        )
+        
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val start = dateRangePickerState.selectedStartDateMillis
+                        val end = dateRangePickerState.selectedEndDateMillis
+                        if (start != null) {
+                            val c = Calendar.getInstance(); c.timeInMillis = start; c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); val i = c.timeInMillis
+                            val f = if (end != null) { val ce = Calendar.getInstance(); ce.timeInMillis = end; ce.set(Calendar.HOUR_OF_DAY, 23); ce.set(Calendar.MINUTE, 59); ce.timeInMillis } else { i + 86399999L }
+                            onDateRangeSelected(i, f)
+                        }
+                        showDatePicker = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.padding(end = 8.dp, bottom = 8.dp)
+                ) {
+                    Text("ACEPTAR", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDatePicker = false },
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+                }
+            },
+            colors = DatePickerDefaults.colors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            DateRangePicker(
+                state = dateRangePickerState,
+                showModeToggle = false,
+                modifier = Modifier.weight(1f),
+                colors = DatePickerDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    headlineContentColor = DelisaRed,
+                    selectedDayContainerColor = DelisaRed,
+                    selectedDayContentColor = Color.White,
+                    todayDateBorderColor = DelisaRed,
+                    todayContentColor = DelisaRed,
+                    dayInSelectionRangeContainerColor = DelisaRed.copy(alpha = 0.15f),
+                    dayInSelectionRangeContentColor = DelisaRed
+                )
+            )
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
@@ -140,54 +206,56 @@ fun PaginaVentaContent(
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                             .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), RoundedCornerShape(14.dp))
                     ) {
-                        val maxWidth = maxWidth
-                        val tabWidth = maxWidth / uiState.rutasDisponibles.size
-                        
-                        val indicatorOffset by animateDpAsState(
-                            targetValue = tabWidth * indexSeleccionado,
-                            animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioLowBouncy),
-                            label = "routeIndicator"
-                        )
+                        val totalRutas = uiState.rutasDisponibles.size
+                        if (totalRutas > 0) {
+                            val tabWidth = maxWidth / totalRutas
+                            
+                            val indicatorOffset by animateDpAsState(
+                                targetValue = tabWidth * indexSeleccionado,
+                                animationSpec = spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioLowBouncy),
+                                label = "routeIndicator"
+                            )
 
-                        Box(
-                            modifier = Modifier
-                                .offset(x = indicatorOffset)
-                                .width(tabWidth)
-                                .fillMaxHeight()
-                                .padding(3.dp)
-                                .shadow(3.dp, RoundedCornerShape(11.dp))
-                                .background(DelisaRed, RoundedCornerShape(11.dp))
-                        )
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = indicatorOffset)
+                                    .width(tabWidth)
+                                    .fillMaxHeight()
+                                    .padding(3.dp)
+                                    .shadow(3.dp, RoundedCornerShape(11.dp))
+                                    .background(DelisaRed, RoundedCornerShape(11.dp))
+                            )
 
-                        Row(modifier = Modifier.fillMaxSize()) {
-                            uiState.rutasDisponibles.forEachIndexed { index, ruta ->
-                                val isSelected = index == indexSeleccionado
-                                val textColor by animateColorAsState(
-                                    targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    label = "routeTextColor"
-                                )
-
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null,
-                                            onClick = { onFiltroRutaChanged(ruta) }
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = ruta.uppercase(),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
-                                        color = textColor,
-                                        fontSize = 10.sp,
-                                        letterSpacing = 0.5.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                            Row(modifier = Modifier.fillMaxSize()) {
+                                uiState.rutasDisponibles.forEachIndexed { index, ruta ->
+                                    val isSelected = index == indexSeleccionado
+                                    val textColor by animateColorAsState(
+                                        targetValue = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        label = "routeTextColor"
                                     )
+
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null,
+                                                onClick = { onFiltroRutaChanged(ruta) }
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = ruta.uppercase(),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                            color = textColor,
+                                            fontSize = 10.sp,
+                                            letterSpacing = 0.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -196,16 +264,19 @@ fun PaginaVentaContent(
             }
 
             MedidorDeMetaPremium(
-                metaDelDia = meta, 
-                totalClientes = cliTarget, 
-                clientesVisitados = visitasHoy, 
-                avance = totalHoy, 
+                metaDelDia = meta * uiState.numDiasFiltro, 
+                totalClientes = cliTarget * uiState.numDiasFiltro, 
+                clientesVisitados = visitasPeriodo, 
+                avance = totalPeriodo, 
+                numDias = uiState.numDiasFiltro,
+                isLoading = uiState.cargandoDashboard,
                 onUpdateMeta = { meta = it; prefs.guardarValores(meta, cliTarget) }, 
-                onUpdateClientes = { cliTarget = it; prefs.guardarValores(meta, cliTarget) }
+                onUpdateClientes = { cliTarget = it; prefs.guardarValores(meta, cliTarget) },
+                onCalendarClick = { showDatePicker = true }
             )
             Spacer(Modifier.height(16.dp))
             
-            if (isLoading && ticketsHoy.isEmpty()) {
+            if (uiState.cargandoDashboard) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
             } else if (ticketsHoy.isEmpty()) { 
                 Box(Modifier.fillMaxSize(), Alignment.Center) { 
@@ -218,7 +289,11 @@ fun PaginaVentaContent(
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 16.dp)) { items(ticketsHoy, key = { it.id }) { t -> CardTicketRuta(t, fmtFecha, fmtMoneda, onTicketClick) } } 
             }
         }
-        ResumenVentasCard(visitasHoy, totalHoy, fmtMoneda)
+        
+        // 🔥 Solo mostrar resumen si no estamos procesando para evitar el flash de ceros
+        if (!uiState.cargandoDashboard) {
+            ResumenVentasCard(visitasPeriodo, totalPeriodo, fmtMoneda)
+        }
     }
 }
 
@@ -366,5 +441,5 @@ fun ResumenVentasCard(count: Int, total: Double, fmt: NumberFormat) {
 @Composable
 fun PaginaRutaPreview() {
     val tickets = listOf(TicketVenta("1", "Abarrotes Don Pepe", 1250.0, Date(), true), TicketVenta("2", "Mini Super El Sol", 450.0, Date(), false))
-    DeliveryTheme { PaginaVentaContent(tickets, isLoading = false, uiState = VentaUiState(), onTicketClick = {}, onFiltroRutaChanged = {}) }
+    DeliveryTheme { PaginaVentaContent(tickets, uiState = VentaUiState(), onTicketClick = {}, onFiltroRutaChanged = {}, onDateRangeSelected = {_,_ ->}) }
 }

@@ -15,7 +15,9 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.maps.android.compose.CameraPositionState
 import com.google.maps.android.compose.MapType
+import com.gruposanangel.delivery.Itinerario
 import com.gruposanangel.delivery.data.RepositoryCliente
+import com.gruposanangel.delivery.data.RepositoryRuta
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -40,16 +42,23 @@ data class MapaUiState(
     val puestoTrabajo: String? = null,
     val miRuta: String? = null,
     val filtroRuta: String = "Todas las Rutas",
-    val listaRutas: List<String> = listOf("Todas las Rutas")
+    val listaRutas: List<String> = listOf("Todas las Rutas"),
+    
+    // 🔥 Visor de Hojas de Ruta
+    val itinerarioActivo: Itinerario? = null,
+    val modoHojaRuta: Boolean = false,
+    val clientesRuta: List<Cliente> = emptyList()
 )
 
 class MapaViewModel(
-    private var repositoryCliente: RepositoryCliente? = null
+    private var repositoryCliente: RepositoryCliente? = null,
+    private var repositoryRuta: RepositoryRuta? = null
 ) : ViewModel() {
 
-    fun setRepository(repo: RepositoryCliente) {
+    fun setRepositories(repoCliente: RepositoryCliente, repoRuta: RepositoryRuta) {
         if (this.repositoryCliente == null) {
-            this.repositoryCliente = repo
+            this.repositoryCliente = repoCliente
+            this.repositoryRuta = repoRuta
             cargarDatosUsuario()
             if (_uiState.value.markersVisible) {
                 cargarClientes()
@@ -275,6 +284,52 @@ class MapaViewModel(
         else _uiState.update { it.copy(seguirVendedor = ruta, vendedorSeleccionadoRuta = ruta, selectedCliente = null) }
     }
 
+    // ---------------------------------------------------------
+    // 🗺️ LÓGICA DE HOJAS DE RUTA
+    // ---------------------------------------------------------
+
+    fun cargarHojaRuta(ruta: String, dia: String, ciclo: String) {
+        val itinerarioId = "${ruta.replace(" ", "")}_${dia}_$ciclo"
+        _uiState.update { it.copy(isLoading = true) }
+        
+        viewModelScope.launch {
+            try {
+                val itinerario = repositoryRuta?.obtenerItinerario(itinerarioId)
+                if (itinerario != null && itinerario.clientesOrdenados.isNotEmpty()) {
+                    // Obtener las entidades de los clientes para tener sus coordenadas
+                    val todosLosClientes = repositoryCliente?.obtenerClientesLocal()?.first() ?: emptyList()
+                    val idsEnHoja = itinerario.clientesOrdenados.map { it.clienteId }.toSet()
+                    
+                    val clientesEnHoja = todosLosClientes.filter { idsEnHoja.contains(it.id) }.map { ent ->
+                        Cliente(ent.id, ent.nombreNegocio, ent.ubicacionLat, ent.ubicacionLon, ent.valorCliente, ent.nombreDueno, ent.telefono, ent.fotografiaUrl)
+                    }
+
+                    _uiState.update { it.copy(
+                        itinerarioActivo = itinerario,
+                        modoHojaRuta = true,
+                        clientesRuta = clientesEnHoja,
+                        isLoading = false
+                    ) }
+                    
+                    // Centrar cámara en los puntos de la hoja
+                    _cameraEvents.emit(CameraEvent.CenterOnClients)
+                } else {
+                    _uiState.update { it.copy(isLoading = false, error = "⚠️ La ruta solicitada no tiene clientes asignados o no existe") }
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = "Error al cargar ruta: ${e.message}") }
+            }
+        }
+    }
+
+    fun clearError() {
+        _uiState.update { it.copy(error = null) }
+    }
+
+    fun limpiarHojaRuta() {
+        _uiState.update { it.copy(itinerarioActivo = null, modoHojaRuta = false, clientesRuta = emptyList()) }
+    }
+
     override fun onCleared() {
         super.onCleared()
         liveTrackingListener?.let { rtdb.child("vendedores_en_vivo").removeEventListener(it) }
@@ -282,11 +337,14 @@ class MapaViewModel(
     }
 }
 
-class MapaViewModelFactory(private val repository: RepositoryCliente) : ViewModelProvider.Factory {
+class MapaViewModelFactory(
+    private val repositoryCliente: RepositoryCliente,
+    private val repositoryRuta: RepositoryRuta
+) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         val vm = MapaViewModel()
-        vm.setRepository(repository)
+        vm.setRepositories(repositoryCliente, repositoryRuta)
         return vm as T
     }
 }

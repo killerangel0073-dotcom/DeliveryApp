@@ -8,9 +8,8 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -43,6 +42,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,6 +78,8 @@ data class ProductoEditarModelo(
     val unidadesPorDisplay: String = "",
     val gramosVenta: Long? = null,
     val precioCompra: Double = 0.0,
+    val costoEmpaque: Double = 0.0,
+    val aplicaTransporte: Boolean = true,
     val esCompuesto: Boolean = false,
     val ingredientes: List<IngredienteBusqueda> = emptyList()
 )
@@ -145,33 +150,95 @@ fun DropdownFieldEditar(
 
 @Composable
 fun ModernFieldEditar(
-    label: String,
-    value: TextFieldValue,
-    icon: ImageVector,
-    maxLines: Int = 1,
-    prefix: String? = null,
+    label: String, 
+    value: TextFieldValue, 
+    icon: ImageVector, 
+    maxLines: Int = 1, 
+    prefix: String? = null, 
     keyboardType: KeyboardType = KeyboardType.Text,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    textAlign: TextAlign = TextAlign.Start,
     onChange: (TextFieldValue) -> Unit
 ) {
     OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
-        leadingIcon = { Icon(icon, null, tint = DelisaRed) },
+        value = value, 
+        onValueChange = onChange, 
+        label = { Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }, 
+        leadingIcon = { Icon(icon, null, tint = DelisaRed) }, 
         prefix = if (prefix != null) { { Text(prefix, color = MaterialTheme.colorScheme.onSurface) } } else null,
         maxLines = maxLines,
         singleLine = maxLines == 1,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType), 
+        visualTransformation = visualTransformation,
+        textStyle = LocalTextStyle.current.copy(textAlign = textAlign),
+        modifier = Modifier.fillMaxWidth(), 
+        shape = RoundedCornerShape(16.dp), 
         colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = DelisaRed,
+            focusedBorderColor = DelisaRed, 
             focusedLabelColor = DelisaRed,
             focusedTextColor = MaterialTheme.colorScheme.onSurface,
             unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
             unfocusedBorderColor = MaterialTheme.colorScheme.outline
         )
     )
+}
+
+class CurrencyVisualTransformationEditar : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val rawText = text.text
+        if (rawText.isEmpty()) {
+            return TransformedText(AnnotatedString("$ 0.00"), object : OffsetMapping {
+                override fun originalToTransformed(offset: Int): Int = 6
+                override fun transformedToOriginal(offset: Int): Int = 0
+            })
+        }
+
+        val digits = rawText.filter { it.isDigit() }
+        val value = digits.toDoubleOrNull() ?: 0.0
+        val formatted = "$ " + String.format(Locale.US, "%.2f", value / 100.0)
+
+        val offsetMapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int = formatted.length
+            override fun transformedToOriginal(offset: Int): Int = rawText.length
+        }
+
+        return TransformedText(AnnotatedString(formatted), offsetMapping)
+    }
+}
+
+class SuffixVisualTransformationEditar(val suffix: String) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val rawText = text.text
+        val formatted = rawText + suffix
+        val offsetMapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int = offset
+            override fun transformedToOriginal(offset: Int): Int {
+                // Prevenir crash: si el cursor intenta entrar al sufijo, limitarlo al final del texto real
+                if (offset > rawText.length) return rawText.length
+                return offset
+            }
+        }
+        return TransformedText(AnnotatedString(formatted), offsetMapping)
+    }
+}
+
+class NumericRtlVisualTransformationEditar : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val rawText = text.text
+        val offsetMapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int = rawText.length
+            override fun transformedToOriginal(offset: Int): Int = rawText.length
+        }
+        return TransformedText(text, offsetMapping)
+    }
+}
+
+@Composable
+fun CostoMiniItemEditar(label: String, value: String, color: Color = Color.Unspecified) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontSize = 15.sp, fontWeight = FontWeight.Black, color = if(color == Color.Unspecified) MaterialTheme.colorScheme.onSurface else color)
+    }
 }
 
 fun createImageFileEditar(context: android.content.Context): File {
@@ -206,6 +273,8 @@ fun EditarProductoScreen(
     var unidadesPorDisplay by remember { mutableStateOf(TextFieldValue(previewProducto?.unidadesPorDisplay ?: "")) }
     var gramosVenta by remember { mutableStateOf(TextFieldValue(previewProducto?.gramosVenta?.toString() ?: "")) }
     var precioCompra by remember { mutableStateOf(TextFieldValue(previewProducto?.precioCompra?.toString() ?: "")) }
+    var costoEmpaque by remember { mutableStateOf(TextFieldValue(previewProducto?.costoEmpaque?.toString() ?: "")) }
+    var aplicaTransporte by remember { mutableStateOf(previewProducto?.aplicaTransporte ?: true) }
 
     // --- NUEVOS CAMPOS PARA PRODUCTOS COMPUESTOS (MIXES) ---
     var esCompuesto by remember { mutableStateOf(previewProducto?.esCompuesto ?: false) }
@@ -254,14 +323,31 @@ fun EditarProductoScreen(
                 if (doc.exists()) {
                     nombre = TextFieldValue(doc.getString("nombre") ?: "")
                     descripcion = TextFieldValue(doc.getString("descripcion") ?: "")
-                    precio = TextFieldValue(doc.getDouble("precio")?.toString() ?: "")
+                    
+                    // Convertir precios de Firestore (Double) a Formato Centavos (String) para los campos nuevos
+                    val pVentaVal = doc.getDouble("precio") ?: 0.0
+                    precio = TextFieldValue((pVentaVal * 100).toLong().toString())
+                    
                     marca = doc.getString("marca") ?: ""
                     categoria = doc.getString("categoria") ?: ""
                     subcategoria = doc.getString("subcategoria") ?: ""
-                    cantidadUnitario = TextFieldValue(doc.get("cantidadUnitario")?.toString() ?: "")
-                    unidadesPorDisplay = TextFieldValue(doc.get("unidadesPorDisplay")?.toString() ?: "")
-                    gramosVenta = TextFieldValue(doc.get("gramosVenta")?.toString() ?: "")
-                    precioCompra = TextFieldValue(doc.get("precioCompra")?.toString() ?: "")
+                    
+                    val cUVal = doc.get("cantidadUnitario")?.toString()?.toLongOrNull() ?: 0L
+                    cantidadUnitario = TextFieldValue(cUVal.toString())
+                    
+                    val uDVal = doc.get("unidadesPorDisplay")?.toString()?.toLongOrNull() ?: 0L
+                    unidadesPorDisplay = TextFieldValue(uDVal.toString())
+                    
+                    val gVVal = doc.get("gramosVenta")?.toString()?.toLongOrNull() ?: 0L
+                    gramosVenta = TextFieldValue(gVVal.toString())
+                    
+                    val pCompraVal = doc.getDouble("precioCompra") ?: 0.0
+                    precioCompra = TextFieldValue((pCompraVal * 100).toLong().toString()) 
+                    
+                    val cEmpaqueVal = doc.getDouble("costoEmpaque") ?: 0.0
+                    costoEmpaque = TextFieldValue((cEmpaqueVal * 100).toLong().toString())
+
+                    aplicaTransporte = doc.getBoolean("aplicaTransporte") ?: true
 
                     esCompuesto = doc.getBoolean("esCompuesto") ?: false
                     val ingList = doc.get("ingredientes") as? List<Map<String, Any>>
@@ -549,8 +635,11 @@ fun EditarProductoScreen(
                             val cUnit = (prodBase?.get("cantidadUnitario") as? Number)?.toDouble() ?: 1.0
                             (pCompra / cUnit) * ing.gramos
                         }
+                        
+                        // Añadir costo de empaque al Mix si se desea considerar empaque final
+                        val costoFinalMix = costoSugerido + (costoEmpaque.text.toDoubleOrNull() ?: 0.0)
 
-                        if (costoSugerido > 0) {
+                        if (costoFinalMix > 0) {
                             Card(
                                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                                 colors = CardDefaults.cardColors(containerColor = DelisaGreenLight.copy(alpha = if(isSystemInDarkTheme()) 0.2f else 1f)),
@@ -561,8 +650,8 @@ fun EditarProductoScreen(
                                     Spacer(Modifier.width(12.dp))
                                     Column {
                                         Text("Costo de Producción Sugerido", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text("$ ${String.format(Locale.US, "%.2f", costoSugerido)}", fontWeight = FontWeight.Black, color = if(isSystemInDarkTheme()) Color(0xFF81C784) else DelisaGreenDark)
-                                        Text("* Basado en el costo de los ingredientes base.", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("$ ${String.format(Locale.US, "%.2f", costoFinalMix)}", fontWeight = FontWeight.Black, color = if(isSystemInDarkTheme()) Color(0xFF81C784) else DelisaGreenDark)
+                                        Text("* Incluye ingredientes base + empaque.", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
@@ -571,7 +660,7 @@ fun EditarProductoScreen(
 
                     if (!esCompuesto) {
                         Text(
-                            "CONFIGURACIÓN DE COMPRA",
+                            "Configuración de compra",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Black,
                             color = DelisaRed,
@@ -581,26 +670,62 @@ fun EditarProductoScreen(
 
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Box(Modifier.weight(1f)) {
-                                ModernFieldEditar("Gramos Bolsa", cantidadUnitario, Icons.Outlined.Scale, keyboardType = KeyboardType.Number) {
-                                    if (it.text.all { c -> c.isDigit() }) cantidadUnitario = it
+                                ModernFieldEditar(
+                                    label = "Peso bolsa o caja", 
+                                    value = cantidadUnitario, 
+                                    icon = Icons.Outlined.Scale, 
+                                    keyboardType = KeyboardType.Number,
+                                    visualTransformation = SuffixVisualTransformationEditar(" gramos"),
+                                    textAlign = TextAlign.End
+                                ) {
+                                    if (it.text.all { c -> c.isDigit() }) {
+                                        if (it.text.length <= 6) cantidadUnitario = it
+                                    }
                                 }
                             }
                             Box(Modifier.weight(1f)) {
-                                ModernFieldEditar("Display", unidadesPorDisplay, Icons.Outlined.Inventory2, keyboardType = KeyboardType.Number) {
-                                    if (it.text.all { c -> c.isDigit() }) unidadesPorDisplay = it 
+                                ModernFieldEditar(
+                                    label = "Unidades por display", 
+                                    value = unidadesPorDisplay, 
+                                    icon = Icons.Outlined.Inventory2, 
+                                    keyboardType = KeyboardType.Number,
+                                    visualTransformation = NumericRtlVisualTransformationEditar(),
+                                    textAlign = TextAlign.End
+                                ) {
+                                    if (it.text.all { c -> c.isDigit() }) {
+                                        if (it.text.length <= 4) unidadesPorDisplay = it 
+                                    }
                                 }
                             }
                         }
 
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Box(Modifier.weight(1f)) {
-                                ModernFieldEditar("Precio Compra", precioCompra, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number, prefix = "$") {
-                                    if (it.text.all { c -> c.isDigit() || c == '.' }) precioCompra = it
+                                ModernFieldEditar(
+                                    label = "Precio bolsa o caja", 
+                                    value = precioCompra, 
+                                    icon = Icons.Outlined.ShoppingBag, 
+                                    keyboardType = KeyboardType.Number,
+                                    visualTransformation = CurrencyVisualTransformationEditar(),
+                                    textAlign = TextAlign.End
+                                ) {
+                                    if (it.text.all { c -> c.isDigit() }) {
+                                        if (it.text.length <= 7) precioCompra = it
+                                    }
                                 }
                             }
                             Box(Modifier.weight(1f)) {
-                                ModernFieldEditar("Gramos Bolsita", gramosVenta, Icons.Outlined.ShoppingBag, keyboardType = KeyboardType.Number) {
-                                    if (it.text.all { c -> c.isDigit() }) gramosVenta = it
+                                ModernFieldEditar(
+                                    label = "Peso por bolsita", 
+                                    value = gramosVenta, 
+                                    icon = Icons.Outlined.Scale, 
+                                    keyboardType = KeyboardType.Number,
+                                    visualTransformation = SuffixVisualTransformationEditar(" gramos"),
+                                    textAlign = TextAlign.End
+                                ) {
+                                    if (it.text.all { c -> c.isDigit() }) {
+                                        if (it.text.length <= 5) gramosVenta = it
+                                    }
                                 }
                             }
                         }
@@ -610,15 +735,126 @@ fun EditarProductoScreen(
                         LaunchedEffect(sumaGramos) {
                             gramosVenta = TextFieldValue(sumaGramos.toInt().toString())
                         }
-                        ModernFieldEditar("Gramos Totales Mix", gramosVenta, Icons.Outlined.Scale, keyboardType = KeyboardType.Number) {
-                            gramosVenta = it
+                        ModernFieldEditar(
+                            label = "Gramos Totales Mix", 
+                            value = gramosVenta, 
+                            icon = Icons.Outlined.Scale, 
+                            keyboardType = KeyboardType.Number,
+                            visualTransformation = SuffixVisualTransformationEditar(" gramos"),
+                            textAlign = TextAlign.End
+                        ) {
+                            if (it.text.all { c -> c.isDigit() }) gramosVenta = it
                         }
                     }
-                    
-                    Text("Solo números: Ej. 900, 20, 45", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                    ModernFieldEditar("Precio al Público", precio, Icons.Outlined.AttachMoney, keyboardType = KeyboardType.Number, prefix = "$") {
-                        if (it.text.all { c -> c.isDigit() || c == '.' }) precio = it
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            ModernFieldEditar(
+                                label = "Costo de empaque", 
+                                value = costoEmpaque, 
+                                icon = Icons.Outlined.ShoppingBasket, 
+                                keyboardType = KeyboardType.Number,
+                                visualTransformation = CurrencyVisualTransformationEditar(),
+                                textAlign = TextAlign.End
+                            ) {
+                                if (it.text.all { c -> c.isDigit() }) {
+                                    if (it.text.length <= 7) costoEmpaque = it
+                                }
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            ModernFieldEditar(
+                                label = "Precio al público", 
+                                value = precio, 
+                                icon = Icons.Outlined.AttachMoney, 
+                                keyboardType = KeyboardType.Number,
+                                visualTransformation = CurrencyVisualTransformationEditar(),
+                                textAlign = TextAlign.End
+                            ) {
+                                if (it.text.all { c -> c.isDigit() }) {
+                                    if (it.text.length <= 7) precio = it
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().background(DelisaRed.copy(alpha = 0.05f), RoundedCornerShape(12.dp)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("¿Cobrar Transporte?", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                            Text("Aplica costo de $5.00 por kilogramo", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = aplicaTransporte,
+                            onCheckedChange = { aplicaTransporte = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = DelisaRed)
+                        )
+                    }
+                }
+            }
+
+            // --- CALCULADORA DE COSTOS EN TIEMPO REAL ---
+            val pC = (precioCompra.text.toDoubleOrNull() ?: 0.0) / 100.0
+            val gB = cantidadUnitario.text.toDoubleOrNull() ?: 1.0
+            val gV = gramosVenta.text.toDoubleOrNull() ?: 0.0
+            val cE = (costoEmpaque.text.toDoubleOrNull() ?: 0.0) / 100.0
+            val pV = (precio.text.toDoubleOrNull() ?: 0.0) / 100.0
+
+            // Si es compuesto, el costo de materia prima (relleno) viene de la suma de ingredientes
+            val costoMateriaPrima = if (esCompuesto) {
+                ingredientes.sumOf { ing ->
+                    val prodBase = todosLosProductos.find { it["id"] == ing.id }
+                    val pCBase = (prodBase?.get("precioCompra") as? Number)?.toDouble() ?: 0.0
+                    val cUBase = (prodBase?.get("cantidadUnitario") as? Number)?.toDouble() ?: 1.0
+                    (pCBase / cUBase) * ing.gramos
+                }
+            } else {
+                if(gB > 0) (pC / gB) * gV else 0.0
+            }
+
+            val costoTransporte = if(aplicaTransporte) (gV / 1000.0) * 5.0 else 0.0
+            val costoFinal = costoMateriaPrima + cE + costoTransporte
+            val utilidad = pV - costoFinal
+            val margen = if(pV > 0) (utilidad / pV) * 100 else 0.0
+
+            if (costoFinal > 0) {
+                val colorEstado = if(utilidad > 0) DelisaGreenDark else DelisaRed
+                val colorFondoExtra = if(utilidad > 0) DelisaGreen.copy(alpha = 0.05f) else DelisaRed.copy(alpha = 0.05f)
+
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp).shadow(4.dp, RoundedCornerShape(24.dp)),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, colorEstado.copy(alpha = 0.3f))
+                ) {
+                    Column(Modifier.background(colorFondoExtra).padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Analytics, null, tint = colorEstado, modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text("ANÁLISIS DE COSTO REAL", fontWeight = FontWeight.Black, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            CostoMiniItemEditar(if(esCompuesto) "MATERIAL MIX" else "MATERIA PRIMA", "$ ${String.format(Locale.US, "%.2f", costoMateriaPrima)}")
+                            CostoMiniItemEditar("EMPAQUE", "$ ${String.format(Locale.US, "%.2f", cE)}")
+                            CostoMiniItemEditar("TRANSPORTE", "$ ${String.format(Locale.US, "%.2f", costoTransporte)}")
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            CostoMiniItemEditar("COSTO FINAL", "$ ${String.format(Locale.US, "%.2f", costoFinal)}")
+                            CostoMiniItemEditar("UTILIDAD", "$ ${String.format(Locale.US, "%.2f", utilidad)}", color = colorEstado)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+                        Spacer(Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
+                            Text("MARGEN ESTIMADO: ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${String.format(Locale.US, "%.1f", margen)}%", fontSize = 18.sp, fontWeight = FontWeight.Black, color = colorEstado)
+                        }
                     }
                 }
             }
@@ -671,11 +907,13 @@ fun EditarProductoScreen(
                                     "categoria" to categoria,
                                     "subcategoria" to subcategoria,
                                     "descripcion" to descripcion.text,
-                                    "precio" to precioDouble,
+                                    "precio" to ((precio.text.toDoubleOrNull() ?: 0.0) / 100.0),
                                     "cantidadUnitario" to (cantidadUnitario.text.toLongOrNull() ?: 0L),
                                     "unidadesPorDisplay" to (unidadesPorDisplay.text.toLongOrNull() ?: 0L),
                                     "gramosVenta" to (gramosVenta.text.toLongOrNull() ?: 0L),
-                                    "precioCompra" to (precioCompra.text.toDoubleOrNull() ?: 0.0),
+                                    "precioCompra" to ((precioCompra.text.toDoubleOrNull() ?: 0.0) / 100.0),
+                                    "costoEmpaque" to ((costoEmpaque.text.toDoubleOrNull() ?: 0.0) / 100.0),
+                                    "aplicaTransporte" to aplicaTransporte,
                                     "esCompuesto" to esCompuesto,
                                     "ingredientes" to ingredientes.map { mapOf(
                                         "id" to it.id,

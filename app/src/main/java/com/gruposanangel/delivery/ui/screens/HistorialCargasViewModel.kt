@@ -9,10 +9,12 @@ import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.model.Plantilla_Producto
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -28,7 +30,9 @@ data class CargaResumen(
     val timestamp: Long,
     val totalPiezas: Int,
     val montoTotal: Double,
-    val productos: List<Plantilla_Producto>
+    val productos: List<Plantilla_Producto>,
+    val esEmergencia: Boolean = false,
+    val metodoAuditoria: String? = null
 )
 
 data class HistorialCargasUiState(
@@ -43,7 +47,8 @@ data class HistorialCargasUiState(
 )
 
 class HistorialCargasViewModel(
-    private val usuarioRepo: com.gruposanangel.delivery.RepositoryUsuario
+    private val usuarioRepo: com.gruposanangel.delivery.RepositoryUsuario,
+    private val inventarioRepo: RepositoryInventario
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HistorialCargasUiState())
@@ -169,14 +174,15 @@ class HistorialCargasViewModel(
                         timestamp = timestamp,
                         totalPiezas = productos.sumOf { it.cantidad },
                         montoTotal = productos.sumOf { it.cantidad * it.precio },
-                        productos = productos
+                        productos = productos,
+                        esEmergencia = data["esEmergencia"] as? Boolean ?: false
                     )
                 } ?: emptyList()
 
                 // 🔥 2. CONSULTAR TAMBIÉN LOS ARQUEOS (Ajustes de auditoría) con Blindaje
                 try {
                     var arqueosQuery: com.google.firebase.firestore.Query = db.collection("ajustes_inventario")
-                        .whereIn("tipo", listOf("AJUSTE_ARQUEO_FALTANTE", "AJUSTE_ARQUEO_SOBRANTE"))
+                        .whereIn("tipo", listOf("AJUSTE_ARQUEO_FALTANTE", "AJUSTE_ARQUEO_SOBRANTE", "AJUSTE_ARQUEO_OK"))
                         .whereGreaterThanOrEqualTo("timestamp", state.fechaInicio)
                         .whereLessThanOrEqualTo("timestamp", state.fechaFin)
                         .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
@@ -188,33 +194,39 @@ class HistorialCargasViewModel(
                     val arqueosSnap = arqueosQuery.get().await()
                     
                     // Agrupamos los micro-ajustes por su referenciaId (El Arqueo Completo)
+                    val catalogo = inventarioRepo.obtenerProductosLocal().first()
+
                     val listaArqueos = arqueosSnap.documents.groupBy { it.getString("referenciaId") ?: "SIN_ID" }
                         .mapNotNull { (referenciaId, docs) ->
                             if (referenciaId == "SIN_ID") return@mapNotNull null
                             val primerDoc = docs.first()
                             val timestamp = primerDoc.getLong("timestamp") ?: 0L
+                            val metodo = primerDoc.getString("metodoAuditoria")
                             
                             val productos = docs.map { d ->
                                 val tipo = d.getString("tipo")
                                 val cant = d.getLong("cantidad")?.toInt() ?: 0
+                                val prodId = d.getString("productoId") ?: ""
+                                val precio = catalogo.find { it.productoId == prodId }?.precio ?: 0.0
                                 Plantilla_Producto(
-                                    id = d.getString("productoId") ?: "",
+                                    id = prodId,
                                     nombre = d.getString("nombreProducto") ?: "Producto",
-                                    precio = 0.0, 
+                                    precio = precio, 
                                     cantidad = if (tipo == "AJUSTE_ARQUEO_FALTANTE") -cant else cant
                                 )
                             }
 
                             CargaResumen(
                                 id = referenciaId,
-                                origen = "AUDITORÍA FÍSICA",
+                                origen = if (metodo == "LIQUIDACION") "LIQUIDACIÓN" else "AUDITORÍA FÍSICA",
                                 destino = primerDoc.getString("almacenNombre") ?: "",
-                                estado = "ARQUEADO",
+                                estado = if (metodo == "LIQUIDACION") "LIQUIDADO" else "ARQUEADO",
                                 fechaFormateada = sdf.format(Date(timestamp)),
                                 timestamp = timestamp,
                                 totalPiezas = productos.sumOf { it.cantidad },
-                                montoTotal = 0.0, 
-                                productos = productos
+                                montoTotal = productos.sumOf { it.cantidad * it.precio }, // Ahora sí calculamos el valor de la diferencia
+                                productos = productos,
+                                metodoAuditoria = metodo
                             )
                         }.sortedByDescending { it.timestamp }
 
@@ -282,9 +294,10 @@ class HistorialCargasViewModel(
 }
 
 class HistorialCargasViewModelFactory(
-    private val usuarioRepo: com.gruposanangel.delivery.RepositoryUsuario
+    private val usuarioRepo: com.gruposanangel.delivery.RepositoryUsuario,
+    private val inventarioRepo: RepositoryInventario
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = 
-        HistorialCargasViewModel(usuarioRepo) as T
+        HistorialCargasViewModel(usuarioRepo, inventarioRepo) as T
 }

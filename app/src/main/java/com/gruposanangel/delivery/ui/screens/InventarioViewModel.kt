@@ -61,10 +61,10 @@ class InventarioViewModel(
             .onEach { usuario ->
                 if (usuario != null) {
                     val p = usuario.puestoTrabajo?.trim() ?: ""
-                    val adminRoles = listOf("CEO", "Gerente General", "Encargado Almacen", "Auxiliar de almacen")
-                    val esAdmin = p in adminRoles
-                    val esAlmacenRol = p == "Encargado Almacen" || p == "Auxiliar de almacen"
-                    val esDirectivo = p == "CEO" || p == "Gerente General"
+                    val adminRoles = listOf("CEO", "GERENTE GENERAL", "ENCARGADO ALMACEN", "AUXILIAR DE ALMACEN", "SUPERVISOR")
+                    val esAdmin = p.uppercase() in adminRoles
+                    val esAlmacenRol = p.uppercase().contains("ALMACEN") || p.uppercase().contains("BODEGA")
+                    val esDirectivo = p.uppercase() == "CEO" || p.uppercase() == "GERENTE GENERAL"
                     
                     val nombreAlmacen = usuario.ultimoAlmacenNombre
                     
@@ -108,7 +108,7 @@ class InventarioViewModel(
                             puestoTrabajo = usuario.puestoTrabajo,
                             rutaAsignada = nombreAlmacen,
                             isAdmin = esAdmin,
-                            isLoading = false,
+                            isLoading = if (state.almacenSeleccionado == null) true else state.isLoading,
                             perfilesDisponibles = if (esAuditoriaExterna) state.perfilesDisponibles else perfiles,
                             perfilSeleccionado = if (esAuditoriaExterna) state.perfilSeleccionado else perfilActualizado
                         )
@@ -118,15 +118,18 @@ class InventarioViewModel(
                         cargarListaAlmacenes()
                     }
                     
-                    if (esDirectivo && _uiState.value.almacenSeleccionado == null) {
-                        activarVistaGlobal()
-                    } else if (esAlmacenRol && _uiState.value.almacenSeleccionado == null) {
-                        seleccionarAlmacen(nombreAlmacen ?: "Almacen Huasteca")
-                    } else if (!nombreAlmacen.isNullOrEmpty() && _uiState.value.almacenSeleccionado == null) {
-                        seleccionarAlmacen(nombreAlmacen)
-                        escucharNotificaciones(nombreAlmacen)
-                        cargarStockDanado(nombreAlmacen)
-                        observarMovimientosLocales(nombreAlmacen, usuario.uid)
+                    // 🔥 MEJORA DE PERSISTENCIA: Solo auto-seleccionar si no hay nada en memoria
+                    if (_uiState.value.almacenSeleccionado == null) {
+                        if (esDirectivo) {
+                            activarVistaGlobal()
+                        } else if (esAlmacenRol) {
+                            seleccionarAlmacen(nombreAlmacen ?: "Almacen Huasteca")
+                        } else if (!nombreAlmacen.isNullOrEmpty()) {
+                            seleccionarAlmacen(nombreAlmacen)
+                            escucharNotificaciones(nombreAlmacen)
+                            cargarStockDanado(nombreAlmacen)
+                            observarMovimientosLocales(nombreAlmacen, usuario.uid)
+                        }
                     }
                 }
             }
@@ -162,8 +165,13 @@ class InventarioViewModel(
                     }
 
                     val modelos = entities
-                        .filter { it.cantidadDisponible > 0 && it.id.contains(almacenActual) }
+                        .filter { it.id.contains(almacenActual) }
                         .filter(predicate)
+                        .filter { 
+                            // 🔥 MODIFICACIÓN: Ocultar ceros para vendedores (excepto Huasteca)
+                            val esHuasteca = almacenActual == "Almacen Huasteca"
+                            if (esHuasteca) true else it.cantidadDisponible > 0
+                        }
                         .map { entity ->
                             Plantilla_Producto(
                                 id = entity.id,
@@ -349,7 +357,6 @@ class InventarioViewModel(
                 } ?: emptyMap()
 
                 val productosStock = stockMap.mapNotNull { (prodId, cant) ->
-                    if (cant <= 0) return@mapNotNull null
                     val info = catalogo[prodId]
                     
                     val pMarca = info?.getString("marca") ?: "Delisa"
@@ -372,6 +379,10 @@ class InventarioViewModel(
                     }
 
                     if (!cumplePerfil) return@mapNotNull null
+
+                    // 🔥 MODIFICACIÓN: Ocultar ceros para vendedores (excepto Huasteca)
+                    val esHuasteca = almacen == "Almacen Huasteca"
+                    if (!esHuasteca && cant <= 0) return@mapNotNull null
 
                     Plantilla_Producto(
                         id = prodId, 
@@ -410,7 +421,6 @@ class InventarioViewModel(
                 val catalogo = catalogSnap.documents.associateBy { it.id }
                 
                 val productos = globalStock.mapNotNull { (prodId, cant) ->
-                    if (cant <= 0) return@mapNotNull null
                     val info = catalogo[prodId]
                     
                     Plantilla_Producto(
@@ -441,7 +451,6 @@ class InventarioViewModel(
                 val perfil = _uiState.value.perfilSeleccionado
 
                 val lista = danado.mapNotNull { (prodId, cant) ->
-                    if (cant <= 0) return@mapNotNull null
                     val info = catalogo[prodId]
                     
                     val pMarca = info?.getString("marca") ?: "Delisa"
@@ -462,6 +471,10 @@ class InventarioViewModel(
                     }
 
                     if (!cumplePerfil) return@mapNotNull null
+
+                    // 🔥 MODIFICACIÓN: Ocultar ceros para vendedores (excepto Huasteca)
+                    val esHuasteca = almacen == "Almacen Huasteca"
+                    if (!esHuasteca && cant <= 0) return@mapNotNull null
 
                     Plantilla_Producto(
                         id = prodId, 

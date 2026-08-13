@@ -4,10 +4,11 @@ import android.content.Context
 import android.util.Log
 import com.gruposanangel.delivery.data.RepositoryCliente
 import com.gruposanangel.delivery.data.RepositoryGasto
-import com.gruposanangel.delivery.data.VentaEntity
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.util.*
@@ -68,53 +69,21 @@ class SyncManager(
                 .whereGreaterThanOrEqualTo("fecha", com.google.firebase.Timestamp(noventaDiasAtras))
                 .get().await()
 
-            // Mapeo de Clientes para atribución local de rutas y FOTOGRAFÍAS
-            val clientesLocal = clienteRepository.obtenerClientesLocalNoFlow()
-            val clientToRutaMap = clientesLocal.associate { it.id to (it.rutaId ?: "") }
-            val clientToFotoMap = clientesLocal.associate { it.id to (it.fotografiaUrl ?: "") }
+            Log.i(TAG, "📦 Procesando ${ventasSnap.size()} ventas para blindaje local...")
 
-            val entities = ventasSnap.documents.map { doc ->
-                val vClienteId = doc.getString("clienteId") ?: ""
-                val vRutaId = doc.getString("rutaId") ?: clientToRutaMap[vClienteId] ?: ""
-                val vFoto = doc.getString("clienteImagenUrl") ?: clientToFotoMap[vClienteId] ?: ""
-                
-                val fRaw = doc.get("fecha")
-                val fechaMs = when(fRaw) {
-                    is com.google.firebase.Timestamp -> fRaw.toDate().time
-                    is Number -> fRaw.toLong()
-                    else -> System.currentTimeMillis()
+            // 🔥 MEJORA OFFLINE-FIRST: Procesamos cada documento para asegurar que bajen los detalles (productos)
+            // Esto garantiza que el celular tenga TODA la info lista para trabajar sin internet.
+            coroutineScope {
+                ventasSnap.documents.forEach { doc ->
+                    launch {
+                        try {
+                            ventaRepository.procesarDocumentoVenta(doc, db, doc.getString("vendedorId") ?: "")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error procesando venta ${doc.id} en sync: ${e.message}")
+                        }
+                    }
                 }
-
-                VentaEntity(
-                    id = doc.id,
-                    clienteId = vClienteId,
-                    clienteNombre = doc.getString("clienteNombre") ?: "Cliente",
-                    clienteImagenUrl = vFoto, // 🔥 Aseguramos que la foto se guarde desde el inicio
-                    total = (doc.get("total") as? Number)?.toDouble() ?: 0.0,
-                    metodoPago = doc.getString("metodoPago") ?: "Efectivo",
-                    vendedorId = doc.getString("vendedorId") ?: "",
-                    vendedorNombre = doc.getString("vendedorNombre"),
-                    almacenId = doc.getString("almacenId") ?: doc.getString("almacenVendedorId"),
-                    rutaId = vRutaId,
-                    rutaNombre = doc.getString("rutaNombre") ?: vRutaId,
-                    fecha = fechaMs,
-                    horaDispositivo = doc.getLong("horaDispositivo") ?: fechaMs,
-                    horaVerificada = doc.getLong("horaVerificada") ?: fechaMs,
-                    alertaTiempo = doc.getBoolean("alertaTiempo") ?: false,
-                    latitudVenta = doc.getDouble("latitudVenta") ?: 0.0,
-                    longitudVenta = doc.getDouble("longitudVenta") ?: 0.0,
-                    fueraDeRango = doc.getBoolean("fueraDeRango") ?: false,
-                    fotoEvidenciaVisita = doc.getString("fotoEvidenciaVisita"),
-                    sincronizado = true,
-                    firestoreId = doc.id,
-                    estado = doc.getString("estado") ?: "pagada",
-                    motivoVisita = doc.getString("motivoVisita")
-                )
             }
-            // 🛡️ PROTECCIÓN DE DATOS: Usamos OnConflictStrategy.IGNORE (vía VentaDao)
-            // para que los registros de 90 días no borren los detalles (productos)
-            // de las ventas que ya tenemos completas en el teléfono.
-            ventaRepository.insertarVentas(entities)
             
             // 4. SINCRONIZAR GASTOS
             gastoRepository.descargarGastosPeriodo(uid, noventaDiasAtras.time, System.currentTimeMillis())

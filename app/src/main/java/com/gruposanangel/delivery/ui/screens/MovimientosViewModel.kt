@@ -241,6 +241,7 @@ class MovimientosViewModel(
     }
 
     fun crearOrden(origen: String, destino: String, productosSeleccionados: List<Plantilla_Producto>, cantidades: Map<String, Int>, onSuccess: (String) -> Unit) {
+        if (_uiState.value.isLoading) return // 🔥 CANDADO: Evitar múltiples clics
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {
@@ -303,6 +304,7 @@ class MovimientosViewModel(
     }
 
     fun confirmarCargaDirecta(origen: String, destino: String, productosSeleccionados: List<Plantilla_Producto>, cantidades: Map<String, Int>, onSuccess: () -> Unit) {
+        if (_uiState.value.isLoading) return // 🔥 CANDADO: Evitar múltiples clics
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
             try {

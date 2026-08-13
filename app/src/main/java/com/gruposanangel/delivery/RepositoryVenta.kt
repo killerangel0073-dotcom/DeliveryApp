@@ -395,7 +395,7 @@ class VentaRepository(
             }
         }
 
-    private suspend fun procesarDocumentoVenta(
+    suspend fun procesarDocumentoVenta(
         doc: com.google.firebase.firestore.DocumentSnapshot, 
         firestore: FirebaseFirestore,
         vendedorIdAsignado: String // 🔥 UID forzado para asegurar Room

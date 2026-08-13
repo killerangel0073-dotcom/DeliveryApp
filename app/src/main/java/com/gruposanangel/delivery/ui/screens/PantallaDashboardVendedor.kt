@@ -69,6 +69,7 @@ import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.PantallaSeleccionImpresora
 import com.gruposanangel.delivery.utilidades.VendorBatteryIndicator
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -138,6 +139,7 @@ fun PantallaDashboardVendedor(
                 onNavigate = { navController.navigate(it) },
                 onGastoRegistrado = { m, c, d, cb -> viewModel.registrarGasto(m, c, d, cb) },
                 onMetaFriturasChange = { viewModel.actualizarMetaFrituras(it) },
+                onFechaFiltroChange = { viewModel.actualizarFechaFiltro(it) },
                 onConfigurarImpresora = {
                     val hasPermission = bluetoothPermissions.all {
                         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -185,12 +187,50 @@ fun DashboardVendedorView(
     onNavigate: (String) -> Unit,
     onGastoRegistrado: (Double, String, String, () -> Unit) -> Unit,
     onMetaFriturasChange: (Int) -> Unit,
+    onFechaFiltroChange: (Long) -> Unit,
     onConfigurarImpresora: () -> Unit
 ) {
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showGastoSheet by remember { mutableStateOf(false) }
     var showMetaDialog by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = uiState.fechaFiltroDiario)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { onFechaFiltroChange(it) }
+                        showDatePicker = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("ACEPTAR", fontWeight = FontWeight.Black, color = Color.White) }
+            },
+            dismissButton = { 
+                TextButton(onClick = { showDatePicker = false }) { 
+                    Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold) 
+                } 
+            },
+            colors = DatePickerDefaults.colors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            DatePicker(
+                state = datePickerState, 
+                showModeToggle = false, 
+                colors = DatePickerDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    headlineContentColor = DelisaRed,
+                    selectedDayContainerColor = DelisaRed,
+                    selectedDayContentColor = Color.White,
+                    todayDateBorderColor = DelisaRed,
+                    todayContentColor = DelisaRed
+                )
+            )
+        }
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         // 🔝 FILA DE ESTADO SUPERIOR
@@ -373,8 +413,10 @@ fun DashboardVendedorView(
             clientes = uiState.clientesDia, 
             ticketPromedio = uiState.ticketPromedioDia, 
             formato = formatoMoneda,
+            fechaFiltro = uiState.fechaFiltroDiario,
             onCierreClick = { onNavigate("CIERRE_DIA") },
-            onGastoClick = { showGastoSheet = true }
+            onGastoClick = { showGastoSheet = true },
+            onCalendarClick = { showDatePicker = true }
         )
 
         // 🔥 NUEVA SECCIÓN: DESGLOSE POR PERFIL (Siempre visible si hay múltiples perfiles)
@@ -521,10 +563,11 @@ fun ModalGastoSheet(
     onDismiss: () -> Unit,
     onGuardar: (Double, String, String) -> Unit
 ) {
+    val context = LocalContext.current
     var monto by remember { mutableStateOf("") }
     var categoria by remember { mutableStateOf("Gasolina") }
     var descripcion by remember { mutableStateOf("") }
-    val categorias = listOf("Gasolina", "Estacionamiento", "Papelería", "Mantenimiento", "Otros")
+    val categorias = listOf("Gasolina", "Papelería", "Otros")
     var expanded by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
@@ -542,7 +585,9 @@ fun ModalGastoSheet(
                 text = "REGISTRAR GASTO",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
             )
             
             Spacer(Modifier.height(24.dp))
@@ -604,12 +649,14 @@ fun ModalGastoSheet(
 
             Spacer(Modifier.height(16.dp))
 
+            val esObligatorio = categoria != "Gasolina"
             OutlinedTextField(
                 value = descripcion,
                 onValueChange = { descripcion = it },
-                label = { Text("Descripción (Opcional)") },
+                label = { Text(if (esObligatorio) "Descripción (Obligatoria)" else "Descripción (Opcional)") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
+                isError = esObligatorio && descripcion.trim().isEmpty(),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = DelisaRed,
                     focusedLabelColor = DelisaRed,
@@ -623,7 +670,13 @@ fun ModalGastoSheet(
             Button(
                 onClick = {
                     val m = monto.toDoubleOrNull() ?: 0.0
-                    if (m > 0) {
+                    val esValido = if (esObligatorio) descripcion.trim().isNotEmpty() else true
+                    
+                    if (m <= 0) {
+                        Toast.makeText(context, "Ingresa un monto válido", Toast.LENGTH_SHORT).show()
+                    } else if (!esValido) {
+                        Toast.makeText(context, "La descripción es obligatoria para $categoria", Toast.LENGTH_LONG).show()
+                    } else {
                         onGuardar(m, categoria, descripcion)
                     }
                 },
@@ -897,34 +950,61 @@ fun VentaPrincipalCard(
     clientes: Int, 
     ticketPromedio: Double, 
     formato: NumberFormat,
+    fechaFiltro: Long,
     onCierreClick: () -> Unit,
-    onGastoClick: () -> Unit
+    onGastoClick: () -> Unit,
+    onCalendarClick: () -> Unit
 ) {
+    val esHoy = remember(fechaFiltro) {
+        val cal = Calendar.getInstance()
+        val calFiltro = Calendar.getInstance().apply { timeInMillis = fechaFiltro }
+        cal.get(Calendar.YEAR) == calFiltro.get(Calendar.YEAR) && 
+        cal.get(Calendar.DAY_OF_YEAR) == calFiltro.get(Calendar.DAY_OF_YEAR)
+    }
+
+    val titulo = if (esHoy) "VENTA TOTAL HOY" else {
+        val sdf = SimpleDateFormat("dd 'de' MMM", Locale.forLanguageTag("es-MX"))
+        "VENTA DEL ${sdf.format(Date(fechaFiltro))}".uppercase()
+    }
+
     val progreso = (monto / meta).coerceIn(0.0, 1.0).toFloat()
-    Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp).shadow(8.dp, RoundedCornerShape(24.dp)), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .shadow(8.dp, RoundedCornerShape(24.dp)), 
+        shape = RoundedCornerShape(24.dp), 
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
         Column(Modifier.padding(24.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("VENTA TOTAL HOY", fontSize = 11.sp, fontWeight = FontWeight.Black, color = DelisaRed)
-                
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        onClick = onGastoClick,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(28.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Rounded.LocalGasStation, null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(12.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("GASTOS", color = MaterialTheme.colorScheme.onSurface, fontSize = 10.sp, fontWeight = FontWeight.Black)
-                        }
-                    }
-
+            Row(
+                modifier = Modifier.fillMaxWidth(), 
+                horizontalArrangement = Arrangement.SpaceBetween, 
+                verticalAlignment = Alignment.Top
+            ) {
+                // IZQUIERDA: CALENDARIO Y TÍTULO
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onCalendarClick() }
+                        .padding(vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CalendarMonth, 
+                        contentDescription = "Cambiar Fecha", 
+                        tint = DelisaRed, 
+                        modifier = Modifier.size(18.dp)
+                    )
                     Spacer(Modifier.width(8.dp))
-
+                    Text(titulo, fontSize = 11.sp, fontWeight = FontWeight.Black, color = DelisaRed)
+                }
+                
+                // DERECHA: BOTONES DE ACCIÓN (UNO BAJO EL OTRO)
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Surface(
                         onClick = onCierreClick,
                         color = DelisaRed,
@@ -938,6 +1018,22 @@ fun VentaPrincipalCard(
                             Icon(Icons.Rounded.Lock, null, tint = Color.White, modifier = Modifier.size(12.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("CERRAR RUTA", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+
+                    Surface(
+                        onClick = onGastoClick,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.LocalGasStation, null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("GASTOS", color = MaterialTheme.colorScheme.onSurface, fontSize = 10.sp, fontWeight = FontWeight.Black)
                         }
                     }
                 }
@@ -1284,5 +1380,5 @@ fun DashboardVendedorActivePreview() {
         ventaBloque = 60000.0,
         ventasPorDiaSemana = sampleVentas
     )
-    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}, {}, {_,_,_,_ -> }, {}, {}) }
+    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}, {}, {_,_,_,_ -> }, {}, {}, {}) }
 }

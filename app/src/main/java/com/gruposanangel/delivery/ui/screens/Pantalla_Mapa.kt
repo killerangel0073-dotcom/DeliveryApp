@@ -7,24 +7,23 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.util.Log
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Assignment
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
@@ -52,9 +51,7 @@ import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.VendorBatteryIndicator
 import com.gruposanangel.delivery.utilidades.VendorGpsIndicator
 import com.gruposanangel.delivery.utilidades.VendorSpeedIndicator2
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.io.File
 import java.util.Date
 
 @SuppressLint("MissingPermission")
@@ -67,6 +64,16 @@ fun MapaScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp
+
+    // 📏 VARIABLES ADAPTATIVAS SEGÚN EL TAMAÑO DE PANTALLA
+    val esPantallaPequena = screenWidth < 380
+    val tamIconoLateral = if (esPantallaPequena) 18.dp else 22.dp
+    val tamBotonLateral = if (esPantallaPequena) 38.dp else 44.dp
+    val tamTextoRuta = if (esPantallaPequena) 10.sp else 12.sp
+    val tamIconoRuta = if (esPantallaPequena) 14.dp else 16.dp
+    val paddingBotones = if (esPantallaPequena) 8.dp else 16.dp
 
     val isDark = ThemeConfig.isActuallyDark
 
@@ -75,9 +82,7 @@ fun MapaScreen(
         if (isAdminOverride != null) {
             viewModel.sobreescribirAdmin(isAdminOverride)
         }
-
         viewModel.startRealtimeSync(context)
-        // Inicializar estilo de mapa según el tema actual si no se ha cambiado
         if (uiState.mapStyleJson == null && uiState.mapType == MapType.NORMAL) {
             if (isDark) {
                 viewModel.setMapType(MapType.NORMAL, darkMapStyleJson)
@@ -85,10 +90,17 @@ fun MapaScreen(
         }
     }
 
-    // Seguir el tema si cambia el sistema/preferencia (opcional, pero recomendado para consistencia)
     LaunchedEffect(isDark) {
         if (uiState.mapType == MapType.NORMAL) {
             viewModel.setMapType(MapType.NORMAL, if (isDark) darkMapStyleJson else null)
+        }
+    }
+
+    // 🔔 GESTIÓN DE ERRORES
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let {
+            android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
+            viewModel.clearError()
         }
     }
 
@@ -97,48 +109,49 @@ fun MapaScreen(
     val vendedorStates: SnapshotStateMap<String, AnimatableMarker> = remember { mutableStateMapOf() }
     val vendedorMarkerStates: SnapshotStateMap<String, MarkerState> = remember { mutableStateMapOf() }
 
-    // Icono de vendedor (PNG) - Mantener tamaño original/previo
-    val vendedorIcon = remember(mapIsReady) {
-        if (mapIsReady) bitmapDescriptorFromPng(context, R.drawable.marcador_vendedor, 120, 150) else null
-    }
+    // Iconos
+    val vendedorIcon = remember(mapIsReady) { if (mapIsReady) bitmapDescriptorFromPng(context, R.drawable.marcador_vendedor, 120, 150) else null }
+    val iconAlto = remember(mapIsReady) { if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorverde, 100, 160) else null }
+    val iconMedio = remember(mapIsReady) { if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadoramarillo, 100, 160) else null }
+    val iconBajo = remember(mapIsReady) { if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorrojo, 100, 160) else null }
+    val iconAltoSel = remember(mapIsReady) { if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorverde, 130, 208) else null }
+    val iconMedioSel = remember(mapIsReady) { if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadoramarillo, 130, 208) else null }
+    val iconBajoSel = remember(mapIsReady) { if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorrojo, 130, 208) else null }
+    val iconHojaRuta = remember(mapIsReady) { if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadornaranja, 130, 208) else null }
+    val iconNegroSel = remember(mapIsReady) { if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadornegro, 130, 208) else null }
 
-    // ✅ CORRECCIÓN LÓGICA DE COLORES Y TAMAÑOS
-    val iconAlto = remember(mapIsReady) {
-        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorverde, 100, 160) else null
-    }
-    val iconMedio = remember(mapIsReady) {
-        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadoramarillo, 100, 160) else null
-    }
-    val iconBajo = remember(mapIsReady) {
-        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorrojo, 100, 160) else null
-    }
+    // 📏 CÁLCULO DE ELEVACIÓN DINÁMICA
+    val hayRuta = uiState.modoHojaRuta && uiState.itinerarioActivo != null
+    val hayDetalle = uiState.selectedCliente != null || uiState.vendedorSeleccionadoRuta != null
+    
+    val paddingFab by animateDpAsState(
+        targetValue = when {
+            hayRuta && hayDetalle -> 210.dp
+            hayDetalle -> 140.dp
+            hayRuta -> 80.dp
+            else -> 0.dp
+        },
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessLow),
+        label = "fabPadding"
+    )
 
-    // 🔍 ICONOS PARA ESTADO SELECCIONADO (Más grandes: 130x208)
-    val iconAltoSel = remember(mapIsReady) {
-        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorverde, 130, 208) else null
-    }
-    val iconMedioSel = remember(mapIsReady) {
-        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadoramarillo, 130, 208) else null
-    }
-    val iconBajoSel = remember(mapIsReady) {
-        if (mapIsReady) bitmapDescriptorFromVectorLocallyResized(context, R.drawable.marcadorrojo, 130, 208) else null
-    }
-
-    val mostrarTarjetaInferior = uiState.selectedCliente != null || uiState.vendedorSeleccionadoRuta != null
-
-    // ✅ ESCUCHA DE EVENTOS DE CÁMARA AUTOMÁTICOS (CENTRO AL ACTIVAR CLIENTES)
+    // ✅ ESCUCHA DE EVENTOS DE CÁMARA
     LaunchedEffect(Unit) {
         viewModel.cameraEvents.collect { event ->
-            if (event is CameraEvent.CenterOnClients && uiState.clientes.isNotEmpty()) {
-                try {
-                    val builder = LatLngBounds.Builder()
-                    uiState.clientes.forEach { builder.include(LatLng(it.ubicacionLat, it.ubicacionLng)) }
-                    viewModel.cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(builder.build(), 200), 1200)
-                } catch (e: Exception) { }
+            if (event is CameraEvent.CenterOnClients) {
+                val listaAEncuadrar = if (uiState.modoHojaRuta) uiState.clientesRuta else uiState.clientes
+                if (listaAEncuadrar.isNotEmpty()) {
+                    try {
+                        val builder = LatLngBounds.Builder()
+                        listaAEncuadrar.forEach { builder.include(LatLng(it.ubicacionLat, it.ubicacionLng)) }
+                        viewModel.cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(builder.build(), 200), 1200)
+                    } catch (e: Exception) { }
+                }
             }
         }
     }
 
+    // ✅ CENTRADO INICIAL GPS
     LaunchedEffect(Unit) {
         if (viewModel.cameraPositionState.isMoving.not() && viewModel.cameraPositionState.position.target.latitude == 19.4768) {
             val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -156,7 +169,8 @@ fun MapaScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // 📱 CONTENEDOR PRINCIPAL - ELIMINADO SCAFFOLD PARA EDGE-TO-EDGE
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         GoogleMap(
             onMapLoaded = { mapIsReady = true },
             modifier = Modifier.fillMaxSize(),
@@ -172,9 +186,7 @@ fun MapaScreen(
             ),
             onMapClick = {
                 viewModel.selectCliente(null)
-                if (uiState.seguirVendedor != null) {
-                    viewModel.selectVendedor(uiState.seguirVendedor)
-                }
+                viewModel.selectVendedor(null)
             }
         ) {
             if (!mapIsReady) return@GoogleMap
@@ -190,27 +202,12 @@ fun MapaScreen(
 
                 markerState.position = LatLng(state.animLat.value.toDouble(), state.animLng.value.toDouble())
 
-                // 🎥 SEGUIMIENTO DE CÁMARA SUAVE Y PRECISO (Sin perder precisión de ubicación)
                 LaunchedEffect(vendedor.lat, vendedor.lng, uiState.seguirVendedor) {
                     if (uiState.seguirVendedor == vendedor.ruta && vendedor.lat != 0.0) {
                         val targetPos = LatLng(vendedor.lat, vendedor.lng)
-                        
-                        // Solo movemos la cámara si el vendedor se alejó más de 5 metros del centro actual
-                        // para evitar vibraciones innecesarias, pero manteniendo el objetivo centrado.
-                        val currentCamPos = viewModel.cameraPositionState.position.target
-                        val distanceResults = FloatArray(1)
-                        android.location.Location.distanceBetween(
-                            currentCamPos.latitude, currentCamPos.longitude,
-                            targetPos.latitude, targetPos.longitude,
-                            distanceResults
-                        )
-                        
-                        if (distanceResults[0] > 5f) { // Umbral de 5 metros para suavizado
-                            viewModel.cameraPositionState.animate(
-                                CameraUpdateFactory.newLatLng(targetPos), 
-                                1000 // Animación fluida de 1 segundo
-                            )
-                        }
+                        val distResults = FloatArray(1)
+                        android.location.Location.distanceBetween(viewModel.cameraPositionState.position.target.latitude, viewModel.cameraPositionState.position.target.longitude, targetPos.latitude, targetPos.longitude, distResults)
+                        if (distResults[0] > 5f) viewModel.cameraPositionState.animate(CameraUpdateFactory.newLatLng(targetPos), 1000)
                         markerState.showInfoWindow()
                     }
                 }
@@ -219,476 +216,454 @@ fun MapaScreen(
                     val animSpec = tween<Float>(800)
                     launch { state.animLat.animateTo(vendedor.lat.toFloat(), animSpec) }
                     launch { state.animLng.animateTo(vendedor.lng.toFloat(), animSpec) }
-
-                    val rot = calcularAngulo(state.animLat.value.toDouble(), state.animLng.value.toDouble(), vendedor.lat, vendedor.lng)
-                    state.animRotation.animateTo(rot, tween(500))
+                    state.animRotation.animateTo(calcularAngulo(state.animLat.value.toDouble(), state.animLng.value.toDouble(), vendedor.lat, vendedor.lng), tween(500))
                 }
 
                 val haloColor = lerp(MaterialTheme.colorScheme.onSurfaceVariant.copy(0.35f), DelisaRed.copy(0.35f), state.animHaloColorFactor.value)
-                val visualRadius = (state.animRadius.value * 5f).coerceIn(30f, 180f)
-
-                Circle(
-                    center = markerState.position,
-                    radius = visualRadius.toDouble(),
-                    strokeColor = haloColor,
-                    strokeWidth = 2f,
-                    fillColor = haloColor.copy(0.2f)
-                )
-
-                Marker(
-                    state = markerState,
-                    title = vendedor.ruta,
-                    icon = vendedorIcon,
-                    onClick = {
-                        viewModel.selectVendedor(vendedor.ruta)
-                        scope.launch { viewModel.cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(markerState.position, 18f)) }
-                        true
-                    }
-                )
+                Circle(center = markerState.position, radius = (state.animRadius.value * 5f).coerceIn(30f, 180f).toDouble(), strokeColor = haloColor, strokeWidth = 2f, fillColor = haloColor.copy(0.2f))
+                Marker(state = markerState, title = vendedor.ruta, icon = vendedorIcon, onClick = { viewModel.selectVendedor(vendedor.ruta); scope.launch { viewModel.cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(markerState.position, 18f)) }; true })
             }
 
-            // DIBUJAR CLIENTES
-            if (uiState.markersVisible) {
-                uiState.clientes.forEach { cliente ->
-                    key(cliente.id) { // 🔥 Estabilización de marcador (Evita redibujados innecesarios)
-                        val isSelected = uiState.selectedCliente?.id == cliente.id
+            // 🛡️ DIBUJAR CLIENTES - LÓGICA ULTRA-ESTABLE
+            val idsRuta = remember(uiState.modoHojaRuta, uiState.clientesRuta) { 
+                if (uiState.modoHojaRuta) uiState.clientesRuta.map { it.id }.toSet() else emptySet() 
+            }
+            val combinada = (uiState.clientes + uiState.clientesRuta).distinctBy { it.id }
 
-                        val icon = remember(cliente.valor, isSelected, mapIsReady) {
-                            if (!mapIsReady) return@remember null
-                            when (cliente.valor.lowercase()) {
-                                "alto" -> if (isSelected) iconAltoSel else iconAlto
-                                "medio" -> if (isSelected) iconMedioSel else iconMedio
-                                "bajo" -> if (isSelected) iconBajoSel else iconBajo
-                                else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
-                            }
+            combinada.forEach { cliente ->
+                val esRuta = idsRuta.contains(cliente.id)
+                val esCobertura = uiState.markersVisible && uiState.clientes.any { it.id == cliente.id }
+                val visible = esRuta || esCobertura
+                
+                val isSelected = uiState.selectedCliente?.id == cliente.id
+                val markerIcon = remember(cliente.valor, isSelected, esRuta, mapIsReady) {
+                    if (!mapIsReady) return@remember null
+                    if (esRuta) { if (isSelected) iconNegroSel else iconHojaRuta }
+                    else {
+                        when (cliente.valor.lowercase()) {
+                            "alto" -> if (isSelected) iconAltoSel else iconAlto
+                            "medio" -> if (isSelected) iconMedioSel else iconMedio
+                            "bajo" -> if (isSelected) iconBajoSel else iconBajo
+                            else -> BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
                         }
-                        
-                        val mState = rememberMarkerState(key = cliente.id, position = LatLng(cliente.ubicacionLat, cliente.ubicacionLng))
+                    }
+                }
 
-                        Marker(
-                            state = mState,
-                            zIndex = if (isSelected) 2f else 1f,
-                            title = cliente.nombreNegocio,
-                            icon = icon,
-                            onClick = {
-                                viewModel.selectCliente(cliente)
-                                scope.launch { 
-                                    viewModel.cameraPositionState.animate(
-                                        CameraUpdateFactory.newLatLngZoom(mState.position, 16.5f), 
-                                        800
-                                    ) 
-                                }
-                                true
-                            }
-                        )
+                key(cliente.id) {
+                    Marker(
+                        state = rememberMarkerState(key = cliente.id, position = LatLng(cliente.ubicacionLat, cliente.ubicacionLng)),
+                        visible = visible,
+                        zIndex = if (esRuta) (if (isSelected) 3f else 2.5f) else (if (isSelected) 2f else 1f),
+                        title = cliente.nombreNegocio,
+                        icon = markerIcon ?: BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED),
+                        onClick = { viewModel.selectCliente(cliente); scope.launch { viewModel.cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(LatLng(cliente.ubicacionLat, cliente.ubicacionLng), 16.5f), 800) }; true }
+                    )
+                }
+            }
+        }
+
+        // CONTROLES FLOTANTES
+        val p = uiState.puestoTrabajo?.trim() ?: ""
+        val esAdminEfectivo = p in listOf("CEO", "Gerente General", "Supervisor", "Administración", "Gerente")
+
+        // 🛣️ BOTONES DE RUTA LATERALES (TOP START)
+        Column(
+            Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = paddingBotones, top = paddingBotones),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (esAdminEfectivo) {
+                uiState.vendedores.forEach { v ->
+                    val activo = uiState.seguirVendedor == v.ruta
+                    val cardBg = if (activo) DelisaRed else if (isDark) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+                    val textTint = if (activo) Color.White else if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+                    
+                    Card(
+                        modifier = Modifier.shadow(4.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp)).clickable { viewModel.toggleSeguirVendedor(v.ruta) }, 
+                        shape = RoundedCornerShape(16.dp), 
+                        colors = CardDefaults.cardColors(containerColor = cardBg)
+                    ) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.LocalShipping, null, tint = if (activo) Color.White else DelisaRed, modifier = Modifier.size(tamIconoRuta))
+                            Spacer(Modifier.width(6.dp)); Text(text = v.ruta.replace(" Delisa", ""), fontSize = tamTextoRuta, fontWeight = FontWeight.Black, color = textTint)
+                        }
+                    }
+                }
+            } else {
+                uiState.miRuta?.let { rutaAsignada ->
+                    val activo = uiState.seguirVendedor == rutaAsignada
+                    val cardBg = if (activo) DelisaRed else if (isDark) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+                    val textTint = if (activo) Color.White else if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+
+                    Card(
+                        modifier = Modifier.shadow(4.dp, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).clickable { viewModel.toggleSeguirVendedor(rutaAsignada) }, 
+                        shape = RoundedCornerShape(12.dp), 
+                        colors = CardDefaults.cardColors(containerColor = cardBg)
+                    ) {
+                        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.MyLocation, null, tint = if (activo) Color.White else DelisaRed, modifier = Modifier.size(tamIconoRuta))
+                            Spacer(Modifier.width(6.dp)); Text(text = "MI RUTA", fontSize = tamTextoRuta, fontWeight = FontWeight.Black, color = textTint)
+                        }
                     }
                 }
             }
         }
 
-        // CONTROLES DE CAPAS Y RUTAS PREMIUM
-        Box(Modifier.fillMaxSize().padding(16.dp)) {
+        // 🌍 CAPAS Y VISOR (TOP END)
+        var showLayerSheet by remember { mutableStateOf(false) }
+        var showRouteSelector by remember { mutableStateOf(false) }
+        var showRouteMenu by remember { mutableStateOf(false) }
+        val sheetState = rememberModalBottomSheetState()
+        Column(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(paddingBotones).padding(top = paddingBotones), horizontalAlignment = Alignment.End) {
+            val surfaceColor = if (isDark) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+            Surface(onClick = { showLayerSheet = true }, color = surfaceColor, shadowElevation = 4.dp, shape = RoundedCornerShape(14.dp), modifier = Modifier.size(tamBotonLateral)) {
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Layers, null, modifier = Modifier.size(tamIconoLateral), tint = DelisaRed) }
+            }
+            Spacer(Modifier.height(10.dp))
+            Surface(onClick = { showRouteSelector = true }, color = if (uiState.modoHojaRuta) WarningOrange else surfaceColor, shadowElevation = 4.dp, shape = RoundedCornerShape(14.dp), modifier = Modifier.size(tamBotonLateral)) {
+                Box(contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Filled.Assignment, null, modifier = Modifier.size(tamIconoLateral), tint = if (uiState.modoHojaRuta) Color.White else WarningOrange) }
+            }
+            if (esAdminEfectivo) {
+                Spacer(Modifier.height(10.dp))
+                Surface(onClick = { navController.navigate("HISTORIAL_RUTA") }, color = surfaceColor, shadowElevation = 4.dp, shape = RoundedCornerShape(14.dp), modifier = Modifier.size(tamBotonLateral)) {
+                    Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.History, null, modifier = Modifier.size(tamIconoLateral), tint = DelisaRed) }
+                }
+            }
+        }
 
-            FloatingActionButton(
-                onClick = {
-                    val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                    if (hasPermission) {
-                        val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-                        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-                            location?.let {
-                                scope.launch {
-                                    viewModel.cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 18f))
+        // 🏷️ TOGGLE CLIENTES (TOP CENTER) - REDISEÑO PROFESIONAL DELISA
+        Column(
+            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = paddingBotones),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            val activo = uiState.markersVisible
+            val bgColor by animateColorAsState(
+                targetValue = if (activo) {
+                    if (isDark) DelisaRed.copy(alpha = 0.85f) else DelisaRed
+                } else {
+                    if (isDark) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+                },
+                animationSpec = tween(400), label = "toggleBg"
+            )
+            val contentColor by animateColorAsState(
+                targetValue = if (activo) Color.White else if (isDark) Color.White else MaterialTheme.colorScheme.onSurface,
+                animationSpec = tween(400), label = "toggleContent"
+            )
+
+            Surface(
+                modifier = Modifier.shadow(if (activo) 8.dp else 4.dp, RoundedCornerShape(24.dp)),
+                shape = RoundedCornerShape(24.dp),
+                color = bgColor,
+                contentColor = contentColor,
+                border = if (!activo) BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)) else null
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // LADO IZQUIERDO: TOGGLE VISIBILIDAD
+                    Row(
+                        modifier = Modifier
+                            .clickable { viewModel.toggleMarkersVisible() }
+                            .padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(
+                                color = contentColor,
+                                modifier = Modifier.size(if (esPantallaPequena) 14.dp else 16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (activo) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = null,
+                                modifier = Modifier.size(if (esPantallaPequena) 16.dp else 18.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = if (activo) "CLIENTES: ${uiState.clientes.size}" else "MOSTRAR CLIENTES",
+                            fontWeight = FontWeight.Black,
+                            fontSize = if (esPantallaPequena) 10.sp else 12.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+
+                    // SEPARADOR SUTIL (SOLO ADMIN)
+                    if (esAdminEfectivo) {
+                        Box(Modifier.width(1.dp).height(24.dp).background(contentColor.copy(alpha = 0.2f)))
+                        
+                        // LADO DERECHO: LUPITA FILTRO
+                        Box(
+                            modifier = Modifier
+                                .clickable { showRouteMenu = !showRouteMenu }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (showRouteMenu) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = "Filtrar",
+                                modifier = Modifier.size(if (esPantallaPequena) 16.dp else 18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 🔍 FILTRO DE RUTAS VERTICAL - INTEGRACIÓN TOTAL
+            AnimatedVisibility(
+                visible = showRouteMenu && esAdminEfectivo && uiState.listaRutas.size > 1,
+                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
+            ) {
+                Surface(
+                    color = if (isDark) DelisaRed.copy(alpha = 0.75f) else DelisaRed.copy(alpha = 0.95f),
+                    shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .offset(y = (-10).dp)
+                        .width(IntrinsicSize.Max)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(top = 10.dp)
+                    ) {
+                        uiState.listaRutas.forEachIndexed { index, ruta ->
+                            val selected = uiState.filtroRuta == ruta
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { 
+                                        viewModel.actualizarFiltroRuta(ruta)
+                                        showRouteMenu = false // Cerrar al seleccionar
+                                    }
+                                    .background(if (selected) Color.White.copy(alpha = 0.25f) else Color.Transparent)
+                                    .padding(horizontal = 24.dp, vertical = 2.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = ruta.replace("Todas las Rutas", "TODOS").replace(" Delisa", "").uppercase(),
+                                    fontSize = 10.sp,
+                                    fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
+                                    color = Color.White,
+                                    letterSpacing = 0.5.sp,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                            if (index < uiState.listaRutas.size - 1) {
+                                HorizontalDivider(
+                                    thickness = 0.5.dp,
+                                    color = Color.White.copy(alpha = 0.2f),
+                                    modifier = Modifier.padding(horizontal = 12.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 📍 BOTÓN MI UBICACIÓN
+        FloatingActionButton(
+            onClick = {
+                val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (hasPermission) {
+                    val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+                    fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                        location?.let { scope.launch { viewModel.cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(LatLng(it.latitude, it.longitude), 18f)) } }
+                    }
+                }
+            },
+            containerColor = DelisaRed, contentColor = Color.White, shape = CircleShape,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .padding(bottom = paddingFab.coerceAtLeast(0.dp))
+                .size(if (esPantallaPequena) 44.dp else 50.dp)
+                .then(if (isDark) Modifier.border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape) else Modifier)
+        ) { Icon(Icons.Default.MyLocation, null, modifier = Modifier.size(if (esPantallaPequena) 18.dp else 22.dp)) }
+
+        // 📇 TARJETAS INFERIORES
+        Column(modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp, vertical = 16.dp).zIndex(10f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (uiState.modoHojaRuta && uiState.itinerarioActivo != null) {
+                Card(modifier = Modifier.fillMaxWidth().shadow(8.dp, RoundedCornerShape(20.dp)), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.5.dp, WarningOrange.copy(alpha = 0.4f))) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(36.dp).background(WarningOrange.copy(alpha = 0.1f), CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.AutoMirrored.Filled.Assignment, null, tint = WarningOrange, modifier = Modifier.size(20.dp)) }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                uiState.itinerarioActivo?.let { iti ->
+                                    Text(text = iti.rutaId.uppercase(), color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                                    Spacer(Modifier.width(8.dp)); Surface(color = WarningOrange, shape = RoundedCornerShape(6.dp)) { Text(text = "${uiState.clientesRuta.size} PUNTOS", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) }
+                                }
+                            }
+                            uiState.itinerarioActivo?.let { iti ->
+                                val diaC = when(iti.diaSemana) { "Lun" -> "Lunes"; "Mar" -> "Martes"; "Mie" -> "Miércoles"; "Jue" -> "Jueves"; "Vie" -> "Viernes"; "Sab" -> "Sábado"; else -> iti.diaSemana }
+                                Text(text = "$diaC - Semana ${iti.frecuencia}", color = WarningOrange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        VerticalDivider(Modifier.height(30.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                        IconButton(onClick = { viewModel.limpiarHojaRuta() }, modifier = Modifier.padding(start = 8.dp).size(32.dp)) { Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                    }
+                }
+            }
+            if (uiState.selectedCliente != null) { ClienteCard(uiState.selectedCliente!!, navController, isAdminOverride) }
+            else if (uiState.vendedorSeleccionadoRuta != null) { uiState.vendedores.find { it.ruta == uiState.vendedorSeleccionadoRuta }?.let { VendedorInfoCard(it) } }
+        }
+
+        // DIALOGOS
+        if (showRouteSelector) {
+            var selRuta by remember { mutableStateOf(uiState.filtroRuta.ifEmpty { uiState.listaRutas.getOrNull(1) ?: "" }) }
+            var selDia by remember { mutableStateOf("Lun") }
+            var selCiclo by remember { mutableStateOf("Par") }
+            AlertDialog(
+                onDismissRequest = { showRouteSelector = false },
+                title = { 
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.size(48.dp).background(DelisaRed.copy(0.1f), CircleShape), contentAlignment = Alignment.Center) {
+                            Icon(Icons.AutoMirrored.Filled.Assignment, null, tint = DelisaRed, modifier = Modifier.size(24.dp))
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Text("Hoja de Ruta", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.fillMaxWidth()) {
+                        val rutasF = remember(uiState.listaRutas) { uiState.listaRutas.filter { it != "Todas las Rutas" } }
+                        if (rutasF.isNotEmpty()) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                Text("SELECCIONA RUTA", fontSize = 11.sp, fontWeight = FontWeight.Black, color = DelisaRed, letterSpacing = 1.2.sp)
+                                Spacer(Modifier.height(12.dp))
+                                
+                                val selectedIndex = rutasF.indexOf(selRuta).coerceAtLeast(0)
+                                TabRow(
+                                    selectedTabIndex = selectedIndex,
+                                    containerColor = Color.Transparent,
+                                    divider = {},
+                                    indicator = { tabPositions ->
+                                        if (selectedIndex < tabPositions.size) {
+                                            TabRowDefaults.SecondaryIndicator(
+                                                Modifier.tabIndicatorOffset(tabPositions[selectedIndex]),
+                                                color = DelisaRed,
+                                                height = 3.dp
+                                            )
+                                        }
+                                    }
+                                ) {
+                                    rutasF.forEach { r ->
+                                        Tab(
+                                            selected = selRuta == r,
+                                            onClick = { selRuta = r },
+                                            text = { 
+                                                Text(
+                                                    text = r.replace(" Delisa", "").uppercase(), 
+                                                    fontSize = 13.sp, 
+                                                    fontWeight = if(selRuta == r) FontWeight.Black else FontWeight.Bold,
+                                                    maxLines = 1
+                                                ) 
+                                            },
+                                            selectedContentColor = DelisaRed,
+                                            unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                            Text("DÍA DE VISITA", fontSize = 10.sp, fontWeight = FontWeight.Black, color = DelisaRed, letterSpacing = 1.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                listOf("Lun", "Mar", "Mie", "Jue", "Vie", "Sab").forEach { d ->
+                                    val isSelected = selDia == d
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isSelected) DelisaRed else MaterialTheme.colorScheme.surfaceVariant.copy(0.5f))
+                                            .clickable { selDia = d },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = d,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                            Text("CICLO / SEMANA", fontSize = 10.sp, fontWeight = FontWeight.Black, color = DelisaRed, letterSpacing = 1.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                                listOf("Par", "Non").forEach { c ->
+                                    val isSelected = selCiclo == c
+                                    Surface(
+                                        onClick = { selCiclo = c },
+                                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp).height(36.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSelected) DelisaRed else MaterialTheme.colorScheme.surfaceVariant.copy(0.5f),
+                                        contentColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text("Semana $c", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 },
-                containerColor = DelisaRed,
-                contentColor = Color.White,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = if (mostrarTarjetaInferior) 190.dp else 0.dp)
-                    .size(50.dp)
-                    .then(if (isDark) Modifier.border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape) else Modifier),
-                shape = CircleShape
-            ) { Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(22.dp)) }
-
-            val p = uiState.puestoTrabajo?.trim() ?: ""
-            val esAdminEfectivo = p in listOf("CEO", "Gerente General", "Supervisor", "Administración", "Gerente")
-            val esVendedorEfectivo = !esAdminEfectivo
-
-            // 🛣️ Botones de Ruta Laterales (Chips)
-            Column(
-                Modifier.align(Alignment.TopStart).padding(top = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                if (esVendedorEfectivo) {
-                    // 🔘 BOTÓN ÚNICO SEGUIMIENTO (PARA VENDEDORES O ADMIN EN MODO RUTA)
-                    uiState.miRuta?.let { rutaAsignada ->
-                        val activo = uiState.seguirVendedor == rutaAsignada
-                        val interactionSource = remember { MutableInteractionSource() }
-                        val isPressed by interactionSource.collectIsPressedAsState()
-                        val scale by animateFloatAsState(
-                            targetValue = if (isPressed) 0.92f else 1f,
-                            animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow),
-                            label = "miRutaScale"
-                        )
-
-                        Card(
-                            modifier = Modifier
-                                .graphicsLayer {
-                                    scaleX = scale
-                                    scaleY = scale
-                                }
-                                .shadow(4.dp, RoundedCornerShape(12.dp))
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable(
-                                    interactionSource = interactionSource,
-                                    indication = rememberRipple(color = if (activo) Color.White else DelisaRed),
-                                    onClick = { viewModel.toggleSeguirVendedor(rutaAsignada) }
-                                ),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (activo) DelisaRed else MaterialTheme.colorScheme.surface
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.MyLocation,
-                                    contentDescription = null,
-                                    tint = if (activo) Color.White else DelisaRed,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = "MI RUTA",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = if (activo) Color.White else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    // 🔘 BOTONES DE RUTA NORMALES (ADMIN / OTROS)
-                    uiState.vendedores.forEach { v ->
-                        val activo = uiState.seguirVendedor == v.ruta
-                        val interactionSource = remember { MutableInteractionSource() }
-                        val isPressed by interactionSource.collectIsPressedAsState()
-                        val scale by animateFloatAsState(
-                            targetValue = if (isPressed) 0.92f else 1f,
-                            animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow),
-                            label = "routeBtnScale"
-                        )
-
-                        Card(
-                            modifier = Modifier
-                                .graphicsLayer {
-                                    scaleX = scale
-                                    scaleY = scale
-                                }
-                                .shadow(4.dp, RoundedCornerShape(16.dp))
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable(
-                                    interactionSource = interactionSource,
-                                    indication = rememberRipple(color = if (activo) Color.White else DelisaRed),
-                                    onClick = { viewModel.toggleSeguirVendedor(v.ruta) }
-                                ),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (activo) DelisaRed else MaterialTheme.colorScheme.surface
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.LocalShipping,
-                                    contentDescription = null,
-                                    tint = if (activo) Color.White else DelisaRed,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = v.ruta.replace(" Delisa", ""),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = if (activo) Color.White else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 🌍 Capas de Mapa (Esquina Superior Derecha)
-            var showLayerSheet by remember { mutableStateOf(false) }
-            val sheetState = rememberModalBottomSheetState()
-
-            Column(Modifier.align(Alignment.TopEnd).padding(top = 16.dp), horizontalAlignment = Alignment.End) {
-                // 🌍 BOTÓN DE CAPAS (Limpio y sin tintes grisáceos)
-                Surface(
-                    onClick = { showLayerSheet = true },
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 0.dp, // 🛡️ CRÍTICO: Quita el tinte gris de Material 3
-                    shadowElevation = 4.dp,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Layers,
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                            tint = DelisaRed
-                        )
-                    }
-                }
-                
-                if (esAdminEfectivo) {
-                    Spacer(Modifier.height(12.dp))
-                    // 📜 BOTÓN DE HISTORIAL (Limpio)
-                    Surface(
-                        onClick = { navController.navigate("HISTORIAL_RUTA") },
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 0.dp,
-                        shadowElevation = 4.dp,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.size(44.dp)
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.cargarHojaRuta(selRuta, selDia, selCiclo); showRouteSelector = false },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                        shape = RoundedCornerShape(14.dp)
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                modifier = Modifier.size(22.dp),
-                                tint = DelisaRed
-                            )
-                        }
+                        Text("VISUALIZAR RUTA", fontWeight = FontWeight.Black, letterSpacing = 1.sp)
                     }
-                }
-            }
-
-            // 🔥 NUEVO SELECTOR DE CAPAS PREMIUM
-            if (showLayerSheet) {
-                ModalBottomSheet(
-                    onDismissRequest = { showLayerSheet = false },
-                    sheetState = sheetState,
-                    containerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White,
-                    dragHandle = { BottomSheetDefaults.DragHandle(color = DelisaRed.copy(0.4f)) }
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
-                            .padding(bottom = 40.dp)
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showRouteSelector = false },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            "TIPO DE MAPA",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(Modifier.height(20.dp))
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            MapTypeOption(
-                                label = "Estándar",
-                                icon = Icons.Default.Map,
-                                selected = uiState.mapType == MapType.NORMAL && uiState.mapStyleJson == null,
-                                onClick = { viewModel.setMapType(MapType.NORMAL); showLayerSheet = false }
-                            )
-                            MapTypeOption(
-                                label = "Satélite",
-                                icon = Icons.Default.Satellite,
-                                selected = uiState.mapType == MapType.SATELLITE,
-                                onClick = { viewModel.setMapType(MapType.SATELLITE); showLayerSheet = false }
-                            )
-                            MapTypeOption(
-                                label = "Noche",
-                                icon = Icons.Default.DarkMode,
-                                selected = uiState.mapStyleJson != null,
-                                onClick = { viewModel.setMapType(MapType.NORMAL, darkMapStyleJson); showLayerSheet = false }
-                            )
-                        }
+                        Text("CERRAR VENTANA", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
-                }
-            }
-
-            // 🏷️ Toggle Cobertura de Clientes (Lógica centralizada en ViewModel)
-            var showRouteMenu by remember { mutableStateOf(false) }
-
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                val interactionSource = remember { MutableInteractionSource() }
-                val isPressed by interactionSource.collectIsPressedAsState()
-                val scale by animateFloatAsState(
-                    targetValue = if (isPressed) 0.95f else 1f,
-                    animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium),
-                    label = "clientesBtnScale"
-                )
-
-                Card(
-                    modifier = Modifier
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        }
-                        .shadow(4.dp, RoundedCornerShape(24.dp))
-                        .clip(RoundedCornerShape(24.dp))
-                        .clickable(
-                            interactionSource = interactionSource,
-                            indication = rememberRipple(color = if (uiState.markersVisible) Color.White else DelisaRed),
-                            onClick = { viewModel.toggleMarkersVisible() }
-                        ),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (uiState.markersVisible) {
-                            if (isDark) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.surface
-                        }
-                    ),
-                    border = if (isDark && !uiState.markersVisible) BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)) else null
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        if (uiState.isLoading) {
-                            CircularProgressIndicator(color = if (uiState.markersVisible) Color.White else DelisaRed, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                        } else {
-                            Icon(
-                                Icons.Default.Storefront,
-                                contentDescription = null,
-                                tint = if (uiState.markersVisible) Color.White else DelisaRed,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(
-                            text = if (uiState.markersVisible) "Ocultar Clientes (${uiState.clientes.size})" else "Mostrar Clientes",
-                            color = if (uiState.markersVisible) Color.White else MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-
-                // 🔥 Selector de Ruta para Admin (CEO / Gerente)
-                if (esAdminEfectivo && uiState.markersVisible) {
-                    Spacer(Modifier.height(8.dp))
-                    val interactionSource = remember { MutableInteractionSource() }
-                    val isPressed by interactionSource.collectIsPressedAsState()
-                    val scale by animateFloatAsState(
-                        targetValue = if (isPressed) 0.95f else 1f,
-                        label = "filterBtnScale"
-                    )
-
-                    Card(
-                        modifier = Modifier
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                            }
-                            .shadow(2.dp, RoundedCornerShape(12.dp))
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable(
-                                interactionSource = interactionSource,
-                                indication = rememberRipple(color = DelisaRed),
-                                onClick = { showRouteMenu = true }
-                            ),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = uiState.filtroRuta,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = DelisaRed
-                            )
-                            Icon(Icons.Default.ArrowDropDown, null, tint = DelisaRed, modifier = Modifier.size(16.dp))
-                        }
-
-                        DropdownMenu(expanded = showRouteMenu, onDismissRequest = { showRouteMenu = false }) {
-                            uiState.listaRutas.forEach { ruta ->
-                                DropdownMenuItem(
-                                    text = { Text(ruta, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
-                                    onClick = {
-                                        viewModel.actualizarFiltroRuta(ruta)
-                                        showRouteMenu = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+                },
+                shape = RoundedCornerShape(28.dp),
+                containerColor = MaterialTheme.colorScheme.surface
+            )
         }
 
-        // 📇 CONTENEDOR DE TARJETAS INFERIORES ELÉGANTES
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp, vertical = 16.dp)
-                .zIndex(10f)
-        ) {
-            if (uiState.selectedCliente != null) {
-                ClienteCard(uiState.selectedCliente!!, navController, isAdminOverride)
-            } else if (uiState.vendedorSeleccionadoRuta != null) {
-                val vendedor = uiState.vendedores.find { it.ruta == uiState.vendedorSeleccionadoRuta }
-                vendedor?.let { VendedorInfoCard(it) }
+        if (showLayerSheet) {
+            ModalBottomSheet(onDismissRequest = { showLayerSheet = false }, sheetState = sheetState, containerColor = if (isDark) MaterialTheme.colorScheme.surface else Color.White, dragHandle = { BottomSheetDefaults.DragHandle(color = DelisaRed.copy(0.4f)) }) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
+                    Text("TIPO DE MAPA", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = 1.sp)
+                    Spacer(Modifier.height(20.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        MapTypeOption("Estándar", Icons.Default.Map, uiState.mapType == MapType.NORMAL && uiState.mapStyleJson == null) { viewModel.setMapType(MapType.NORMAL); showLayerSheet = false }
+                        MapTypeOption("Satélite", Icons.Default.Satellite, uiState.mapType == MapType.SATELLITE) { viewModel.setMapType(MapType.SATELLITE); showLayerSheet = false }
+                        MapTypeOption("Noche", Icons.Default.DarkMode, uiState.mapStyleJson != null) { viewModel.setMapType(MapType.NORMAL, darkMapStyleJson); showLayerSheet = false }
+                    }
+                }
             }
         }
     }
 }
 
-// =============================================================
-// COMPOSABLES SECUNDARIOS
-// =============================================================
-
 @Composable
 fun ClienteCard(cliente: Cliente, navController: NavController, isAdminOverride: Boolean? = null) {
     val isDark = isSystemInDarkTheme()
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(10.dp, RoundedCornerShape(24.dp))
-            .clickable { navController.navigate("detalle_cliente/${cliente.id}?origen=Mapa") },
+        modifier = Modifier.fillMaxWidth().shadow(10.dp, RoundedCornerShape(24.dp)).clickable { navController.navigate("detalle_cliente/${cliente.id}?origen=Mapa") },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = if (isDark) BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)) else null
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AsyncImage(
-                model = cliente.fotoUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(70.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = ContentScale.Crop
-            )
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(model = cliente.fotoUrl, contentDescription = null, modifier = Modifier.size(70.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentScale = ContentScale.Crop)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(cliente.nombreNegocio, fontWeight = FontWeight.Black, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
@@ -700,38 +675,8 @@ fun ClienteCard(cliente: Cliente, navController: NavController, isAdminOverride:
                     Text(cliente.telefono ?: "Sin número", color = DelisaRed, fontSize = 13.sp, fontWeight = FontWeight.Black)
                 }
             }
-
-            // 🛒 BOTÓN DE VENTA RÁPIDA ANIMADO "PREMIUM"
-            val interactionSource = remember { MutableInteractionSource() }
-            val isPressed by interactionSource.collectIsPressedAsState()
-            val scale by animateFloatAsState(
-                targetValue = if (isPressed) 0.85f else 1f,
-                animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessLow),
-                label = "buttonScale"
-            )
-
-            Box(
-                modifier = Modifier
-                    .size(54.dp)
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                    }
-                    .clip(CircleShape)
-                    .background(DelisaRed.copy(alpha = 0.12f))
-                    .clickable(
-                        interactionSource = interactionSource,
-                        indication = rememberRipple(bounded = true, color = DelisaRed, radius = 27.dp),
-                        onClick = { navController.navigate("pantalla_ventas/${cliente.id}?origen=Mapa&isAdminOverride=${isAdminOverride ?: true}") }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ShoppingCart,
-                    contentDescription = "Venta",
-                    tint = DelisaRed,
-                    modifier = Modifier.size(26.dp)
-                )
+            Box(modifier = Modifier.size(54.dp).graphicsLayer { }.clip(CircleShape).background(DelisaRed.copy(alpha = 0.12f)).clickable { navController.navigate("pantalla_ventas/${cliente.id}?origen=Mapa&isAdminOverride=${isAdminOverride ?: true}") }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.ShoppingCart, "Venta", tint = DelisaRed, modifier = Modifier.size(26.dp))
             }
         }
     }
@@ -750,17 +695,8 @@ fun VendedorInfoCard(vendedor: VendedorUbicacion) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(vendedor.ruta, fontWeight = FontWeight.Black, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface)
                 val moving = vendedor.speed > 0.5
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = (if (moving) DelisaGreen else WarningOrange).copy(alpha = 0.15f)
-                ) {
-                    Text(
-                        text = if (moving) "EN MOVIMIENTO" else "UNIDAD DETENIDA",
-                        color = if (moving) DelisaGreenDark else WarningOrange,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Black
-                    )
+                Surface(shape = RoundedCornerShape(10.dp), color = (if (moving) DelisaGreen else WarningOrange).copy(alpha = 0.15f)) {
+                    Text(text = if (moving) "EN MOVIMIENTO" else "UNIDAD DETENIDA", color = if (moving) DelisaGreenDark else WarningOrange, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp), fontSize = 10.sp, fontWeight = FontWeight.Black)
                 }
             }
             Text("Último reporte: ${tiempoTranscurrido(vendedor.timestamp)}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -768,9 +704,7 @@ fun VendedorInfoCard(vendedor: VendedorUbicacion) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), thickness = 1.dp)
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                VendorGpsIndicator(accuracy = vendedor.accuracy)
-                VendorSpeedIndicator2(speed = vendedor.speed)
-                VendorBatteryIndicator(batteryLevel = vendedor.battery)
+                VendorGpsIndicator(vendedor.accuracy); VendorSpeedIndicator2(vendedor.speed); VendorBatteryIndicator(vendedor.battery)
             }
         }
     }
@@ -779,23 +713,14 @@ fun VendedorInfoCard(vendedor: VendedorUbicacion) {
 @Composable
 fun MapTypeOption(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, onClick: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Surface(
-            onClick = onClick,
-            modifier = Modifier.size(64.dp),
-            shape = RoundedCornerShape(16.dp),
-            color = if (selected) DelisaRed.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            border = if (selected) BorderStroke(2.dp, DelisaRed) else null
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(icon, null, tint = if (selected) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
-            }
+        Surface(onClick = onClick, modifier = Modifier.size(64.dp), shape = RoundedCornerShape(16.dp), color = if (selected) DelisaRed.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), border = if (selected) BorderStroke(2.dp, DelisaRed) else null) {
+            Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = if (selected) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp)) }
         }
         Spacer(Modifier.height(8.dp))
         Text(label, fontSize = 12.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, color = if (selected) DelisaRed else MaterialTheme.colorScheme.onSurface)
     }
 }
 
-// 🌍 Lógica de carga de vectores redimensionados local (Blindada contra breaking changes globales)
 fun bitmapDescriptorFromVectorLocallyResized(context: Context, vectorResId: Int, width: Int, height: Int): BitmapDescriptor {
     val vectorDrawable = ContextCompat.getDrawable(context, vectorResId) ?: return BitmapDescriptorFactory.defaultMarker()
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -804,4 +729,3 @@ fun bitmapDescriptorFromVectorLocallyResized(context: Context, vectorResId: Int,
     vectorDrawable.draw(canvas)
     return BitmapDescriptorFactory.fromBitmap(bitmap)
 }
-

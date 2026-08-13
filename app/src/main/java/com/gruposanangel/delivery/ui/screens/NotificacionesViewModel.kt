@@ -128,8 +128,10 @@ class NotificacionesViewModel(
                 .map { mov ->
                     val esArqueo = mov.tipo.contains("ARQUEO")
                     val esDirectLoad = mov.referenciaId?.startsWith("DIRECT_LOAD") == true
+                    val esLiquidacion = mov.tipo.contains("LIQUIDACION") // Por si se guarda localmente
                     
                     val tituloFinal = when {
+                        esLiquidacion -> "LIQUIDACIÓN FINALIZADA"
                         esArqueo -> "ARQUEO DE INVENTARIO"
                         esDirectLoad -> "LIQUIDACIÓN PROCESADA"
                         else -> "CARGA MANUAL"
@@ -202,6 +204,7 @@ class NotificacionesViewModel(
                 val origen = data["origen"] as? String ?: ""
                 val destino = data["destino"] as? String ?: ""
                 val motivo = data["motivoCancelacion"] as? String
+                val esEmergencia = data["esEmergencia"] as? Boolean ?: false
                 
                 val esRetorno = origen == nombreAlmacen
                 val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
@@ -213,12 +216,14 @@ class NotificacionesViewModel(
                 
                 val tituloFinal = when {
                     estado == "CANCELADA" -> "CARGA ANULADA"
+                    esEmergencia -> "CARGA DE EMERGENCIA"
                     esRetorno -> "LIQUIDACIÓN ENVIADA"
                     else -> "CARGA DE ALMACÉN"
                 }
 
                 val mensajeFinal = when {
                     estado == "CANCELADA" -> "Esta transferencia fue cancelada"
+                    esEmergencia -> "Carga manual autorizada por supervisor"
                     esRetorno -> "Retorno de mercancía hacia $destino"
                     else -> "Transferencia recibida desde $origen"
                 }
@@ -234,7 +239,8 @@ class NotificacionesViewModel(
                     aceptada = esRetorno || estado == "COMPLETADA" || estado == "ACEPTADA",
                     estado = estado,
                     monto = totalMonto,
-                    motivo = motivo
+                    motivo = motivo,
+                    esEmergencia = esEmergencia
                 )
             } ?: emptyList()
             _notificacionesNubeCargas.value = ords
@@ -262,17 +268,22 @@ class NotificacionesViewModel(
 
                         if (tsMillis < _uiState.value.fechaInicio || tsMillis > _uiState.value.fechaFin) return@mapNotNull null
                         
+                        val metodo = first.getString("metodoAuditoria")
+                        val esLiquidacion = metodo == "LIQUIDACION"
                         val totalFaltantes = docs.filter { it.getString("tipo") == "AJUSTE_ARQUEO_FALTANTE" }.sumOf { it.getLong("cantidad")?.toInt() ?: 0 }
                         val totalSobrantes = docs.filter { it.getString("tipo") == "AJUSTE_ARQUEO_SOBRANTE" }.sumOf { it.getLong("cantidad")?.toInt() ?: 0 }
                         
                         Notificacion(
                             id = refId,
-                            titulo = "AUDITORÍA FINALIZADA",
-                            mensaje = "Arqueo registrado. Resumen: -$totalFaltantes faltantes, +$totalSobrantes sobrantes.",
+                            titulo = if (esLiquidacion) "LIQUIDACIÓN FINALIZADA" else "AUDITORÍA FINALIZADA",
+                            mensaje = if (esLiquidacion) "Se ha vaciado la unidad y retornado el stock a bodega." 
+                                      else "Arqueo registrado. Resumen: -$totalFaltantes faltantes, +$totalSobrantes sobrantes.",
                             fecha = if (tsMillis > 0) formatoFecha.format(Date(tsMillis)) else "Reciente",
                             timestamp = tsMillis,
                             esCarga = false,
-                            aceptada = true
+                            aceptada = true,
+                            estado = if (esLiquidacion) "LIQUIDADO" else "ARQUEADO",
+                            esLiquidacion = esLiquidacion
                         )
                     } ?: emptyList()
                 _notificacionesNubeArqueos.value = arqs

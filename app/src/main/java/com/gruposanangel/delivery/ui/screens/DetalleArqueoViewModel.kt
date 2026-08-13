@@ -28,6 +28,7 @@ data class DetalleArqueoUiState(
     val isLoading: Boolean = false,
     val productos: List<ProductoArqueoDetalle> = emptyList(),
     val fecha: Long? = null,
+    val metodoAuditoria: String? = null,
     val error: String? = null
 )
 
@@ -57,6 +58,7 @@ class DetalleArqueoViewModel(
 
                 val catalogo = inventarioRepo.obtenerProductosLocal().first()
                 var fechaArqueo: Long? = null
+                var metodo: String? = null
 
                 val productos = snap.documents.mapNotNull { doc ->
                     if (fechaArqueo == null) {
@@ -66,6 +68,9 @@ class DetalleArqueoViewModel(
                             is Number -> tsRaw.toLong()
                             else -> null
                         }
+                    }
+                    if (metodo == null) {
+                        metodo = doc.getString("metodoAuditoria")
                     }
                     
                     val prodId = doc.getString("productoId") ?: return@mapNotNull null
@@ -84,7 +89,7 @@ class DetalleArqueoViewModel(
                     )
                 }.sortedByDescending { Math.abs(it.diferencia) } // Primero los errores
 
-                _uiState.update { it.copy(productos = productos, fecha = fechaArqueo, isLoading = false) }
+                _uiState.update { it.copy(productos = productos, fecha = fechaArqueo, metodoAuditoria = metodo, isLoading = false) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }

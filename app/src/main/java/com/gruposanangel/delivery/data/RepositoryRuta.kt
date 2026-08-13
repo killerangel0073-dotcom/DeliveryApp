@@ -137,4 +137,17 @@ class RepositoryRuta(
             null
         }
     }
+
+    /**
+     * Descarga todos los itinerarios configurados en la colección 'rutas_itinerarios'.
+     */
+    suspend fun obtenerTodosLosItinerarios(): List<Itinerario> = withContext(Dispatchers.IO) {
+        try {
+            val snapshot = db.collection("rutas_itinerarios").get().await()
+            snapshot.toObjects(Itinerario::class.java)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error obteniendo todos los itinerarios", e)
+            emptyList()
+        }
+    }
 }

@@ -1,28 +1,37 @@
 package com.gruposanangel.delivery.ui.screens
 
-import android.location.Location
+import android.annotation.SuppressLint
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
 import com.gruposanangel.delivery.RepositoryUsuario
 import com.gruposanangel.delivery.VentaRepository
-import com.gruposanangel.delivery.data.*
-import com.gruposanangel.delivery.model.Plantilla_Producto
 import com.gruposanangel.delivery.SegundoPlano.LocationState
+import com.gruposanangel.delivery.data.*
+import com.gruposanangel.delivery.data.PerfilVenta
+import com.gruposanangel.delivery.model.Plantilla_Producto
+import com.gruposanangel.delivery.utilidades.TimeManager
 import TicketVentaCompleto
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
+import org.json.JSONArray
 import java.util.*
+
+sealed class EstadoRuta {
+    object Cargando : EstadoRuta()
+    object SinRuta : EstadoRuta()
+    data class Error(val mensaje: String) : EstadoRuta()
+    data class ConRuta(val nombreAlmacen: String, val almacenId: String) : EstadoRuta()
+}
 
 data class VentaUiState(
     val productosEnCarrito: List<Plantilla_Producto> = emptyList(),
@@ -44,7 +53,7 @@ data class VentaUiState(
     val distanciaAlClienteMetros: Float = -1f,
     val estaEnRango: Boolean = true,
     val requiereFotoEvidencia: Boolean = false,
-    val enRuta: Boolean = true, // Por defecto true para no bloquear mientras carga
+    val enRuta: Boolean = true,
     
     // 🔥 VISITA SIN VENTA
     val mostrarDialogoSinVenta: Boolean = false,
@@ -53,54 +62,65 @@ data class VentaUiState(
     // 🔥 FILTROS DE RUTA PARA ADMINISTRADOR
     val filtroRutaAdmin: String? = null,
     val rutasDisponibles: List<String> = emptyList(),
-    val mostrarFiltrosAdmin: Boolean = false
+    val mostrarFiltrosAdmin: Boolean = false,
+
+    // 🔥 FILTROS DE FECHA
+    val fechaInicio: Long = 0L,
+    val fechaFin: Long = 0L,
+    val numDiasFiltro: Int = 1,
+    val totalVentaPeriodo: Double = 0.0,
+    val visitasCount: Int = 0,
+    val cargandoDashboard: Boolean = false,
+
+    // 🔥 MODO CONSOLIDADO
+    val modoConsolidado: Boolean = false,
+    val subtotalesPorPerfil: Map<String, Double> = emptyMap()
 )
 
-sealed class EstadoRuta {
-    object Cargando : EstadoRuta()
-    object SinRuta : EstadoRuta()
-    data class Error(val mensaje: String) : EstadoRuta()
-    data class ConRuta(val nombreAlmacen: String, val almacenId: String) : EstadoRuta()
-}
-
-/**
- * VentaViewModel - Maneja la lógica de ventas y stock
- */
 class VentaViewModel(
     private val repositoryInventario: RepositoryInventario,
     private val ventaRepository: VentaRepository,
     private val repositoryUsuario: RepositoryUsuario,
-    private val clienteDao: com.gruposanangel.delivery.data.ClienteDao? = null // 🔥 Agregado para mapeo UI
+    private val clienteDao: com.gruposanangel.delivery.data.ClienteDao? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(VentaUiState())
     val uiState: StateFlow<VentaUiState> = _uiState.asStateFlow()
 
-    private val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-    private var salesListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private val db = FirebaseFirestore.getInstance()
+    private var salesListener: ListenerRegistration? = null
+    
+    // 🔥 FILTROS DE FECHA REACTIVOS
+    private val _fechaInicioFiltro = MutableStateFlow<Long?>(null)
+    private val _fechaFinFiltro = MutableStateFlow<Long?>(null)
 
+    // 🔥 CAPACIDAD DE SOBREESCRITURA DE ROL
+    private val _isAdminOverride = MutableStateFlow<Boolean?>(null)
+    private val _filtroRutaAdmin = MutableStateFlow<String?>(null)
+    private val _rutaToAlmacenMap = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    private var jobGeocerca: Job? = null
+
+    // 🔥 Soporte para Pantalla_Ventas_Periodo
     private val _ventasPeriodo = MutableStateFlow<List<VentaEntity>>(emptyList())
     val ventasPeriodo: StateFlow<List<VentaEntity>> = _ventasPeriodo.asStateFlow()
-
-    // 🔥 CAPACIDAD DE SOBREESCRITURA DE ROL (Para Admins en modo Ruta)
-    private val _isAdminOverride = MutableStateFlow<Boolean?>(null)
-
-    private val _filtroRutaAdmin = MutableStateFlow<String?>(null)
-    private val _rutasDisponibles = MutableStateFlow<List<String>>(emptyList())
-    private val _rutaToAlmacenMap = MutableStateFlow<Map<String, String>>(emptyMap())
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val ventasHoyFlow: StateFlow<List<VentaEntity>> = combine(
         repositoryUsuario.getUsuarioActual(),
         _isAdminOverride,
         _filtroRutaAdmin,
-        _rutaToAlmacenMap
+        _rutaToAlmacenMap,
+        _fechaInicioFiltro,
+        _fechaFinFiltro
     ) { args ->
-        val usuario = args[0] as? com.gruposanangel.delivery.data.UsuarioEntity
+        val usuario = args[0] as? UsuarioEntity
         val override = args[1] as? Boolean
         val filtro = args[2] as? String
         @Suppress("UNCHECKED_CAST")
         val mapaRutas = args[3] as? Map<String, String> ?: emptyMap()
+        val startFiltro = args[4] as? Long
+        val endFiltro = args[5] as? Long
 
         val uid = usuario?.uid ?: ""
         val puesto = usuario?.puestoTrabajo?.trim() ?: ""
@@ -108,36 +128,32 @@ class VentaViewModel(
         val rNom = usuario?.ultimaRutaNombre ?: ""
         val rId = usuario?.ultimaRutaId ?: ""
         
-        val puestoLimpio = puesto.uppercase().trim()
+        val puestoLimpio = puesto.uppercase()
         val esAdminReal = puestoLimpio == "CEO" || puestoLimpio.contains("GERENTE") || 
-                         puestoLimpio.contains("SUPERVISOR") || puestoLimpio.contains("ADMIN") ||
-                         puestoLimpio.contains("DIRECCION")
+                         puestoLimpio.contains("SUPERVISOR") || puestoLimpio.contains("ADMIN")
         
         val esVendedorReal = puestoLimpio.contains("VENDEDOR") || puestoLimpio.contains("SUPLENTE")
         
-        val modoVendedorActivo = if (esAdminReal) {
-            override == false
-        } else if (esVendedorReal) {
-            override != true
-        } else {
-            false
-        }
-        
+        val modoVendedorActivo = if (esAdminReal) override == false else if (esVendedorReal) override != true else false
         val idParaQuery = if (modoVendedorActivo) uid else ""
             
-        val ahoraRelativo = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
-        val ahoraReal = if (ahoraRelativo > 1000000000000L) ahoraRelativo else System.currentTimeMillis()
+        val ahoraReal = TimeManager.getHoraReal().takeIf { it > 1000000L } ?: System.currentTimeMillis()
+        val cal = Calendar.getInstance().apply { timeInMillis = ahoraReal }
         
-        val cal = Calendar.getInstance()
-        cal.timeInMillis = ahoraReal
+        val inicio: Long
+        val fin: Long
         
-        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
-        val inicio = cal.timeInMillis
-
-        cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59); cal.set(Calendar.MILLISECOND, 999)
-        val fin = cal.timeInMillis
+        if (startFiltro != null && endFiltro != null) {
+            inicio = startFiltro
+            fin = endFiltro
+        } else {
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            inicio = cal.timeInMillis
+            cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59); cal.set(Calendar.MILLISECOND, 999)
+            fin = cal.timeInMillis
+        }
         
-        val resultFlow = if (modoVendedorActivo && (almid.isNotEmpty() || rNom.isNotEmpty() || rId.isNotEmpty())) {
+        if (modoVendedorActivo && (almid.isNotEmpty() || rNom.isNotEmpty() || rId.isNotEmpty())) {
             ventaRepository.obtenerVentasPorUnidadPeriodoFlow(almid, rNom, rId, inicio, fin)
         } else if (filtro != null && !modoVendedorActivo) {
             val almacenAsociado = mapaRutas[filtro] ?: filtro
@@ -145,13 +161,18 @@ class VentaViewModel(
         } else {
             ventaRepository.obtenerVentasPorPeriodoFlow(idParaQuery, inicio, fin)
         }
-        resultFlow
     }.flatMapLatest { it }
-    .stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyList()
-    )
+    .onEach { lista -> 
+        _uiState.update { state -> 
+            state.copy(
+                estaProcesando = false,
+                cargandoDashboard = false,
+                totalVentaPeriodo = lista.filter { it.estado != "CANCELADA" }.sumOf { it.total },
+                visitasCount = lista.count { it.estado != "CANCELADA" }
+            ) 
+        } 
+    }
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val ticketsHoyFlow: StateFlow<List<TicketVenta>> = ventasHoyFlow.flatMapLatest { ventas ->
@@ -161,15 +182,10 @@ class VentaViewModel(
                 val mapFotos = clientes.associate { it.id to (it.fotografiaUrl ?: "") }
                 ventas.map { v ->
                     TicketVenta(
-                        id = v.id,
-                        cliente = v.clienteNombre,
-                        total = v.total,
-                        fecha = Date(v.fecha),
-                        sincronizado = v.sincronizado,
+                        id = v.id, cliente = v.clienteNombre, total = v.total,
+                        fecha = Date(v.fecha), sincronizado = v.sincronizado,
                         fotoCliente = v.clienteImagenUrl?.takeIf { it.isNotEmpty() } ?: mapFotos[v.clienteId] ?: "",
-                        estado = v.estado,
-                        intentosSync = v.intentosSync,
-                        ultimoError = v.ultimoError
+                        estado = v.estado, intentosSync = v.intentosSync, ultimoError = v.ultimoError
                     )
                 }
             } else {
@@ -184,21 +200,7 @@ class VentaViewModel(
             }
             emit(lista)
         }
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = emptyList()
-    )
-
-    init {
-        observarUsuarioYPerfiles()
-        observarBaseInventario()
-        observarInventarioOptimizado()
-        escucharVentasNube()
-        observarEstadoRutaReactivo()
-        observarEstadoJornada()
-        escucharRutas()
-    }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private fun escucharRutas() {
         db.collection("rutas").addSnapshotListener { snapshot, _ ->
@@ -208,187 +210,138 @@ class VentaViewModel(
                 snapshot.documents.forEach { doc ->
                     val name = doc.getString("nombre") ?: doc.id
                     names.add(name)
-                    
-                    // Intentamos obtener el ID del almacén asociado (Referencia o String)
                     val almRef = doc.get("almacenAsignado") as? com.google.firebase.firestore.DocumentReference
-                    if (almRef != null) {
-                        map[name] = almRef.id
-                    } else {
-                        val almId = doc.getString("almacenAsignado")
-                        if (almId != null) map[name] = almId
-                    }
+                    if (almRef != null) map[name] = almRef.id
+                    else doc.getString("almacenAsignado")?.let { map[name] = it }
                 }
-                _rutasDisponibles.value = listOf("TODAS") + names.distinct().sorted()
+                val finalRutas = listOf("TODAS") + names.distinct().sorted()
+                _uiState.update { it.copy(rutasDisponibles = finalRutas) }
                 _rutaToAlmacenMap.value = map
             }
         }
     }
 
     fun cambiarFiltroRuta(ruta: String) {
-        _filtroRutaAdmin.value = if (ruta == "TODAS") null else ruta
+        val filtro = if (ruta == "TODAS") null else ruta
+        _filtroRutaAdmin.value = filtro
+        _uiState.update { it.copy(filtroRutaAdmin = filtro) }
+    }
+
+    fun actualizarRangoFechas(inicio: Long, fin: Long) {
+        _uiState.update { it.copy(cargandoDashboard = true) }
+        _fechaInicioFiltro.value = inicio
+        _fechaFinFiltro.value = fin
+        
+        val calStart = Calendar.getInstance().apply { timeInMillis = inicio; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
+        val calEnd = Calendar.getInstance().apply { timeInMillis = fin; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
+        var dias = 0
+        while (!calStart.after(calEnd)) { dias++; calStart.add(Calendar.DAY_OF_YEAR, 1) }
+        _uiState.update { it.copy(fechaInicio = inicio, fechaFin = fin, numDiasFiltro = if (dias <= 0) 1 else dias) }
+    }
+
+    fun resetFiltro() {
+        val ahoraReal = TimeManager.getHoraReal().takeIf { it > 1000000L } ?: System.currentTimeMillis()
+        val cal = Calendar.getInstance().apply { timeInMillis = ahoraReal }
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+        val inicio = cal.timeInMillis
+        cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59); cal.set(Calendar.MILLISECOND, 999)
+        val fin = cal.timeInMillis
+
+        val yaEsHoy = _fechaInicioFiltro.value == null && _fechaFinFiltro.value == null
+        _uiState.update { it.copy(
+            cargandoDashboard = !yaEsHoy, numDiasFiltro = 1,
+            fechaInicio = inicio, fechaFin = fin,
+            totalVentaPeriodo = if (yaEsHoy) it.totalVentaPeriodo else 0.0,
+            visitasCount = if (yaEsHoy) it.visitasCount else 0
+        ) }
+        if (!yaEsHoy) {
+            _fechaInicioFiltro.value = null
+            _fechaFinFiltro.value = null
+        }
+    }
+
+    fun cargarVentasPorPeriodo(inicio: Date, fin: Date) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val u = repositoryUsuario.obtenerUsuarioActual()
+            val uid = u?.uid ?: ""
+            
+            val cal = Calendar.getInstance()
+            cal.time = inicio
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+            val tInicio = cal.timeInMillis
+
+            cal.time = fin
+            cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59); cal.set(Calendar.MILLISECOND, 999)
+            val tFin = cal.timeInMillis
+
+            val ventas = ventaRepository.obtenerVentasPorPeriodo(uid, tInicio, tFin)
+            _ventasPeriodo.value = ventas
+        }
     }
 
     fun sobreescribirAdmin(esAdmin: Boolean) {
         _isAdminOverride.value = esAdmin
+        _uiState.update { it.copy(mostrarFiltrosAdmin = esAdmin) }
+    }
+
+    fun verificarRutaAsignadaLocal(uid: String) {
+        viewModelScope.launch {
+            val usuario = repositoryUsuario.obtenerUsuarioActual()
+            val nuevoEstado = if (usuario?.ultimaRutaId != null && usuario.ultimoAlmacenId != null) {
+                EstadoRuta.ConRuta(
+                    nombreAlmacen = usuario.ultimoAlmacenNombre ?: "Almacén",
+                    almacenId = usuario.ultimoAlmacenId
+                )
+            } else {
+                EstadoRuta.SinRuta
+            }
+            _uiState.update { it.copy(estadoRuta = nuevoEstado) }
+        }
     }
 
     private fun observarEstadoRutaReactivo() {
-        repositoryUsuario.getUsuarioActual()
-            .onEach { usuario ->
-                val nuevoEstado = if (usuario?.ultimaRutaId != null && usuario.ultimoAlmacenId != null) {
-                    EstadoRuta.ConRuta(
-                        nombreAlmacen = usuario.ultimoAlmacenNombre ?: "Almacén",
-                        almacenId = usuario.ultimoAlmacenId
-                    )
-                } else {
-                    EstadoRuta.SinRuta
-                }
-                _uiState.update { it.copy(estadoRuta = nuevoEstado) }
-            }
-            .launchIn(viewModelScope)
-    }
-
-    fun precargarUltimaVenta(clienteId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                Log.d("VentaDebug", "🚀 PRECARGA VELOZ - Cliente: $clienteId")
-
-                // 1. Obtener última venta e inventario en paralelo (VÍA ROOM - INSTANTÁNEO)
-                val ultimaVenta = ventaRepository.obtenerUltimaVentaConProductosPorCliente(clienteId)
-                    ?: ventaRepository.obtenerTicketCompletoFirestorePorCliente(clienteId)?.let { ticketCloud ->
-                        VentaEntity(
-                            id = ticketCloud.numeroTicket, clienteId = clienteId, clienteNombre = ticketCloud.cliente,
-                            total = ticketCloud.total, metodoPago = "Efectivo", vendedorId = "",
-                            fecha = ticketCloud.fecha.time, horaDispositivo = ticketCloud.fecha.time,
-                            horaVerificada = ticketCloud.fecha.time, alertaTiempo = false, sincronizado = true
-                        )
-                    }
-
-                if (ultimaVenta == null) return@launch
-
-                val stockTotal = repositoryInventario.obtenerProductosLocal().first()
-                val usuario = repositoryUsuario.getUsuarioActual().first()
-
-                // 3. Determinar almacén objetivo
-                val filtroAdmin = _filtroRutaAdmin.value
-                val almacenIdPerfil = usuario?.ultimoAlmacenId ?: ""
-                val almacenNombrePerfil = usuario?.ultimoAlmacenNombre ?: ""
-
-                val stockFiltrado = stockTotal.filter { entidad ->
-                    if (filtroAdmin != null) {
-                        entidad.id.endsWith("_$filtroAdmin")
-                    } else {
-                        entidad.id.endsWith("_$almacenNombrePerfil") || (almacenIdPerfil.isNotEmpty() && entidad.id.endsWith("_$almacenIdPerfil"))
-                    }
-                }
-
-                if (stockFiltrado.isEmpty()) return@launch
-
-                // 4. Obtener detalles y cruzar
-                var detalles = ventaRepository.obtenerDetallesDeVenta(ultimaVenta.id)
-                if (detalles.isEmpty()) {
-                    val ticketCompleto = ventaRepository.obtenerTicketCompletoFirestore(ultimaVenta.id)
-                    detalles = ticketCompleto?.productos?.map { p ->
-                        VentaDetalleEntity(
-                            ventaId = ultimaVenta.id, productoId = p.nombre.split("_")[0],
-                            nombre = p.nombre, precio = p.precio, cantidad = p.cantidad
-                        )
-                    } ?: emptyList()
-                }
-
-                val nuevasCantidades = mutableMapOf<String, Int>()
-                detalles.forEach { detalle ->
-                    val pIdLimpio = detalle.productoId.trim()
-                    val productoMatch = stockFiltrado.find { 
-                        it.productoId == pIdLimpio || it.nombre.lowercase().trim() == detalle.nombre.lowercase().trim()
-                    }
-
-                    if (productoMatch != null) {
-                        val cantidadSugerida = Math.min(detalle.cantidad, productoMatch.cantidadDisponible)
-                        if (cantidadSugerida > 0) nuevasCantidades[productoMatch.id] = cantidadSugerida
-                    }
-                }
-                
-                if (nuevasCantidades.isNotEmpty()) {
-                    _cantidades.value = nuevasCantidades
-                }
-            } catch (e: Exception) {
-                Log.e("VentaDebug", "Error en precarga veloz", e)
-            }
-        }
+        repositoryUsuario.getUsuarioActual().onEach { usuario ->
+            val nuevoEstado = if (usuario?.ultimaRutaId != null && usuario.ultimoAlmacenId != null) {
+                EstadoRuta.ConRuta(usuario.ultimoAlmacenNombre ?: "Almacén", usuario.ultimoAlmacenId)
+            } else EstadoRuta.SinRuta
+            _uiState.update { it.copy(estadoRuta = nuevoEstado) }
+        }.launchIn(viewModelScope)
     }
 
     private fun observarEstadoJornada() {
-        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
-        db.collection("jornadas").document(uid)
-            .addSnapshotListener { snapshot, _ ->
-                val activo = snapshot?.getBoolean("activo") ?: false
-                _uiState.update { it.copy(enRuta = activo) }
-            }
+        repositoryUsuario.getUsuarioActual().onEach { _ ->
+            _uiState.update { it.copy(enRuta = true) }
+        }.launchIn(viewModelScope)
     }
 
-    /**
-     * Monitorea la distancia en tiempo real entre el vendedor y el cliente.
-     */
-    fun monitorearGeocerca(clienteLat: Double, clienteLon: Double) {
-        viewModelScope.launch {
-            LocationState.ultimaUbicacion.collect { miUbicacion ->
-                if (miUbicacion != null && clienteLat != 0.0) {
-                    val locCliente = Location("").apply {
-                        latitude = clienteLat
-                        longitude = clienteLon
-                    }
-                    val distancia = miUbicacion.distanceTo(locCliente)
-                    val precisión = miUbicacion.accuracy
-                    
-                    // 📏 Regla de Negocio: Rango de 200m
-                    // Si el GPS está muy impreciso (> 100m), activamos modo foto preventivo
-                    val enRango = distancia < 200f
-                    val requiereFoto = !enRango || precisión > 100f
-                    
-                    _uiState.update { it.copy(
-                        distanciaAlClienteMetros = distancia,
-                        estaEnRango = enRango,
-                        requiereFotoEvidencia = requiereFoto
-                    ) }
-                }
-            }
-        }
-    }
-
-    private fun escucharVentasNube() {
+    fun escucharVentasNube() {
         repositoryUsuario.getUsuarioActual()
-            .onEach { usuario ->
-                if (usuario == null) return@onEach
+            .onEach { user ->
+                if (user == null) return@onEach
                 
-                val uid = usuario.uid
-                val puesto = usuario.puestoTrabajo?.trim() ?: ""
-                val almacenId = usuario.ultimoAlmacenId ?: ""
-                val esVendedor = puesto.contains("Vendedor", ignoreCase = true) || puesto.contains("Suplente", ignoreCase = true)
+                val uid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+                val puesto = user.puestoTrabajo?.trim() ?: ""
+                val esVendedor = puesto.contains("VENDEDOR", ignoreCase = true) || puesto.contains("SUPLENTE", ignoreCase = true)
                 val idParaSync = if (esVendedor) uid else ""
+                val almid = user.ultimoAlmacenNombre ?: ""
 
                 val cal = Calendar.getInstance()
-                cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0); cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
                 val inicio = cal.time
 
                 salesListener?.remove()
                 
-                var query: com.google.firebase.firestore.Query = db.collection("ventas")
+                var query: Query = db.collection("ventas")
                     .whereGreaterThanOrEqualTo("fecha", inicio)
                 
                 if (esVendedor) {
-                    // Escuchamos prioritariamente por Almacén si está disponible
-                    if (almacenId.isNotEmpty()) {
-                        query = query.whereEqualTo("almacenId", almacenId)
-                    } else {
-                        query = query.whereEqualTo("vendedorId", uid)
-                    }
+                    query = query.whereEqualTo("almacenId", almid)
                 }
 
                 salesListener = query.addSnapshotListener { snapshot, _ ->
                     if (snapshot != null) {
                         viewModelScope.launch {
-                            ventaRepository.descargarVentasDia(idParaSync, almacenId)
+                            ventaRepository.descargarVentasDia(idParaSync, almid)
                         }
                     }
                 }
@@ -396,372 +349,326 @@ class VentaViewModel(
             .launchIn(viewModelScope)
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        salesListener?.remove()
+    fun sincronizarVentasDia(uid: String) {
+        viewModelScope.launch {
+            try {
+                val u = repositoryUsuario.obtenerUsuarioActual()
+                val almid = u?.ultimoAlmacenNombre ?: ""
+                val puesto = u?.puestoTrabajo?.trim() ?: ""
+                val esVendedor = puesto.contains("VENDEDOR", ignoreCase = true) || puesto.contains("SUPLENTE", ignoreCase = true)
+                val idParaSync = if (esVendedor) uid else ""
+                
+                ventaRepository.descargarVentasDia(idParaSync, almid)
+            } catch (e: Exception) {
+                Log.e("VentaViewModel", "Error sync manual", e)
+            }
+        }
     }
 
     private val _searchQuery = MutableStateFlow("")
     private val _cantidades = MutableStateFlow<Map<String, Int>>(emptyMap())
     private val _perfilSeleccionado = MutableStateFlow<PerfilVenta?>(null)
-
-    // 🔥 CACHÉ DE PROCESAMIENTO
+    private val _modoConsolidado = MutableStateFlow(false)
     private val _perfilesCache = MutableStateFlow<List<PerfilVenta>>(emptyList())
-    private val _productosAlmacenCache = MutableStateFlow<List<com.gruposanangel.delivery.data.ProductoEntity>>(emptyList())
-
-    init {
-        // Inicializar flujos de datos
-        observarUsuarioYPerfiles()
-        observarBaseInventario()
-        observarInventarioOptimizado()
-        
-        // Servicios secundarios
-        escucharVentasNube()
-        observarEstadoRutaReactivo()
-        observarEstadoJornada()
-        escucharRutas()
-    }
+    private val _productosAlmacenCache = MutableStateFlow<List<ProductoEntity>>(emptyList())
 
     private fun observarUsuarioYPerfiles() {
-        repositoryUsuario.getUsuarioActual()
-            .map { usuario ->
-                try {
-                    val json = usuario?.perfilesVentaJson
-                    if (!json.isNullOrBlank()) {
-                        val array = org.json.JSONArray(json)
-                        (0 until array.length()).map { i ->
-                            val obj = array.getJSONObject(i)
-                            val filtrosArr = obj.getJSONArray("filtros")
-                            val filtros = (0 until filtrosArr.length()).map { j ->
-                                val fObj = filtrosArr.getJSONObject(j)
-                                val catsArr = fObj.optJSONArray("categorias")
-                                val cats = if (catsArr != null) {
-                                    (0 until catsArr.length()).map { k -> catsArr.getString(k) }
-                                } else emptyList<String>()
-                                FiltroPerfil(fObj.getString("marca"), cats)
-                            }
-                            PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros)
+        repositoryUsuario.getUsuarioActual().onEach { u ->
+            val perfiles = try {
+                val json = u?.perfilesVentaJson
+                if (!json.isNullOrBlank()) {
+                    val array = JSONArray(json)
+                    (0 until array.length()).map { i ->
+                        val obj = array.getJSONObject(i)
+                        val filtrosArr = obj.getJSONArray("filtros")
+                        val filtros = (0 until filtrosArr.length()).map { j ->
+                            val fObj = filtrosArr.getJSONObject(j)
+                            val catsArr = fObj.optJSONArray("categorias")
+                            val cats = if (catsArr != null) (0 until catsArr.length()).map { catsArr.getString(it) } else emptyList()
+                            FiltroPerfil(fObj.getString("marca"), cats)
                         }
-                    } else emptyList()
-                } catch (e: Exception) { emptyList() }
+                        PerfilVenta(obj.getString("id"), obj.getString("nombre"), filtros)
+                    }
+                } else emptyList()
+            } catch (e: Exception) {
+                emptyList()
             }
-            .onEach { perfiles -> _perfilesCache.value = perfiles }
-            .launchIn(viewModelScope)
+            
+            // 🔥 Actualizar cache y estado de forma atómica para evitar saltos
+            val selected = _perfilSeleccionado.value ?: perfiles.firstOrNull()
+            
+            _perfilesCache.value = perfiles
+            _perfilSeleccionado.value = selected
+            
+            val puesto = u?.puestoTrabajo?.trim()?.uppercase() ?: ""
+            val esAdminReal = puesto == "CEO" || puesto.contains("GERENTE") || 
+                             puesto.contains("SUPERVISOR") || puesto.contains("ADMIN")
+
+            _uiState.update { it.copy(
+                perfilesDisponibles = perfiles, 
+                perfilSeleccionado = selected,
+                mostrarFiltrosAdmin = _isAdminOverride.value ?: esAdminReal
+            ) }
+        }.launchIn(viewModelScope)
     }
 
     private fun observarBaseInventario() {
-        combine(
-            repositoryInventario.obtenerProductosLocal(),
-            repositoryUsuario.getUsuarioActual()
-        ) { args ->
-            @Suppress("UNCHECKED_CAST")
-            val productos = args[0] as? List<com.gruposanangel.delivery.data.ProductoEntity> ?: emptyList()
-            val usuario = args[1] as? com.gruposanangel.delivery.data.UsuarioEntity
-
-            val almacenesPermitidos = usuario?.almacenesConfig?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
-            productos.filter { entidad ->
-                if (almacenesPermitidos.isNotEmpty()) {
-                    almacenesPermitidos.any { almacen -> entidad.id.endsWith("_$almacen") }
-                } else {
-                    val principal = usuario?.ultimoAlmacenNombre
-                    principal != null && entidad.id.endsWith("_$principal")
+        // 🔥 Refuerzo de carga: Observamos el cambio de almacén y cargamos solo lo que pertenece a ese almacén
+        _uiState.map { it.estadoRuta }.distinctUntilChanged().flatMapLatest { estado ->
+            val almacenId = (estado as? EstadoRuta.ConRuta)?.almacenId
+            if (!almacenId.isNullOrEmpty()) {
+                repositoryInventario.obtenerProductosLocal().map { lista ->
+                    // Filtro estricto por almacén ID para evitar ver inventario de otros
+                    lista.filter { it.id.contains(almacenId, ignoreCase = true) }
                 }
+            } else {
+                flowOf(emptyList())
             }
-        }
-        .flowOn(Dispatchers.Default)
-        .catch { e -> Log.e("VentaVM", "Error en base inventario", e) }
-        .onEach { filtrados -> _productosAlmacenCache.value = filtrados }
-        .launchIn(viewModelScope)
+        }.onEach { filtrados ->
+            Log.d("VentaViewModel", "Inventario filtrado por almacén cargado: ${filtrados.size} productos")
+            _productosAlmacenCache.value = filtrados 
+        }.launchIn(viewModelScope)
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun observarInventarioOptimizado() {
         combine(
-            _productosAlmacenCache,
-            _searchQuery,
-            _cantidades,
-            _perfilSeleccionado,
-            _perfilesCache,
-            _filtroRutaAdmin,
-            _rutasDisponibles,
-            _isAdminOverride
-        ) { args ->
-            @Suppress("UNCHECKED_CAST")
-            val entidades = args[0] as? List<com.gruposanangel.delivery.data.ProductoEntity> ?: emptyList()
-            val query = args[1] as? String ?: ""
-            @Suppress("UNCHECKED_CAST")
-            val mapaCantidades = args[2] as? Map<String, Int> ?: emptyMap()
-            val perfilActivo = args[3] as? PerfilVenta
-            @Suppress("UNCHECKED_CAST")
-            val perfiles = args[4] as? List<PerfilVenta> ?: emptyList()
-            val filtroRuta = args[5] as? String
-            @Suppress("UNCHECKED_CAST")
-            val rutas = args[6] as? List<String> ?: emptyList()
-            val override = args[7] as? Boolean
+            _productosAlmacenCache, 
+            _perfilSeleccionado, 
+            _searchQuery, 
+            _cantidades, 
+            _modoConsolidado
+        ) { productos: List<ProductoEntity>, perfil: PerfilVenta?, query: String, cants: Map<String, Int>, consolidado: Boolean ->
+            
+            val perfiles = _perfilesCache.value
+            val subtotales = mutableMapOf<String, Double>()
+            
+            // 1. Calcular subtotales por perfil (Analizando todo el catálogo local)
+            perfiles.forEach { pVenta ->
+                val suma = productos.filter { p ->
+                    val c = cants[p.productoId] ?: cants[p.id] ?: 0
+                    if (c > 0) {
+                        pVenta.filtros.any { f ->
+                            val mMatch = p.marca.trim().equals(f.marca.trim(), ignoreCase = true)
+                            val cMatch = if (f.categorias.isNotEmpty()) f.categorias.any { it.trim().equals(p.categoria?.trim() ?: "", ignoreCase = true) } else true
+                            mMatch && cMatch
+                        }
+                    } else false
+                }.sumOf { (cants[it.productoId] ?: cants[it.id] ?: 0) * it.precio }
+                if (suma > 0) subtotales[pVenta.nombre] = suma
+            }
 
-            val mostrarFiltros = (override != false) 
-
-            // 1. Filtrado por Perfil Operativo
-            val cumplePerfil = if (perfilActivo != null) {
-                entidades.filter { entidad ->
-                    perfilActivo.filtros.any { filtro ->
-                        val marcaMatch = entidad.marca.trim().equals(filtro.marca.trim(), ignoreCase = true)
-                        val categoriaMatch = if (filtro.categorias.isNotEmpty()) {
-                            filtro.categorias.any { it.trim().equals(entidad.categoria.trim(), ignoreCase = true) }
-                        } else true
-                        marcaMatch && categoriaMatch
-                    }
+            val filtros = perfil?.filtros ?: emptyList()
+            
+            // 2. Filtrar por perfil y búsqueda
+            val filtrados = productos.filter { p ->
+                val matchesProfile = if (filtros.isEmpty()) true 
+                else filtros.any { f -> 
+                    (f.marca.isEmpty() || p.marca.equals(f.marca, ignoreCase = true)) &&
+                    (f.categorias.isEmpty() || f.categorias.any { it.equals(p.categoria, ignoreCase = true) })
                 }
-            } else entidades
+                matchesProfile && p.nombre.contains(query, ignoreCase = true)
+            }
 
-            // 2. Mapeo a Plantilla
-            val catalogo = cumplePerfil.map { e ->
+            // 3. DE-DUPLICACIÓN
+            val unicos = filtrados.groupBy { it.productoId.ifEmpty { it.nombre } }
+                .map { entry -> 
+                    entry.value.maxByOrNull { it.cantidadDisponible } ?: entry.value.first() 
+                }
+
+            // 4. Mapear a Plantilla_Producto
+            val listaMapeada = unicos.map { p ->
+                val cantidad = cants[p.productoId] ?: cants[p.id] ?: 0
+                
                 Plantilla_Producto(
-                    id = e.id, nombre = e.nombre, precio = e.precio,
-                    cantidad = mapaCantidades[e.id] ?: 0,
-                    cantidadDisponible = e.cantidadDisponible,
-                    imagenUrl = e.imagenUrl ?: "",
-                    marca = e.marca, categoria = e.categoria
+                    id = p.id,
+                    nombre = p.nombre,
+                    precio = p.precio,
+                    cantidad = cantidad,
+                    cantidadDisponible = p.cantidadDisponible,
+                    imagenUrl = p.imagenUrl ?: "",
+                    cantidadUnitario = p.cantidadUnitario,
+                    unidadesPorDisplay = p.unidadesPorDisplay,
+                    gramosVenta = p.gramosVenta,
+                    precioCompra = p.precioCompra,
+                    marca = p.marca,
+                    categoria = p.categoria ?: "General"
                 )
-            }.sortedWith(compareBy<Plantilla_Producto>({ it.categoria }, { it.nombre }))
+            }.sortedWith(compareBy({ it.categoria }, { it.nombre }))
 
-            // 3. Resultados de búsqueda
-            val productosMapeados = if (query.isBlank()) {
-                catalogo.filter { it.cantidadDisponible > 0 || it.cantidad > 0 }
-                    .sortedByDescending { it.cantidad > 0 }
-            } else {
-                catalogo.filter { it.nombre.contains(query, ignoreCase = true) }
-            }
+            DataSnapshot(listaMapeada, subtotales, consolidado)
+        }.onEach { result ->
+            val totalVenta = if (result.consolidado) result.subtotales.values.sum() else result.lista.sumOf { it.cantidad * it.precio }
+            
+            _uiState.update { it.copy(
+                catalogoCompleto = result.lista, 
+                productosEnCarrito = result.lista, 
+                totalVenta = totalVenta,
+                subtotalesPorPerfil = result.subtotales,
+                modoConsolidado = result.consolidado,
+                isLoadingInventario = false
+            ) }
+        }.launchIn(viewModelScope)
+    }
 
-            val total = catalogo.sumOf { it.precio * it.cantidad }
-            val perfilActualizado = perfiles.find { it.id == perfilActivo?.id } ?: perfiles.firstOrNull()
+    private data class DataSnapshot(
+        val lista: List<Plantilla_Producto>,
+        val subtotales: Map<String, Double>,
+        val consolidado: Boolean
+    )
 
-            _uiState.update { state ->
-                state.copy(
-                    productosEnCarrito = productosMapeados,
-                    catalogoCompleto = catalogo,
-                    isLoadingInventario = false,
-                    totalVenta = total,
-                    perfilesDisponibles = perfiles,
-                    perfilSeleccionado = perfilActualizado,
-                    filtroRutaAdmin = filtroRuta,
-                    rutasDisponibles = rutas,
-                    searchQuery = query,
-                    cantidades = mapaCantidades,
-                    mostrarFiltrosAdmin = mostrarFiltros
-                )
-            }
-        }
-        .flowOn(Dispatchers.Default)
-        .catch { e -> Log.e("VentaVM", "Error en flujo optimizado", e) }
-        .launchIn(viewModelScope)
+    fun toggleModoConsolidado() {
+        _modoConsolidado.value = !_modoConsolidado.value
     }
 
     fun seleccionarPerfil(perfil: PerfilVenta) {
         _perfilSeleccionado.value = perfil
+        _uiState.update { it.copy(perfilSeleccionado = perfil) }
     }
 
-    fun onSearchQueryChanged(query: String) {
-        _searchQuery.value = query
+    fun onSearchQueryChanged(q: String) {
+        _searchQuery.value = q
+        _uiState.update { it.copy(searchQuery = q) }
     }
 
-    fun setMostrarDialogoSinVenta(mostrar: Boolean) {
-        _uiState.update { it.copy(mostrarDialogoSinVenta = mostrar) }
-    }
+    fun actualizarCantidad(id: String, nueva: Int) {
+        // Encontrar el producto en el cache para obtener su productoId base (sin warehouse)
+        val producto = _productosAlmacenCache.value.find { it.id == id }
+        val idMapa = producto?.productoId ?: id.split("_")[0]
 
-    fun seleccionarMotivoSinVenta(motivo: String) {
-        _uiState.update { it.copy(motivoSinVenta = motivo) }
+        val current = _cantidades.value.toMutableMap()
+        if (nueva <= 0) {
+            current.remove(idMapa)
+            current.remove(id) // Por seguridad borrar ambos
+        } else {
+            current[idMapa] = nueva
+        }
+        _cantidades.value = current
+        _uiState.update { it.copy(cantidades = current) }
     }
 
     fun limpiarCarrito() {
-        _cantidades.value = emptyMap<String, Int>()
-        Log.d("VentaViewModel", "🛒 Carrito vaciado por el usuario.")
+        _cantidades.value = emptyMap()
+        _uiState.update { it.copy(
+            cantidades = emptyMap(),
+            totalVenta = 0.0,
+            productosEnCarrito = _uiState.value.catalogoCompleto.map { it.copy(cantidad = 0) }
+        ) }
     }
 
-    fun actualizarCantidad(productoId: String, nuevaCantidad: Int) {
-        val cantidadesActuales = _cantidades.value.toMutableMap()
-        // Buscamos el producto en el catálogo actual del UIState para verificar stock
-        val producto = _uiState.value.catalogoCompleto.find { it.id == productoId }
-        
-        if (producto != null) {
-            val valorFinal = nuevaCantidad.coerceIn(0, producto.cantidadDisponible)
-            if (valorFinal > 0) cantidadesActuales[productoId] = valorFinal
-            else cantidadesActuales.remove(productoId)
-            
-            _cantidades.value = cantidadesActuales
-        }
-    }
-
-    fun cargarVentasHoy() {
-        val calendar = Calendar.getInstance()
-        calendar.set(Calendar.HOUR_OF_DAY, 0)
-        calendar.set(Calendar.MINUTE, 0)
-        calendar.set(Calendar.SECOND, 0)
-        calendar.set(Calendar.MILLISECOND, 0)
-        val inicio = calendar.timeInMillis
-
-        calendar.set(Calendar.HOUR_OF_DAY, 23)
-        calendar.set(Calendar.MINUTE, 59)
-        calendar.set(Calendar.SECOND, 59)
-        calendar.set(Calendar.MILLISECOND, 999)
-        val fin = calendar.timeInMillis
-
-        cargarVentasPorPeriodo(Date(inicio), Date(fin))
-    }
-
-    fun cargarVentasPorPeriodo(fechaInicio: Date, fechaFin: Date) {
+    fun precargarUltimaVenta(clienteId: String) {
         viewModelScope.launch {
             try {
-                val usuario = repositoryUsuario.obtenerUsuarioActual()
-                val uid = usuario?.uid ?: ""
-                val puesto = usuario?.puestoTrabajo?.trim() ?: ""
-                val idParaQuery = if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") uid else ""
+                Log.d("VentaViewModel", "🔍 Iniciando precarga inteligente Offline-First para: $clienteId")
                 
-                val ventas = ventaRepository.obtenerVentasPorPeriodo(idParaQuery, fechaInicio.time, fechaFin.time)
-                _ventasPeriodo.value = ventas
-            } catch (e: Exception) {
-                Log.e("VentaViewModel", "Error cargando ventas por periodo", e)
-            }
-        }
-    }
+                // 1. INTENTO INSTANTÁNEO (ROOM)
+                ejecutarAnalisisPrecargaLocal(clienteId)
 
-    fun sincronizarHistorialVendedor() {
-        viewModelScope.launch {
-            try {
-                val usuario = repositoryUsuario.obtenerUsuarioActual()
-                val uid = usuario?.uid ?: ""
-                val puesto = usuario?.puestoTrabajo?.trim() ?: ""
-                val idParaSync = if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") uid else ""
-                
-                // Sincroniza todas las ventas (Maestro o individuales)
-                ventaRepository.sincronizarVentasPeriodo(idParaSync)
-                cargarVentasHoy()
-            } catch (e: Exception) {
-                Log.e("VentaViewModel", "Error sincronizando historial completo", e)
-            }
-        }
-    }
-
-    fun sincronizarVentasDia(vendedorId: String) {
-        viewModelScope.launch {
-            try {
-                // 🔥 PROTECCIÓN ADMIN: Si estamos en modo Admin, sincronizamos globalmente (vendedorId = "")
-                val isAdmin = _isAdminOverride.value == true
-                val idSync = if (isAdmin) "" else vendedorId
-                
-                ventaRepository.descargarVentasDia(idSync)
-                cargarVentasHoy()
-            } catch (e: Exception) {
-                Log.e("VentaViewModel", "Error sincronizando ventas", e)
-            }
-        }
-    }
-
-    fun verificarRutaAsignadaLocal(uid: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val usuario = repositoryUsuario.obtenerUsuarioLocal(uid)
-                val nuevoEstado = if ((usuario?.ultimaRutaId != null) && (usuario.ultimoAlmacenId != null)) {
-                    EstadoRuta.ConRuta(
-                        nombreAlmacen = usuario.ultimoAlmacenNombre ?: "Almacén",
-                        almacenId = usuario.ultimoAlmacenId
-                    )
-                } else {
-                    EstadoRuta.SinRuta
+                // 2. REFRESCO EN SEGUNDO PLANO (FIRESTORE) - No bloquea la UI
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        ventaRepository.descargarHistorialCliente90Dias(clienteId)
+                        // Si la descarga trajo algo nuevo y el carrito sigue vacío, volvemos a analizar
+                        if (_cantidades.value.isEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                ejecutarAnalisisPrecargaLocal(clienteId)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("VentaViewModel", "Error sync background", e)
+                    }
                 }
-                _uiState.update { it.copy(estadoRuta = nuevoEstado) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(estadoRuta = EstadoRuta.Error(e.message ?: "Error desconocido")) }
+                Log.e("VentaViewModel", "Error en flujo precarga", e)
             }
         }
     }
 
+    private suspend fun ejecutarAnalisisPrecargaLocal(clienteId: String) {
+        try {
+            // Obtener todo el historial local
+            val historial = ventaRepository.obtenerTodoHistorialCliente(clienteId)
+            if (historial.isEmpty()) return
 
-    fun procesarVenta(
-        clienteId: String,
-        clienteNombre: String,
-        clienteFotoUrl: String?,
-        metodoPago: String,
-        rutaId: String? = null,
-        rutaNombre: String? = null,
-        fotoEvidenciaUrl: String? = null,
-        motivoVisita: String? = null,
-        onResultado: (Boolean, String, String) -> Unit
-    ) {
-        if (_uiState.value.estaProcesando) return
-        if (!_uiState.value.enRuta) {
-            onResultado(false, "Debes iniciar jornada para realizar ventas", "")
-            return
-        }
-        _uiState.update { it.copy(estaProcesando = true) }
+            // Agrupar tickets por DÍA
+            val ticketsPorDia = historial.groupBy { v ->
+                val cal = Calendar.getInstance().apply { timeInMillis = v.fecha }
+                "${cal.get(Calendar.YEAR)}_${cal.get(Calendar.DAY_OF_YEAR)}"
+            }.toList().sortedByDescending { it.second.maxOf { v -> v.fecha } }
 
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val usuarioActual = repositoryUsuario.obtenerUsuarioActual()
-                val uidVendedor = usuarioActual?.uid ?: FirebaseAuth.getInstance().currentUser?.uid ?: ""
-                val nombreVendedor = usuarioActual?.nombre ?: FirebaseAuth.getInstance().currentUser?.displayName ?: "Vendedor"
+            // Buscar hacia atrás el primer día con ventas reales
+            for (diaEntry in ticketsPorDia) {
+                val ticketsDelDia = diaEntry.second
+                val mapaConsolidado = mutableMapOf<String, Int>()
+                var algunaVentaConDetalles = false
 
-                val almacenId = (_uiState.value.estadoRuta as? EstadoRuta.ConRuta)?.almacenId
-                val miUbicacion = LocationState.ultimaUbicacion.value
-                
-                val productosVenta = _uiState.value.catalogoCompleto.filter { it.cantidad > 0 }
-
-                val ventaId = ventaRepository.guardarVentaLocal(
-                    clienteId = clienteId,
-                    clienteNombre = clienteNombre,
-                    clienteImagenUrl = clienteFotoUrl,
-                    productos = productosVenta,
-                    total = 0.0, // El total se recalcula internamente
-                    metodoPago = metodoPago,
-                    vendedorId = uidVendedor,
-                    vendedorNombre = nombreVendedor,
-                    almacenId = almacenId,
-                    rutaId = rutaId,
-                    rutaNombre = rutaNombre,
-                    latitud = miUbicacion?.latitude ?: 0.0,
-                    longitud = miUbicacion?.longitude ?: 0.0,
-                    fueraDeRango = !_uiState.value.estaEnRango,
-                    fotoEvidencia = fotoEvidenciaUrl,
-                    motivoVisita = motivoVisita
-                )
-
-                withContext(Dispatchers.Main) {
-                    _uiState.update { it.copy(estaProcesando = false) }
+                for (ticket in ticketsDelDia) {
+                    if (ticket.estado == "CANCELADA") continue
+                    val detalles = ventaRepository.obtenerDetallesDeVenta(ticket.id)
                     
-                    // 🔥 DISPARO INMEDIATO DE SINCRONIZACIÓN
-                    com.gruposanangel.delivery.SegundoPlano.scheduleSyncWorkers(com.google.firebase.FirebaseApp.getInstance().applicationContext)
-
-                    onResultado(true, "Venta registrada con éxito", ventaId)
+                    if (detalles.isEmpty() && ticket.total > 0) {
+                        // Si no hay detalles locales, intentar descarga rápida (solo si hay internet)
+                        val ticketNube = withContext(Dispatchers.IO) { 
+                            try { ventaRepository.obtenerTicketCompletoFirestore(ticket.id) } catch(e: Exception) { null }
+                        }
+                        ticketNube?.productos?.forEach { p ->
+                            val prodLocal = _uiState.value.catalogoCompleto.find { it.nombre == p.nombre }
+                            val idFinal = prodLocal?.id?.split("_")?.get(0) ?: p.nombre 
+                            mapaConsolidado[idFinal] = (mapaConsolidado[idFinal] ?: 0) + p.cantidad
+                            algunaVentaConDetalles = true
+                        }
+                    } else {
+                        detalles.forEach { d ->
+                            val idProd = d.productoId 
+                            mapaConsolidado[idProd] = (mapaConsolidado[idProd] ?: 0) + d.cantidad
+                            algunaVentaConDetalles = true
+                        }
+                    }
                 }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _uiState.update { it.copy(estaProcesando = false) }
-                    onResultado(false, e.message ?: "Error", "")
+
+                if (algunaVentaConDetalles && mapaConsolidado.values.any { it > 0 }) {
+                    _cantidades.value = mapaConsolidado
+                    val catalogo = _uiState.value.catalogoCompleto
+                    if (catalogo.isNotEmpty()) {
+                        val total = catalogo.sumOf { p -> 
+                            val idBase = p.id.split("_")[0]
+                            (mapaConsolidado[idBase] ?: 0) * p.precio 
+                        }
+                        _uiState.update { it.copy(cantidades = mapaConsolidado, totalVenta = total) }
+                    } else {
+                        _uiState.update { it.copy(cantidades = mapaConsolidado) }
+                    }
+                    Log.i("VentaViewModel", "✅ Precarga Local exitosa: ${Date(ticketsDelDia.first().fecha)}")
+                    return
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("VentaViewModel", "Error en analisis local", e)
+        }
+    }
+
+    fun monitorearGeocerca(lat: Double, lng: Double) {
+        jobGeocerca?.cancel()
+        jobGeocerca = viewModelScope.launch {
+            LocationState.ultimaUbicacion.collect { location ->
+                if (location != null) {
+                    val results = FloatArray(1)
+                    android.location.Location.distanceBetween(
+                        location.latitude, location.longitude,
+                        lat, lng,
+                        results
+                    )
+                    val distancia = results[0]
+                    val enRango = distancia <= 100 
+                    _uiState.update { it.copy(
+                        distanciaAlClienteMetros = distancia,
+                        estaEnRango = enRango,
+                        requiereFotoEvidencia = !enRango
+                    ) }
                 }
             }
         }
     }
-
-    // --- Consultas de Tickets (Utilizadas por Detalle Ticket) ---
-
-    suspend fun obtenerTicketCompleto(ticketId: String): TicketVentaCompleto? {
-        return withContext(Dispatchers.IO) {
-            ventaRepository.obtenerTicketCompleto(ticketId)
-        }
-    }
-
-    suspend fun obtenerVentaPorId(ventaId: String): VentaEntity? {
-        return withContext(Dispatchers.IO) {
-            this@VentaViewModel.ventaRepository.obtenerVentaPorId(ventaId)
-        }
-    }
-
-    suspend fun obtenerDetallesDeVenta(ventaId: String): List<VentaDetalleEntity> {
-        return withContext(Dispatchers.IO) {
-            ventaRepository.obtenerDetallesDeVenta(ventaId)
-        }
-    }
-
-    // --- NUEVO: REGISTRO DE CAMBIOS Y DEVOLUCIONES (DOBLE FLUJO) ---
 
     fun registrarAjusteDoble(
         ticketId: String,
@@ -773,60 +680,142 @@ class VentaViewModel(
         motivo: String?,
         onSuccess: () -> Unit
     ) {
-        viewModelScope.launch(Dispatchers.IO) {
+        Log.i("VentaViewModel", "Registrando ajuste doble: $tipoOperacion")
+        viewModelScope.launch {
             try {
-                val usuario = repositoryUsuario.obtenerUsuarioActual()
-                val uid = usuario?.uid ?: ""
-                val almacenNombre = usuario?.ultimoAlmacenNombre ?: ""
-
+                val u = repositoryUsuario.obtenerUsuarioActual()
+                val uid = u?.uid ?: ""
+                val almacen = u?.ultimoAlmacenNombre ?: ""
+                
                 repositoryInventario.registrarDobleMovimiento(
                     tipoOperacion = tipoOperacion,
                     productoEntra = productoEntra,
                     productoSale = productoSale,
                     cantidad = cantidad,
                     vendedorId = uid,
-                    almacenNombre = almacenNombre,
+                    almacenNombre = almacen,
                     clienteId = clienteId,
                     ticketId = ticketId,
                     motivo = motivo
                 )
-                withContext(Dispatchers.Main) { onSuccess() }
+                withContext(Dispatchers.Main) {
+                    onSuccess()
+                }
             } catch (e: Exception) {
-                Log.e("VentaViewModel", "Error al registrar ajuste", e)
+                Log.e("VentaViewModel", "Error en ajuste doble", e)
             }
         }
     }
 
-    fun anularVenta(
-        ventaId: String,
-        motivo: String,
-        onResultado: (Boolean, String) -> Unit
+    fun procesarVenta(
+        clienteId: String, clienteNombre: String, clienteFotoUrl: String?,
+        metodoPago: String, rutaId: String? = null, rutaNombre: String? = null,
+        fotoEvidenciaUrl: String? = null, motivoVisita: String? = null,
+        onResultado: (Boolean, String, String) -> Unit
     ) {
+        if (_uiState.value.estaProcesando) return
+        if (!_uiState.value.enRuta) {
+            onResultado(false, "Debes iniciar jornada", "")
+            return
+        }
         _uiState.update { it.copy(estaProcesando = true) }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                val admin = repositoryUsuario.obtenerUsuarioActual()
-                val adminNombre = admin?.nombre ?: "Admin"
-                val adminUid = admin?.uid ?: ""
-
-                val (exito, mensaje) = ventaRepository.anularVenta(
-                    ventaId = ventaId,
-                    motivo = motivo,
-                    adminNombre = adminNombre,
-                    adminUid = adminUid
-                )
+                val u = repositoryUsuario.obtenerUsuarioActual()
+                val uid = u?.uid ?: ""
+                val nom = u?.nombre ?: "Vendedor"
+                val almId = (_uiState.value.estadoRuta as? EstadoRuta.ConRuta)?.almacenId
                 
+                // 🔥 SI ESTAMOS EN MODO CONSOLIDADO, TOMAMOS TODOS LOS PRODUCTOS CON CANTIDAD > 0 DE TODO EL CATÁLOGO LOCAL
+                val prods = if (_uiState.value.modoConsolidado) {
+                    val allCants = _cantidades.value
+                    _productosAlmacenCache.value.filter { p -> 
+                        (allCants[p.productoId] ?: allCants[p.id] ?: 0) > 0 
+                    }.map { p ->
+                        Plantilla_Producto(
+                            id = p.id,
+                            nombre = p.nombre,
+                            precio = p.precio,
+                            cantidad = allCants[p.productoId] ?: allCants[p.id] ?: 0
+                        )
+                    }
+                } else {
+                    _uiState.value.catalogoCompleto.filter { it.cantidad > 0 }
+                }
+
+                val vId = ventaRepository.guardarVentaLocal(
+                    clienteId, clienteNombre, clienteFotoUrl, prods, 0.0, metodoPago,
+                    uid, nom, almId, rutaId, rutaNombre, 0.0, 0.0,
+                    !_uiState.value.estaEnRango, fotoEvidenciaUrl, motivoVisita
+                )
                 withContext(Dispatchers.Main) {
                     _uiState.update { it.copy(estaProcesando = false) }
-                    onResultado(exito, mensaje)
+                    onResultado(true, "Venta guardada", vId)
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     _uiState.update { it.copy(estaProcesando = false) }
-                    onResultado(false, e.message ?: "Error desconocido")
+                    onResultado(false, "Error: ${e.message}", "")
                 }
             }
         }
+    }
+
+    fun anularVenta(vId: String, motivo: String, onRes: (Boolean, String) -> Unit) {
+        _uiState.update { it.copy(estaProcesando = true) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val u = repositoryUsuario.obtenerUsuarioActual()
+                val adminUid = u?.uid ?: ""
+                val adminNombre = u?.nombre ?: "Admin"
+                val result = ventaRepository.anularVenta(vId, motivo, adminUid, adminNombre)
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(estaProcesando = false) }
+                    onRes(result.first, result.second)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(estaProcesando = false) }
+                    onRes(false, e.message ?: "Error al anular venta")
+                }
+            }
+        }
+    }
+
+    // 🔥 MÉTODOS DE CONSULTA PARA DETALLES DE VENTA
+    suspend fun obtenerTicketCompleto(ticketId: String): TicketVentaCompleto? {
+        return withContext(Dispatchers.IO) {
+            ventaRepository.obtenerTicketCompleto(ticketId)
+        }
+    }
+
+    suspend fun obtenerVentaPorId(ventaId: String): VentaEntity? {
+        return withContext(Dispatchers.IO) {
+            ventaRepository.obtenerVentaPorId(ventaId)
+        }
+    }
+
+    suspend fun obtenerDetallesDeVenta(ventaId: String): List<VentaDetalleEntity> {
+        return withContext(Dispatchers.IO) {
+            ventaRepository.obtenerDetallesDeVenta(ventaId)
+        }
+    }
+
+    init {
+        resetFiltro()
+        observarUsuarioYPerfiles()
+        observarBaseInventario()
+        observarInventarioOptimizado()
+        escucharVentasNube()
+        observarEstadoRutaReactivo()
+        observarEstadoJornada()
+        escucharRutas()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        salesListener?.remove()
+        jobGeocerca?.cancel()
     }
 }
 
@@ -836,8 +825,8 @@ class VentaViewModelFactory(
     private val repositoryUsuario: RepositoryUsuario,
     private val clienteDao: com.gruposanangel.delivery.data.ClienteDao? = null
 ) : ViewModelProvider.Factory {
-    @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        @Suppress("UNCHECKED_CAST")
         return VentaViewModel(repositoryInventario, ventaRepository, repositoryUsuario, clienteDao) as T
     }
 }

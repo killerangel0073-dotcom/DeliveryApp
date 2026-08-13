@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -450,6 +451,23 @@ fun PantallaReporteSemanal(
                             }
                         }
                     }
+
+                    // 🔥 NUEVA SECCIÓN: DESGLOSE DE GASTOS
+                    if (uiState.todosLosGastosSemana.isNotEmpty()) {
+                        item { 
+                            Text(
+                                "DETALLE DE GASTOS", 
+                                Modifier.padding(horizontal = 24.dp, vertical = 16.dp), 
+                                style = MaterialTheme.typography.labelMedium, 
+                                fontWeight = FontWeight.Black, 
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, 
+                                letterSpacing = 1.5.sp
+                            ) 
+                        }
+                        items(uiState.todosLosGastosSemana.sortedByDescending { it.fecha }) { gasto ->
+                            GastoItemPremium(gasto, formatoMoneda)
+                        }
+                    }
                 }
             }
 
@@ -580,6 +598,76 @@ fun TransactionItemPremium(dia: DiaReporte, formato: NumberFormat, onPdfClick: (
     }
 }
 
+@Composable
+fun GastoItemPremium(gasto: Gasto, formato: NumberFormat) {
+    val dfGasto = remember { SimpleDateFormat("dd/MM", Locale.US) }
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .shadow(1.dp, RoundedCornerShape(20.dp)),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            val icon = when {
+                gasto.categoria.contains("Gasolina", true) -> Icons.Rounded.LocalGasStation
+                gasto.categoria.contains("Comida", true) -> Icons.Rounded.Restaurant
+                gasto.categoria.contains("Reparación", true) -> Icons.Rounded.Build
+                else -> Icons.Rounded.Payments
+            }
+            
+            Surface(
+                Modifier.size(44.dp), 
+                shape = CircleShape, 
+                color = DelisaRed.copy(0.1f)
+            ) { 
+                Icon(
+                    imageVector = icon, 
+                    contentDescription = null, 
+                    tint = DelisaRed, 
+                    modifier = Modifier.padding(12.dp)
+                ) 
+            }
+            
+            Spacer(Modifier.width(16.dp))
+            
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        gasto.categoria.uppercase(), 
+                        fontWeight = FontWeight.Black, 
+                        fontSize = 12.sp,
+                        color = DelisaRed
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        dfGasto.format(Date(gasto.fecha)), 
+                        fontSize = 11.sp, 
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Text(
+                    gasto.descripcion, 
+                    fontSize = 13.sp, 
+                    color = MaterialTheme.colorScheme.onSurface, 
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            
+            Text(
+                "-${formato.format(gasto.monto)}", 
+                fontWeight = FontWeight.Black, 
+                fontSize = 16.sp, 
+                color = DelisaRed
+            )
+        }
+    }
+}
+
 fun generarPdfReporteSemanal(context: Context, state: ReporteSemanalUiState, esDemo: Boolean = false): File {
     val pdfDocument = PdfDocument(); val nf = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
     val pDelisaRed = android.graphics.Paint().apply { color = android.graphics.Color.rgb(227, 6, 19); isAntiAlias = true }
@@ -603,5 +691,40 @@ fun generarPdfReporteSemanal(context: Context, state: ReporteSemanalUiState, esD
     state.dias.forEachIndexed { i, dia -> val h = (dia.totalVenta / maxV * 120f).toFloat().coerceAtLeast(2f); canvas.drawRoundRect(sX + i*(bW+gap), y + 120f - h, sX + i*(bW+gap) + bW, y + 120f, 6f, 6f, android.graphics.Paint().apply { color = android.graphics.Color.rgb(227, 6, 19) }); pBold.textSize = 9f; canvas.drawText(dia.nombre.take(3).uppercase(), sX + i*(bW+gap) + bW/2, y + 138f, pBold) }; y += 200f
     canvas.drawRect(40f, y, 572f, y + 25f, android.graphics.Paint().apply { color = android.graphics.Color.rgb(245, 245, 245) }); pBold.textAlign = android.graphics.Paint.Align.LEFT; canvas.drawText("DÍA", 50f, y+16f, pBold); canvas.drawText("CLIENTES", 220f, y+16f, pBold); canvas.drawText("TOTAL", 480f, y+16f, pBold); y += 30f
     state.dias.forEach { dia -> canvas.drawText(dia.nombre.uppercase(), 50f, y+12f, pText); canvas.drawText("${dia.clientesAtendidos}", 220f, y+12f, pText); canvas.drawText(nf.format(dia.totalVenta), 480f, y+12f, pBold.apply { color = android.graphics.Color.rgb(227, 6, 19) }); y += 23f }; y += 20f
+
+    // --- NUEVA SECCIÓN: DESGLOSE DE GASTOS SEMANALES ---
+    if (state.todosLosGastosSemana.isNotEmpty()) {
+        y += 10f
+        if (y > 700f) {
+            pdfDocument.finishPage(page); page = pdfDocument.startPage(PdfDocument.PageInfo.Builder(612, 792, 2).create()); canvas = page.canvas; y = 40f
+        }
+
+        pBold.textAlign = android.graphics.Paint.Align.CENTER
+        canvas.drawText("DESGLOSE DE GASTOS SEMANALES", 306f, y, pBold.apply { textSize = 12f }); y += 30f
+        
+        fun drawExpensesHeader(canv: android.graphics.Canvas, curY: Float) {
+            canv.drawRect(40f, curY, 572f, curY + 1.2f, pDelisaRed)
+            pBold.textAlign = android.graphics.Paint.Align.LEFT
+            canv.drawText("FECHA", 50f, curY + 16f, pBold)
+            canv.drawText("CATEGORÍA", 140f, curY + 16f, pBold)
+            canv.drawText("DESCRIPCIÓN", 300f, curY + 16f, pBold)
+            canv.drawText("MONTO", 510f, curY + 16f, pBold)
+        }
+        drawExpensesHeader(canvas, y); y += 25f
+        
+        val dfGasto = SimpleDateFormat("dd/MM", Locale.US)
+        state.todosLosGastosSemana.sortedBy { it.fecha }.forEach { gasto ->
+            if (y > 730f) {
+                pdfDocument.finishPage(page); page = pdfDocument.startPage(PdfDocument.PageInfo.Builder(612, 792, 3).create()); canvas = page.canvas; y = 40f; drawExpensesHeader(canvas, y); y += 25f
+            }
+            canvas.drawRect(40f, y, 572f, y + 20f, android.graphics.Paint().apply { color = android.graphics.Color.rgb(252, 252, 252) })
+            canvas.drawText(dfGasto.format(Date(gasto.fecha)), 50f, y + 14f, pText)
+            canvas.drawText(gasto.categoria.take(18).uppercase(), 140f, y + 14f, pText.apply { textSize = 9f })
+            canvas.drawText(gasto.descripcion.take(30), 300f, y + 14f, pText.apply { textSize = 10f })
+            canvas.drawText(nf.format(gasto.monto), 510f, y + 14f, pBold.apply { textAlign = android.graphics.Paint.Align.LEFT; color = android.graphics.Color.rgb(198, 40, 40) })
+            y += 20f
+        }
+    }
+
     canvas.drawRect(40f, 740f, 572f, 741f, pDelisaRed); pSub.textAlign = android.graphics.Paint.Align.LEFT; canvas.drawText("GENERADO: ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(Date())}", 50f, 755f, pSub); pdfDocument.finishPage(page); val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Estadisticas_${state.rutaNombre.replace(" ","")}.pdf"); pdfDocument.writeTo(FileOutputStream(file)); pdfDocument.close(); return file
 }

@@ -41,19 +41,14 @@ async function ejecutarTransferenciaConDetalle(db, ordenId, ordenData) {
     ]);
 
     if (ordenData.origen !== 'Compra Producto') {
-      if (!origenSnap.exists) {
-        throw new Error(`Stock origen no existe (${productoId})`);
-      }
+      const stockActual = origenSnap.exists ? (origenSnap.get('cantidad') || 0) : 0;
 
-      const stockActual = origenSnap.get('cantidad') || 0;
-      if (stockActual < cantidad) {
-        throw new Error(`Stock insuficiente en origen (${productoId})`);
-      }
-
-      batch.update(stockOrigenRef, {
+      // 🔥 Blindaje: Ya no bloqueamos por stock insuficiente.
+      // Permitimos que la bodega quede en negativo para no detener la operación del vendedor.
+      batch.set(stockOrigenRef, {
         cantidad: stockActual - cantidad,
         ultimaActualizacion: ahora
-      });
+      }, { merge: true });
     }
 
 

@@ -207,7 +207,7 @@ fun PantallaInventarioContent(
             }
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                if (uiState.isLoading) {
+                if (uiState.isLoading && uiState.productos.isEmpty()) {
                     InventarioSkeleton()
                 } else if (uiState.rutaAsignada == null && !uiState.isAdmin) {
                     Text("Usuario sin ruta asignada", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
@@ -548,7 +548,30 @@ fun ItemProductoInventario(producto: Plantilla_Producto, esDanado: Boolean = fal
                 Text(text = "Unitario: ${nf.format(producto.precio)}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Column(horizontalAlignment = Alignment.End) {
-                Text(text = "${producto.cantidad} pzas", fontWeight = FontWeight.Black, fontSize = 15.sp, color = com.gruposanangel.delivery.ui.theme.DelisaRed)
+                val colorPiezas = when {
+                    producto.cantidad > 0 -> com.gruposanangel.delivery.ui.theme.DelisaRed
+                    producto.cantidad == 0 -> MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                    else -> MaterialTheme.colorScheme.error
+                }
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (producto.cantidad < 0) {
+                        Icon(
+                            imageVector = Icons.Default.Warning, 
+                            contentDescription = null, 
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = "${producto.cantidad} pzas", 
+                        fontWeight = if (producto.cantidad < 0) FontWeight.ExtraBold else FontWeight.Black, 
+                        fontSize = 15.sp, 
+                        color = colorPiezas
+                    )
+                }
+                
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(text = nf.format(totalProducto), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
             }

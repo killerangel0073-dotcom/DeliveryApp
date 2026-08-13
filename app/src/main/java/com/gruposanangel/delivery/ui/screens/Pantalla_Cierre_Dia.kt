@@ -682,6 +682,41 @@ fun GenerarPDFCierreCarta(
         y += 20f
     }
 
+    // --- NUEVA SECCIÓN: DETALLE DE GASTOS ---
+    if (state.gastosHoy.isNotEmpty()) {
+        y += 25f
+        if (y > 700f) {
+            pdfDocument.finishPage(page); currentPageNumber++
+            page = pdfDocument.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create()); canvas = page.canvas
+            drawHeader(canvas, currentPageNumber); y = 62f
+        }
+        
+        pBold.textAlign = Paint.Align.CENTER
+        canvas.drawText("DETALLE DE GASTOS DEL DÍA", pageWidth / 2f, y, pBold.apply { textSize = 11f }); y += 22f
+        
+        fun drawExpensesHeaderLocal(canv: Canvas, curY: Float) {
+            canv.drawRect(40f, curY, 572f, curY + 1.2f, pDelisaRed)
+            pBold.textAlign = Paint.Align.LEFT
+            canv.drawText("CATEGORÍA", 50f, curY + 14f, pBold)
+            canv.drawText("DESCRIPCIÓN", 200f, curY + 14f, pBold)
+            canv.drawText("MONTO", 510f, curY + 14f, pBold)
+        }
+        drawExpensesHeaderLocal(canvas, y); y += 22f
+        
+        state.gastosHoy.forEach { gasto ->
+            if (y > 730f) {
+                pdfDocument.finishPage(page); currentPageNumber++
+                page = pdfDocument.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create()); canvas = page.canvas
+                drawHeader(canvas, currentPageNumber); y = 62f; drawExpensesHeaderLocal(canvas, y); y += 22f
+            }
+            canvas.drawRect(40f, y, 572f, y + 18f, Paint().apply { color = android.graphics.Color.rgb(250, 250, 250) })
+            canvas.drawText(gasto.categoria.uppercase(), 50f, y + 13f, pText.apply { textSize = 9f })
+            canvas.drawText(gasto.descripcion.take(45), 200f, y + 13f, pText)
+            canvas.drawText(nf.format(gasto.monto), 510f, y + 13f, pBold.apply { textAlign = Paint.Align.LEFT; textSize = 10f; color = android.graphics.Color.rgb(198, 40, 40) })
+            y += 18f
+        }
+    }
+
     if (y > 710f) { pdfDocument.finishPage(page); currentPageNumber++; page = pdfDocument.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create()); canvas = page.canvas; y = 40f }
     val footerY = 710f
     canvas.drawRect(40f, footerY, 572f, footerY + 1.2f, pDelisaRed)

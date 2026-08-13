@@ -59,8 +59,17 @@ class DetalleCargaViewModel(
                         val nombreCarga = item["nombre"] as? String
                         val precioCarga = (item["precio"] as? Number)?.toDouble() ?: 0.0
                         val pLocal = productoDao.getProductoById(id)
-                        Plantilla_Producto(id = id, nombre = pLocal?.nombre ?: nombreCarga ?: "ID: $id", precio = if (pLocal != null && pLocal.precio > 0) pLocal.precio else precioCarga, imagenUrl = pLocal?.imagenUrl ?: "", cantidad = cantidad)
-                    }
+                        Plantilla_Producto(
+                            id = id, 
+                            nombre = pLocal?.nombre ?: nombreCarga ?: "ID: $id", 
+                            precio = if (pLocal != null && pLocal.precio > 0) pLocal.precio else precioCarga, 
+                            imagenUrl = pLocal?.imagenUrl ?: "", 
+                            cantidad = cantidad,
+                            marca = pLocal?.marca ?: "Delisa",
+                            categoria = pLocal?.categoria ?: "General"
+                        )
+                    }.sortedWith(compareBy<Plantilla_Producto>({ it.categoria }, { it.nombre }))
+
                     val fechaCarga = doc.getTimestamp("timestamp")?.toDate()
                     val destino = doc.getString("destino") ?: ""
                     val estadoDoc = doc.getString("estado") ?: "PENDIENTE"
@@ -91,9 +100,11 @@ class DetalleCargaViewModel(
                                 nombre = mov.nombreProducto,
                                 precio = pLocal?.precio ?: 0.0,
                                 cantidad = mov.cantidad,
-                                imagenUrl = pLocal?.imagenUrl ?: ""
+                                imagenUrl = pLocal?.imagenUrl ?: "",
+                                marca = pLocal?.marca ?: "Delisa",
+                                categoria = pLocal?.categoria ?: "General"
                             )
-                        }
+                        }.sortedWith(compareBy<Plantilla_Producto>({ it.categoria }, { it.nombre }))
                         
                         _uiState.update { it.copy(
                             isLoading = false,

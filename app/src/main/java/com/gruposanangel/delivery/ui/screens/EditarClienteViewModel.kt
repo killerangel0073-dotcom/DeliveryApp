@@ -14,6 +14,8 @@ import com.google.android.gms.location.Priority
 import com.google.firebase.firestore.FirebaseFirestore
 import com.gruposanangel.delivery.data.ClienteEntity
 import com.gruposanangel.delivery.data.RepositoryCliente
+import com.gruposanangel.delivery.data.RepositoryRuta
+import com.gruposanangel.delivery.data.RutaEntity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,11 +35,13 @@ data class EditarClienteUiState(
     val imageFile: File? = null,
     val imageBitmap: Bitmap? = null,
     val isLoadingData: Boolean = true,
-    val cliente: ClienteEntity? = null
+    val cliente: ClienteEntity? = null,
+    val listaRutas: List<RutaEntity> = emptyList()
 )
 
 class EditarClienteViewModel(
     private val repository: RepositoryCliente,
+    private val repositoryRuta: RepositoryRuta,
     private val clienteId: String
 ) : ViewModel() {
 
@@ -46,6 +50,18 @@ class EditarClienteViewModel(
 
     init {
         cargarDatosCliente()
+        cargarRutas()
+    }
+
+    private fun cargarRutas() {
+        viewModelScope.launch {
+            // 🔥 Asegurar que las rutas estén descargadas
+            repositoryRuta.descargarRutasDesdeFirebase()
+            
+            repositoryRuta.obtenerRutasLocal().collect { rutas ->
+                _uiState.update { it.copy(listaRutas = rutas) }
+            }
+        }
     }
 
     private fun cargarDatosCliente() {
@@ -88,7 +104,8 @@ class EditarClienteViewModel(
         nombreDueno: String,
         telefono: String,
         correo: String,
-        tipoExhibidor: String
+        tipoExhibidor: String,
+        rutaId: String?
     ) {
         val currentState = _uiState.value
         val original = currentState.cliente ?: return
@@ -111,6 +128,7 @@ class EditarClienteViewModel(
                     telefono = telefono,
                     correo = correo,
                     tipoExhibidor = tipoExhibidor,
+                    rutaId = rutaId,
                     fotografiaUrl = currentState.imageFile?.absolutePath ?: original.fotografiaUrl,
                     syncStatus = false,
                     lastModified = System.currentTimeMillis()

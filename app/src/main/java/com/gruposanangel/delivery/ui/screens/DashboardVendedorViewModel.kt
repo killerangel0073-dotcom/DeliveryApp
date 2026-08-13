@@ -50,6 +50,7 @@ data class DashboardVendedorUiState(
     val comisionPctConfig: Double = 3.0,
     val perfilesVenta: List<com.gruposanangel.delivery.data.PerfilVenta> = emptyList(),
     val ventasPorPerfil: List<PerfilBreakdown> = emptyList(),
+    val fechaFiltroDiario: Long = System.currentTimeMillis(), // 🔥 Nueva: Filtro para la tarjeta principal
     val error: String? = null
 )
 
@@ -156,6 +157,10 @@ class DashboardVendedorViewModel(
                 Log.e("DashboardVM", "Error actualizando meta frituras", e)
             }
         }
+    }
+
+    fun actualizarFechaFiltro(nuevaFecha: Long) {
+        _uiState.update { it.copy(fechaFiltroDiario = nuevaFecha) }
     }
 
     private fun cargarDatosPerfil() {
@@ -352,9 +357,8 @@ class DashboardVendedorViewModel(
         
         viewModelScope.launch {
             val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
-            val cal = Calendar.getInstance().apply { timeInMillis = ahoraReal }
             
-            // Definimos el inicio del bloque (4 semanas atrás)
+            // Definimos el inicio del bloque (4 semanas atrás) basado SIEMPRE en ahoraReal
             val calBloque = Calendar.getInstance().apply { timeInMillis = ahoraReal }
             calBloque.add(Calendar.WEEK_OF_YEAR, -4)
             while (calBloque.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) {
@@ -363,48 +367,41 @@ class DashboardVendedorViewModel(
             calBloque.set(Calendar.HOUR_OF_DAY, 0); calBloque.set(Calendar.MINUTE, 0); calBloque.set(Calendar.SECOND, 0); calBloque.set(Calendar.MILLISECOND, 0)
             val inicioBloque = calBloque.timeInMillis
 
-            // Lógica de SEMANA exacta (Lunes a las 00:00)
+            // Lógica de SEMANA exacta (Lunes a las 00:00) basado SIEMPRE en ahoraReal
             val calSem = Calendar.getInstance().apply { timeInMillis = ahoraReal }
             while (calSem.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) {
                 calSem.add(Calendar.DAY_OF_MONTH, -1)
             }
             calSem.set(Calendar.HOUR_OF_DAY, 0); calSem.set(Calendar.MINUTE, 0); calSem.set(Calendar.SECOND, 0); calSem.set(Calendar.MILLISECOND, 0)
-            val iniSemana = calSem.timeInMillis
-
-            // 🔥 OBSERVACIÓN COMBINADA: Ventas + Gastos + Usuario (para perfiles) + Detalles (para desglose)
-            val calHoy = Calendar.getInstance().apply { timeInMillis = ahoraReal }
-            calHoy.set(Calendar.HOUR_OF_DAY, 0); calHoy.set(Calendar.MINUTE, 0); calHoy.set(Calendar.SECOND, 0); calHoy.set(Calendar.MILLISECOND, 0)
-            val iniHoy = calHoy.timeInMillis
-
-            // 🔥 OBSERVACIÓN COMBINADA: Ventas + Gastos + Usuario (para perfiles) + Detalles + Catálogo
-            val calCalculo = Calendar.getInstance().apply { timeInMillis = ahoraReal }
-            calCalculo.set(Calendar.HOUR_OF_DAY, 0); calCalculo.set(Calendar.MINUTE, 0); calCalculo.set(Calendar.SECOND, 0); calCalculo.set(Calendar.MILLISECOND, 0)
+            val iniSemanaReal = calSem.timeInMillis
 
             usuarioRepository.getUsuarioActual().flatMapLatest { usuario ->
                 val almid = usuario?.ultimoAlmacenNombre ?: ""
                 val rNom = usuario?.ultimaRutaNombre ?: ""
                 val rId = usuario?.ultimaRutaId ?: ""
                 
+                // 🔥 Combinamos con el cambio de la fecha de filtro diario
                 combine(
                     if (almid.isNotEmpty()) ventaRepository.obtenerVentasPorUnidadPeriodoFlow(almid, rNom, rId, inicioBloque, ahoraReal + 86400000)
                     else ventaRepository.obtenerVentasPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000),
                     
                     gastoRepository.obtenerGastosPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000),
                     
-                    // 🛡️ BÚSQUEDA ROBUSTA DE DETALLES: Usamos el mismo criterio que las ventas (por unidad o por vendedor)
-                    // para asegurar que el desglose por línea coincida con el total de venta mostrado.
                     if (almid.isNotEmpty()) {
                         ventaRepository.obtenerDetallesPorUnidadPeriodoFlow(almid, rNom, rId, inicioBloque, ahoraReal + 86400000)
                     } else {
                         ventaRepository.obtenerDetallesPorPeriodoFlow(userId, inicioBloque, ahoraReal + 86400000)
                     },
                     
-                    inventarioRepository.obtenerProductosLocal()
-                ) { todasLasVentas, todosLosGastos, detallesBloque, catalog ->
+                    inventarioRepository.obtenerProductosLocal(),
+                    _uiState.map { it.fechaFiltroDiario }.distinctUntilChanged()
+                ) { todasLasVentas, todosLosGastos, detallesBloque, catalog, fechaFiltro ->
                     
-                    val calCalc = Calendar.getInstance().apply { timeInMillis = ahoraReal }
-                    calCalc.set(Calendar.HOUR_OF_DAY, 0); calCalc.set(Calendar.MINUTE, 0); calCalc.set(Calendar.SECOND, 0); calCalc.set(Calendar.MILLISECOND, 0)
-                    val iniHoyCalc = calCalc.timeInMillis
+                    // 📅 Cálculo del inicio y fin del día filtrado
+                    val calFiltro = Calendar.getInstance().apply { timeInMillis = fechaFiltro }
+                    calFiltro.set(Calendar.HOUR_OF_DAY, 0); calFiltro.set(Calendar.MINUTE, 0); calFiltro.set(Calendar.SECOND, 0); calFiltro.set(Calendar.MILLISECOND, 0)
+                    val iniDiaFiltrado = calFiltro.timeInMillis
+                    val finDiaFiltrado = iniDiaFiltrado + 86400000 - 1
 
                     val catalogMap = catalog.associate { it.productoId to (it.marca to it.categoria) }
 
@@ -428,59 +425,52 @@ class DashboardVendedorViewModel(
                         }
                     } catch (e: Exception) { }
 
-                    // 1. Filtrado de Ventas (Hoy, Semana, Bloque)
-                    val ventasHoy = todasLasVentas.filter { it.fecha >= iniHoyCalc && it.estado != "CANCELADA" }
-                    val ventasSemana = todasLasVentas.filter { it.fecha >= iniSemana && it.estado != "CANCELADA" }
-                    val totalVentaBloque = todasLasVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total }
+                    // 1. Filtrado de Ventas (Filtrado para el día, Semana Real para el resto)
+                    val ventasDiaFiltrado = todasLasVentas.filter { it.fecha in iniDiaFiltrado..finDiaFiltrado && it.estado != "CANCELADA" }
+                    val ventasSemanaReal = todasLasVentas.filter { it.fecha >= iniSemanaReal && it.estado != "CANCELADA" }
+                    val totalVentaBloqueReal = todasLasVentas.filter { it.estado != "CANCELADA" }.sumOf { it.total }
 
-                    // 2. Mapeo de Detalles para hoy (Sincronía total con las ventas del día)
-                    val ventasHoyIds = ventasHoy.map { it.id }.toSet()
-                    val detallesHoy = detallesBloque.filter { ventasHoyIds.contains(it.ventaId) }
+                    // 2. Mapeo de Detalles para el día filtrado
+                    val ventasDiaIds = ventasDiaFiltrado.map { it.id }.toSet()
+                    val detallesDiaFiltrado = detallesBloque.filter { ventasDiaIds.contains(it.ventaId) }
 
-                    // 3. Calcular Desglose por Perfil (Lógica idéntica al Administrador)
+                    // 3. Calcular Desglose por Perfil (Sobre el día filtrado)
                     val breakdown = perfiles.map { perfil ->
-                        val detallesPerfil = detallesHoy.filter { detalle ->
+                        val detallesPerfil = detallesDiaFiltrado.filter { detalle ->
                             val info = catalogMap[detalle.productoId]
-                            
-                            // 🛡️ Clasificación Profunda: Si el detalle es genérico, preferimos la info del catálogo local.
                             val realMarca = if (detalle.marca.equals("Delisa", true) && 
                                                (detalle.categoria.equals("General", true) || detalle.categoria.isEmpty())) {
                                 info?.first ?: detalle.marca
                             } else {
                                 detalle.marca
                             }
-
                             val realCat = if (detalle.marca.equals("Delisa", true) && 
                                              (detalle.categoria.equals("General", true) || detalle.categoria.isEmpty())) {
                                 info?.second ?: detalle.categoria
                             } else {
                                 detalle.categoria
                             }
-
                             perfil.filtros.any { filtro ->
                                 val marcaMatch = realMarca.trim().equals(filtro.marca.trim(), ignoreCase = true)
                                 val catMatch = if (filtro.categorias.isNotEmpty()) {
                                     filtro.categorias.any { it.trim().equals(realCat.trim(), ignoreCase = true) }
                                 } else true
-                                
                                 marcaMatch && catMatch
                             }
                         }
-                        
                         val totalVenta = detallesPerfil.sumOf { it.precio * it.cantidad }
                         val totalUnidades = detallesPerfil.sumOf { it.cantidad }
-                        
                         PerfilBreakdown(perfil.id, perfil.nombre, totalVenta, totalUnidades)
                     }
 
-                    // 4. Filtrado de Gastos
-                    val gastosHoy = todosLosGastos.filter { it.fecha >= iniHoyCalc }
-                    val totalGastoHoy = gastosHoy.sumOf { it.monto }
+                    // 4. Filtrado de Gastos (Día filtrado)
+                    val gastosDiaFiltrado = todosLosGastos.filter { it.fecha in iniDiaFiltrado..finDiaFiltrado }
+                    val totalGastoDiaFiltrado = gastosDiaFiltrado.sumOf { it.monto }
 
-                    // 5. Gráfico de Barras (Lunes a Sábado)
+                    // 5. Gráfico de Barras (SIEMPRE Lunes a Sábado de la SEMANA REAL)
                     val ventasPorDia = MutableList(6) { 0.0 }
                     val calDia = Calendar.getInstance()
-                    ventasSemana.forEach { venta ->
+                    ventasSemanaReal.forEach { venta ->
                         calDia.timeInMillis = venta.fecha
                         val dayOfWeek = calDia.get(Calendar.DAY_OF_WEEK)
                         val index = when (dayOfWeek) {
@@ -491,24 +481,22 @@ class DashboardVendedorViewModel(
                         if (index != -1) ventasPorDia[index] += venta.total
                     }
 
-                    val totalHoy = ventasHoy.sumOf { it.total }
-                    val ticketPromedio = if (ventasHoy.isNotEmpty()) totalHoy / ventasHoy.size else 0.0
-
-                    Log.d("DashboardVM", "🔥 Sync: ${ventasHoy.size} ventas hoy. Details match: ${detallesHoy.size}. Profiles: ${breakdown.size}")
+                    val totalDiaFiltrado = ventasDiaFiltrado.sumOf { it.total }
+                    val ticketPromedioFiltrado = if (ventasDiaFiltrado.isNotEmpty()) totalDiaFiltrado / ventasDiaFiltrado.size else 0.0
 
                     _uiState.update { it.copy(
                         isLoading = false,
-                        ventaDia = totalHoy,
-                        clientesDia = ventasHoy.map { it.clienteId }.distinct().size,
-                        ticketPromedioDia = ticketPromedio,
-                        ventaSemana = ventasSemana.sumOf { it.total },
-                        ventaBloque = totalVentaBloque,
+                        ventaDia = totalDiaFiltrado,
+                        clientesDia = ventasDiaFiltrado.map { it.clienteId }.distinct().size,
+                        ticketPromedioDia = ticketPromedioFiltrado,
+                        ventaSemana = ventasSemanaReal.sumOf { it.total },
+                        ventaBloque = totalVentaBloqueReal,
                         ventasPorDiaSemana = ventasPorDia,
-                        ventasHoy = ventasHoy,
-                        gastosHoy = todosLosGastos.filter { it.fecha >= iniHoyCalc }.map { 
+                        ventasHoy = ventasDiaFiltrado,
+                        gastosHoy = gastosDiaFiltrado.map { 
                             Gasto(it.id, it.monto, it.categoria, it.descripcion, it.fecha, it.vendedorId, it.rutaNombre)
                         },
-                        totalGastosHoy = totalGastoHoy,
+                        totalGastosHoy = totalGastoDiaFiltrado,
                         perfilesVenta = perfiles,
                         ventasPorPerfil = breakdown
                     ) }

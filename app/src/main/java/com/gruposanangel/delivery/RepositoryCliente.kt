@@ -115,7 +115,11 @@ class RepositoryCliente(private val dao: ClienteDao) {
                             syncStatus = true,
                             ownerUid = doc.getString("ownerUid") ?: "",
                             lastModified = remoteLastModified,
-                            rutaId = doc.getString("rutaId")
+                            rutaId = when(val r = doc.get("rutaId")) {
+                                is String -> r
+                                is com.google.firebase.firestore.DocumentReference -> r.id
+                                else -> null
+                            }
                         )
                     }
                 }.awaitAll().filterNotNull()
@@ -166,9 +170,11 @@ class RepositoryCliente(private val dao: ClienteDao) {
         var todosSincronizados = true
 
         pendientes.forEach { cliente ->
-            val now = System.currentTimeMillis()
+            val timeToSync = cliente.lastModified // Usamos el tiempo que ya tiene el objeto
 
             try {
+                Log.d(TAG, "Sincronizando cliente: ${cliente.nombreNegocio} (ID: ${cliente.id}) -> Ruta: ${cliente.rutaId}")
+                
                 // ---------------------------
                 // 1) Subir foto a Firebase Storage (Usando putFile para eficiencia)
                 // ---------------------------
@@ -194,7 +200,7 @@ class RepositoryCliente(private val dao: ClienteDao) {
 
                 // ---------------------------
                 // 2) Preparar datos para Firestore
-                // ---------------------------
+                // 2) Preparar datos para Firestore (Uso de UPDATE para evitar borrar otros campos)
                 val data = hashMapOf<String, Any?>(
                     "nombreNegocio" to cliente.nombreNegocio,
                     "nombreDueno" to cliente.nombreDueno,
@@ -204,20 +210,21 @@ class RepositoryCliente(private val dao: ClienteDao) {
                     "ubicacion" to GeoPoint(cliente.ubicacionLat, cliente.ubicacionLon),
                     "activo" to cliente.activo,
                     "valorCliente" to cliente.valorCliente,
-                    "ownerUid" to uid,
-                    "rutaId" to cliente.rutaId, // Sin forzar a Ruta 1
-                    "lastModified" to now,
-                    "fechaDeCreacion" to Timestamp(Date(cliente.fechaDeCreacion)),
-                    "FotografiaCliente" to downloadUrl
+                    "rutaId" to cliente.rutaId,
+                    "lastModified" to timeToSync
                 )
 
-                // ---------------------------
+                if (downloadUrl != null) {
+                    data["FotografiaCliente"] = downloadUrl
+                }
+
                 // 3) Subir datos a Firestore (Operación crítica)
-                // ---------------------------
                 firestore.collection("clientes")
                     .document(cliente.id)
-                    .set(data)
+                    .update(data)
                     .await()
+
+                Log.d(TAG, "✅ Cliente sincronizado en la Nube: ${cliente.id} con Ruta: ${cliente.rutaId}")
 
                 // ---------------------------
                 // 4) ACTUALIZAR LOCALMENTE SOLO SI TODO LO ANTERIOR FUE EXITOSO
@@ -226,7 +233,7 @@ class RepositoryCliente(private val dao: ClienteDao) {
                     cliente.copy(
                         syncStatus = true,
                         ownerUid = uid,
-                        lastModified = now
+                        lastModified = timeToSync
                     )
                 )
 
@@ -303,7 +310,11 @@ class RepositoryCliente(private val dao: ClienteDao) {
                                 syncStatus = true,
                                 ownerUid = doc.getString("ownerUid") ?: "",
                                 lastModified = remoteLastModified,
-                                rutaId = doc.getString("rutaId")
+                                rutaId = when(val r = doc.get("rutaId")) {
+                                    is String -> r
+                                    is com.google.firebase.firestore.DocumentReference -> r.id
+                                    else -> null
+                                }
                             )
 
                             if (local == null || (local.syncStatus && remoteLastModified > local.lastModified)) {

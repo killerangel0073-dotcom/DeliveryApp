@@ -55,12 +55,12 @@ fun PantallaLiquidacionDirecta(
 ) {
     val context = LocalContext.current
     val viewModel: LiquidacionViewModel = viewModel(
-        factory = remember {
+        factory = remember(origen, destino) {
             val db = AppDatabase.getDatabase(context.applicationContext)
             val firebaseDataSource = FirebaseDataSource()
             val inventarioRepo = RepositoryInventario(firebaseDataSource, db.productoDao(), db.VentaDao(), db.movimientoInventarioDao())
             val usuarioRepo = RepositoryUsuario(firebaseDataSource, db.usuarioDao())
-            LiquidacionViewModelFactory(inventarioRepo, usuarioRepo, context.applicationContext)
+            LiquidacionViewModelFactory(inventarioRepo, usuarioRepo, context.applicationContext, origen, destino)
         }
     )
 
@@ -104,6 +104,9 @@ fun PantallaLiquidacionDirecta(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { viewModel.refrescarDatos() }) {
+                            Icon(Icons.Default.Sync, null, tint = RojoDelisa)
+                        }
                         TextButton(
                             onClick = { viewModel.restablecerStockTeorico() },
                             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -281,20 +284,20 @@ fun PantallaLiquidacionDirecta(
                             
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.clickable { expandedDestino = true }
+                                modifier = Modifier.clickable(enabled = false) { expandedDestino = true }
                             ) {
                                 Icon(Icons.Default.Warehouse, null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(12.dp))
                                 Text("RETORNA A:", fontSize = 9.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    state.destino.ifBlank { "Seleccionar Almacén..." }, 
+                                    "Almacen Huasteca", 
                                     fontSize = 12.sp, 
                                     fontWeight = FontWeight.ExtraBold, 
                                     color = RojoDelisa,
                                     modifier = Modifier.weight(1f)
                                 )
-                                Icon(Icons.Default.ArrowDropDown, null, tint = RojoDelisa)
+                                // Icon(Icons.Default.ArrowDropDown, null, tint = RojoDelisa) // 🔥 Oculto porque ya no es seleccionable
                             }
 
                             DropdownMenu(

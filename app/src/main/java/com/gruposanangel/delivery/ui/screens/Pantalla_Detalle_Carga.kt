@@ -39,7 +39,7 @@ import com.gruposanangel.delivery.data.FirebaseDataSource
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.model.Plantila_carga
 import com.gruposanangel.delivery.model.Plantilla_Producto
-import com.gruposanangel.delivery.ui.theme.DeliveryTheme
+import com.gruposanangel.delivery.ui.theme.*
 import com.gruposanangel.delivery.utilidades.DialogoConfirmacion
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
@@ -55,9 +55,11 @@ fun PantallaDetalleCarga(
     val isPreview = LocalInspectionMode.current
     val cargaBase = remember { plantilacarga ?: navController.previousBackStackEntry?.savedStateHandle?.get<Plantila_carga>("carga") }
 
+    val isDark = ThemeConfig.isActuallyDark
+
     if (cargaBase == null && !isPreview) {
-        Box(Modifier.fillMaxSize().background(Color(0xFFF8F9FA)), contentAlignment = Alignment.Center) {
-            Text("Error: No se recibió información", fontWeight = FontWeight.Bold, color = Color.Gray)
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+            Text("Error: No se recibió información", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
         }
         return
     }
@@ -87,6 +89,7 @@ fun PantallaDetalleCarga(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit, onAceptar: () -> Unit) {
+    val isDark = ThemeConfig.isActuallyDark
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
     val formatoFecha = SimpleDateFormat("EEEE, dd 'de' MMMM, hh:mm a", Locale("es", "MX"))
 
@@ -109,27 +112,27 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
             TopAppBar(
                 title = { 
                     Column {
-                        Text("DETALLE DE CARGA", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = Color.DarkGray)
+                        Text("DETALLE DE CARGA", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, color = if (isDark) Color.White else Color.DarkGray)
                         if (esEmergencia) {
-                            Text("PROCESADA LOCALMENTE", style = MaterialTheme.typography.labelSmall, color = Color.Red, fontWeight = FontWeight.Bold)
+                            Text("PROCESADA LOCALMENTE", style = MaterialTheme.typography.labelSmall, color = DelisaRed, fontWeight = FontWeight.Bold)
                         }
                     }
                 },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.Red) } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
         }
     ) { padding ->
         if (uiState.isLoading) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color.Red) }
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
         } else {
-            Column(Modifier.fillMaxSize().padding(padding).background(Color(0xFFF8F9FA))) {
+            Column(Modifier.fillMaxSize().padding(padding).background(MaterialTheme.colorScheme.background)) {
                 // Header Informativo
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(1.dp)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(2.dp)
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -142,7 +145,7 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                             Icon(
                                 if (esEmergencia) Icons.Default.FlashOn else Icons.Default.Inventory,
                                 null,
-                                tint = if (esEmergencia) Color.Red else Color.Gray,
+                                tint = if (esEmergencia) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(Modifier.width(8.dp))
@@ -150,7 +153,7 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                                 text = uiState.carga?.nombreCarga ?: "CARGA DESCONOCIDA",
                                 fontWeight = FontWeight.Black,
                                 fontSize = 14.sp,
-                                color = Color.DarkGray,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 textAlign = TextAlign.Start,
                                 modifier = Modifier.weight(1f)
                             )
@@ -160,7 +163,7 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                             Text(
                                 text = formatoFecha.format(it).uppercase(),
                                 fontSize = 13.sp,
-                                color = if (esEmergencia) Color.Red else Color.Gray,
+                                color = if (esEmergencia) DelisaRed else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .padding(top = 8.dp)
                                     .fillMaxWidth(), // Toma todo el ancho para que el TextAlign funcione
@@ -173,7 +176,7 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                             Text(
                                 text = "FOLIO: ${uiState.carga.id}",
                                 fontSize = 10.sp,
-                                color = Color.LightGray,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                 modifier = Modifier
                                     .padding(top = 4.dp)
                                     .fillMaxWidth(),
@@ -184,38 +187,61 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                     }
                 }
 
-                LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(uiState.productos) { producto ->
-                        val totalProducto = producto.cantidad * producto.precio
-                        Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
-                            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(70.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFFF1F2F6)), contentAlignment = Alignment.Center) {
-                                    AsyncImage(model = producto.imagenUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = producto.nombre, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                }
-                                Spacer(Modifier.width(16.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(producto.nombre, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    if (producto.cantidadUnitario != null && producto.cantidadUnitario > 0) {
-                                        Text("Presentación: ${producto.cantidadUnitario}g", fontSize = 10.sp, color = Color.Gray)
+                val productosPorCategoria = remember(uiState.productos) {
+                    uiState.productos.groupBy { it.categoria }
+                }
+
+                LazyColumn(
+                    modifier = Modifier.weight(1f), 
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    productosPorCategoria.forEach { (categoria, productos) ->
+                        item(key = "header_$categoria") {
+                            CategoryHeader(categoria)
+                        }
+                        items(productos, key = { it.id }) { producto ->
+                            val totalProducto = producto.cantidad * producto.precio
+                            Card(
+                                shape = RoundedCornerShape(24.dp), 
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
+                                elevation = CardDefaults.cardElevation(2.dp), 
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.size(70.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                                        AsyncImage(model = producto.imagenUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = producto.nombre, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                                     }
-                                    Spacer(Modifier.height(4.dp))
-                                    Surface(color = if (esEmergencia) Color(0xFFFDECEA) else Color(0xFFE8F5E9), shape = RoundedCornerShape(8.dp)) {
-                                        Text("${producto.cantidad} pzas", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 11.sp, color = if (esEmergencia) Color.Red else Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.width(16.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(producto.nombre, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        if (producto.cantidadUnitario != null && producto.cantidadUnitario > 0) {
+                                            Text("Presentación: ${producto.cantidadUnitario}g", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Spacer(Modifier.height(4.dp))
+                                        Surface(color = if (esEmergencia) DelisaRed.copy(alpha = 0.1f) else DelisaGreen.copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
+                                            Text("${producto.cantidad} pzas", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), fontSize = 11.sp, color = if (esEmergencia) DelisaRed else DelisaGreenDark, fontWeight = FontWeight.Bold)
+                                        }
                                     }
-                                }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(formatoMoneda.format(totalProducto), fontWeight = FontWeight.Black, color = Color.Red, fontSize = 16.sp)
-                                    Text("${formatoMoneda.format(producto.precio)} c/u", fontSize = 9.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(formatoMoneda.format(totalProducto), fontWeight = FontWeight.Black, color = DelisaRed, fontSize = 16.sp)
+                                        Text("${formatoMoneda.format(producto.precio)} c/u", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+                                    }
                                 }
                             }
+                            Spacer(Modifier.height(12.dp))
                         }
                     }
                 }
-                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(16.dp)) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(), 
+                    shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp), 
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
+                    elevation = CardDefaults.cardElevation(16.dp)
+                ) {
                     Column(modifier = Modifier.padding(24.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Column { Text("TOTAL PIEZAS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray); Text("$totalCantidad", fontSize = 22.sp, fontWeight = FontWeight.Black, color = Color.Black) }
-                            Column(horizontalAlignment = Alignment.End) { Text("VALOR CARGA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray); Text(formatoMoneda.format(totalValor), fontSize = 26.sp, fontWeight = FontWeight.Black, color = Color.Red) }
+                            Column { Text("TOTAL PIEZAS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant); Text("$totalCantidad", fontSize = 22.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) }
+                            Column(horizontalAlignment = Alignment.End) { Text("VALOR CARGA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(formatoMoneda.format(totalValor), fontSize = 26.sp, fontWeight = FontWeight.Black, color = DelisaRed) }
                         }
                         if (uiState.carga?.aceptada == false && !esCancelada) {
                             Spacer(Modifier.height(20.dp))
@@ -226,7 +252,7 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                                     modifier = Modifier.fillMaxWidth().height(56.dp), 
                                     shape = RoundedCornerShape(16.dp), 
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (uiState.isLoading) Color.Gray else Color.Red,
+                                        containerColor = if (uiState.isLoading) Color.Gray else DelisaRed,
                                         disabledContainerColor = Color.Gray
                                     )
                                 ) {
@@ -246,17 +272,17 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                                 // Muestra mensaje informativo para Admins/Almacenistas
                                 Surface(
                                     modifier = Modifier.fillMaxWidth(),
-                                    color = Color.LightGray.copy(alpha = 0.1f),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
                                     shape = RoundedCornerShape(16.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.LightGray)
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                                 ) {
                                     Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(Icons.Default.Info, null, tint = Color.Gray)
+                                        Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                         Spacer(Modifier.height(8.dp))
                                         Text(
                                             text = mensajeErrorPermiso,
                                             textAlign = TextAlign.Center,
-                                            color = Color.Gray,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp
                                         )
@@ -265,16 +291,18 @@ fun PantallaDetalleCargaContent(uiState: DetalleCargaUiState, onBack: () -> Unit
                             }
                         } else {
                             Spacer(Modifier.height(20.dp))
+                            val surfaceColor = if (esCancelada) Color.Black else if (esEmergencia) DelisaRed.copy(alpha = 0.1f) else DelisaGreen.copy(alpha = 0.1f)
+                            val textColor = if (esCancelada) Color.White else if (esEmergencia) DelisaRed else DelisaGreenDark
                             Surface(
                                 modifier = Modifier.fillMaxWidth(), 
-                                color = if (esCancelada) Color.Black else if (esEmergencia) Color(0xFFFDECEA) else Color(0xFFE8F5E9), 
+                                color = surfaceColor, 
                                 shape = RoundedCornerShape(16.dp)
                             ) {
                                 Text(
                                     text = if (esCancelada) "ESTA CARGA FUE ANULADA" else if (esEmergencia) "ESTA CARGA FUE PROCESADA MANUALMENTE" else "ESTA CARGA YA FUE ACEPTADA", 
                                     modifier = Modifier.padding(16.dp), 
                                     textAlign = TextAlign.Center, 
-                                    color = if (esCancelada) Color.White else if (esEmergencia) Color.Red else Color(0xFF2E7D32),
+                                    color = textColor,
                                     fontWeight = FontWeight.Bold, 
                                     fontSize = 13.sp
                                 )

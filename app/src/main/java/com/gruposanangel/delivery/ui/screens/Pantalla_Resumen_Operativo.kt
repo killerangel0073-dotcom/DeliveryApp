@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.ui.draw.shadow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -71,7 +72,11 @@ import android.graphics.Shader
 import android.graphics.RectF
 import android.graphics.Path
 import android.graphics.DashPathEffect
+import androidx.compose.ui.graphics.toArgb
 import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import coil.ImageLoader
+import coil.request.ImageRequest
 import android.content.Context
 import android.widget.Toast
 import com.google.zxing.BarcodeFormat
@@ -82,8 +87,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material.icons.rounded.ShoppingCart
 import com.gruposanangel.delivery.ui.theme.*
+import com.gruposanangel.delivery.ui.components.DelisaLogoPulse
+import com.gruposanangel.delivery.ui.components.delisaGlowBorder
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -93,6 +101,20 @@ data class ProdVendidoReporte(
     val nombre: String,
     val cantidad: Int,
     val total: Double
+)
+
+data class GroupedGasto(
+    val categoria: String,
+    val rutaNombre: String,
+    val montoTotal: Double,
+    val detalles: List<GastoEntity>
+)
+
+data class CostoProductoDetalle(
+    val nombre: String,
+    val cantidad: Int,
+    val costoUnitario: Double,
+    val costoTotal: Double
 )
 
 data class SellerEarnings(
@@ -123,6 +145,7 @@ data class ResumenOperativoUiState(
     val nominaProduccion: Double = 0.0,  
     val gastosFijosMonto: Double = 0.0,    // 🔥 Separado
     val gastosVariablesMonto: Double = 0.0, // 🔥 Separado
+    val devolucionesMonto: Double = 0.0,  // 🔥 Nuevo: 5% de ingresos
     val utilidadNeta: Double = 0.0,
     val diasPeriodo: Int = 1,
     val nominaDetallada: List<SellerEarnings> = emptyList(),
@@ -395,9 +418,12 @@ class ResumenOperativoViewModel(
             val costoUnit = pInfo?.get("precioCompra")?.toString()?.toDoubleOrNull() ?: 0.0
             val gBolsa = pInfo?.get("cantidadUnitario")?.toString()?.toDoubleOrNull() ?: 1.0
             val gVenta = pInfo?.get("gramosVenta")?.toString()?.toDoubleOrNull() ?: 1.0
+            val cEmpaque = pInfo?.get("costoEmpaque")?.toString()?.toDoubleOrNull() ?: 0.0
+            val aTransporte = pInfo?.get("aplicaTransporte") as? Boolean ?: true
+            val cTransporte = if(aTransporte) (gVenta / 1000.0) * 5.0 else 0.0
             
-            // Costo por bolsita = (Costo Display / Gramos Display) * Gramos Bolsita
-            val costoRealBolsita = if (gBolsa > 0) (costoUnit / gBolsa) * gVenta else 0.0
+            // Costo por bolsita = ((Costo Display / Gramos Display) * Gramos Bolsita) + Empaque + Transporte
+            val costoRealBolsita = if (gBolsa > 0) ((costoUnit / gBolsa) * gVenta) + cEmpaque + cTransporte else 0.0
             cMercancia += (v.cantidad * costoRealBolsita)
         }
 
@@ -426,6 +452,9 @@ class ResumenOperativoViewModel(
             }
         }
 
+        // 6. Devoluciones (5% de la Venta Bruta)
+        val gDevoluciones = vBruta * 0.05
+
         _uiState.update { it.copy(
             ventaBruta = vBruta,
             costoMercancia = cMercancia,
@@ -433,7 +462,8 @@ class ResumenOperativoViewModel(
             nominaProduccion = nProduccion,
             gastosFijosMonto = gFijosSum,
             gastosVariablesMonto = gVariablesSum,
-            utilidadNeta = vBruta - (cMercancia + nVentas + nProduccion + gFijosSum + gVariablesSum)
+            devolucionesMonto = gDevoluciones,
+            utilidadNeta = vBruta - (cMercancia + nVentas + nProduccion + gFijosSum + gVariablesSum + gDevoluciones)
         ) }
     }
 
@@ -516,12 +546,17 @@ class ResumenOperativoViewModel(
             val cantUnitGramos = prod["cantidadUnitario"]?.toString()?.toDoubleOrNull() ?: 0.0
             val gramosVenta = prod["gramosVenta"]?.toString()?.toDoubleOrNull() ?: 0.0
             val unidadesDisplay = prod["unidadesPorDisplay"]?.toString()?.toIntOrNull() ?: 1
+            val cEmpaque = prod["costoEmpaque"]?.toString()?.toDoubleOrNull() ?: 0.0
             
             if (gramosVenta <= 0) return@mapNotNull null
 
             val rendimiento = if (cantUnitGramos > 0) cantUnitGramos / gramosVenta else 0.0
             val bolsitasPorCaja = (rendimiento * unidadesDisplay).toInt()
-            val costoCaja = precioCompraUnit * unidadesDisplay
+            val aTransporte = prod["aplicaTransporte"] as? Boolean ?: true
+            val cTransporteCaja = if(aTransporte) ((gramosVenta * bolsitasPorCaja) / 1000.0) * 5.0 else 0.0
+            
+            // Inversión por caja = (Costo Display * unidades) + (Bolsitas * empaque) + Transporte Peso Total
+            val costoCaja = (precioCompraUnit * unidadesDisplay) + (bolsitasPorCaja * cEmpaque) + cTransporteCaja
 
             val vendido30 = ventas30Dias.find { it.nombre == nombre }?.cantidad ?: 0
             val ventaDiaria = vendido30 / 30.0
@@ -682,6 +717,7 @@ fun PantallaResumenOperativo(navController: NavController) {
     var showPurchaseDialog by remember { mutableStateOf(false) }
     var showAddGastoDialog by remember { mutableStateOf(false) }
     var showRentabilidad by remember { mutableStateOf(false) }
+    var showCostoDetalle by remember { mutableStateOf(false) }
     
     var showEditSalaryDialog by remember { mutableStateOf<SellerEarnings?>(null) }
     var showEditGastoDialog by remember { mutableStateOf<GastoEntity?>(null) }
@@ -692,6 +728,20 @@ fun PantallaResumenOperativo(navController: NavController) {
     val hoyInicio = remember { Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0) }.time }
     var startDate by remember { mutableStateOf(hoyInicio) }
     var endDate by remember { mutableStateOf(Date()) }
+
+    var selectedGastoGroup by remember { mutableStateOf<GroupedGasto?>(null) }
+    
+    val gastosAgrupados = remember(uiState.gastosVariables) {
+        uiState.gastosVariables.groupBy { "${it.categoria.uppercase()}_${it.rutaNombre.uppercase()}" }
+            .map { (_, list) ->
+                GroupedGasto(
+                    categoria = list.first().categoria,
+                    rutaNombre = list.first().rutaNombre,
+                    montoTotal = list.sumOf { it.monto },
+                    detalles = list.sortedByDescending { it.fecha }
+                )
+            }.sortedByDescending { it.montoTotal }
+    }
 
     if (showAddGastoDialog) {
         DialogoNuevoGastoFijo(
@@ -794,13 +844,24 @@ fun PantallaResumenOperativo(navController: NavController) {
         topBar = {
             TopAppBar(
                 title = { 
-                    Text(
-                        text = "RESUMEN FINANCIERO", 
-                        fontWeight = FontWeight.Black, 
-                        fontSize = 15.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    ) 
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "RESUMEN FINANCIERO", 
+                            fontWeight = FontWeight.Black, 
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (uiState.isFetchingVentas) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "(SINCRO...)", 
+                                fontSize = 9.sp, 
+                                color = DelisaRed, 
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 },
                 navigationIcon = { IconButton(onClick = { navController.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DelisaRed) } },
                 actions = {
@@ -849,11 +910,10 @@ fun PantallaResumenOperativo(navController: NavController) {
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        if (uiState.isLoading) {
-            Box(Modifier.fillMaxSize().padding(padding), Alignment.Center) { CircularProgressIndicator(color = DelisaRed) }
-        } else {
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // El contenido se muestra siempre, las tarjetas brillarán durante actualizaciones.
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -865,8 +925,27 @@ fun PantallaResumenOperativo(navController: NavController) {
                         nominaApoyo = uiState.nominaProduccion,
                         gFijos = uiState.gastosFijosMonto,
                         gVariables = uiState.gastosVariablesMonto,
+                        devoluciones = uiState.devolucionesMonto,
                         uNeta = uiState.utilidadNeta,
-                        formato = formatoMoneda
+                        formato = formatoMoneda,
+                        modifier = Modifier.delisaGlowBorder(uiState.isLoading || uiState.isFetchingVentas, shape = RoundedCornerShape(28.dp)),
+                        onCostoClick = { showCostoDetalle = true },
+                        onPdfClick = {
+                            scope.launch {
+                                isGeneratingPdf = true
+                                processingMessage = "GENERANDO ANÁLISIS DE UTILIDAD"
+                                try {
+                                    val file = generarPdfResumenFinanciero(context, uiState, startDate, endDate)
+                                    abrirPdfResumen(context, file)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("PDF_ERROR", "Error al generar PDF: ${e.message}", e)
+                                    Toast.makeText(context, "Error al generar reporte: ${e.message}", Toast.LENGTH_LONG).show()
+                                } finally {
+                                    isGeneratingPdf = false
+                                    processingMessage = "PROCESANDO REPORTE"
+                                }
+                            }
+                        }
                     )
                 }
 
@@ -886,77 +965,83 @@ fun PantallaResumenOperativo(navController: NavController) {
                     )
                 }
 
-                // 🔥 LISTA DETALLADA DE VENDEDORES
-                items(uiState.nominaDetallada) { info ->
-                    ItemVendedorDetalleFinanzas(info, formatoMoneda, onEdit = {
-                        showEditSalaryDialog = info
-                    })
-                }
+                    // 🔥 LISTA DETALLADA DE VENDEDORES
+                    items(uiState.nominaDetallada) { info ->
+                        ItemVendedorDetalleFinanzas(info, formatoMoneda, onEdit = {
+                            showEditSalaryDialog = info
+                        })
+                    }
 
-                // --- SECCIÓN PRODUCCIÓN ---
-                item {
-                    Text("EQUIPO DE PRODUCCIÓN Y APOYO", fontWeight = FontWeight.Black, fontSize = 14.sp, color = WarningOrange, modifier = Modifier.padding(top = 16.dp))
-                }
+                    // --- SECCIÓN PRODUCCIÓN ---
+                    item {
+                        Text("EQUIPO DE PRODUCCIÓN Y APOYO", fontWeight = FontWeight.Black, fontSize = 14.sp, color = WarningOrange, modifier = Modifier.padding(top = 16.dp))
+                    }
 
-                items(uiState.nominaProduccionLista) { info ->
-                    ItemVendedorDetalleFinanzas(info, formatoMoneda, onEdit = {
-                        showEditSalaryDialog = info
-                    })
-                }
+                    items(uiState.nominaProduccionLista) { info ->
+                        ItemVendedorDetalleFinanzas(info, formatoMoneda, onEdit = {
+                            showEditSalaryDialog = info
+                        })
+                    }
 
-                items(uiState.gastosFijos.filter { it.categoria == "NÓMINA" }) { gasto ->
-                    ItemGastoFijo(gasto, formatoMoneda, onEdit = { showEditGastoDialog = gasto }, onDelete = { viewModel.eliminarGastoFijo(gasto.id) })
-                }
+                    items(uiState.gastosFijos.filter { it.categoria == "NÓMINA" }) { gasto ->
+                        ItemGastoFijo(gasto, formatoMoneda, onEdit = { showEditGastoDialog = gasto }, onDelete = { viewModel.eliminarGastoFijo(gasto.id) })
+                    }
 
-                // --- SECCIÓN GASTOS FIJOS ---
-                item {
-                    Row(Modifier.fillMaxWidth().padding(top = 12.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                        Text("GASTOS FIJOS (ESTABLECIMIENTO)", fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.Gray)
-                        TextButton(onClick = { showAddGastoDialog = true }) {
-                            Icon(Icons.Default.Add, null, Modifier.size(16.dp))
-                            Text("AGREGAR FIJO")
+                    // --- SECCIÓN GASTOS FIJOS ---
+                    item {
+                        Row(Modifier.fillMaxWidth().padding(top = 12.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                            Text("GASTOS FIJOS (ESTABLECIMIENTO)", fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.Gray)
+                            TextButton(onClick = { showAddGastoDialog = true }) {
+                                Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+                                Text("AGREGAR FIJO")
+                            }
+                        }
+                    }
+
+                    items(uiState.gastosFijos.filter { it.categoria != "NÓMINA" }) { gasto ->
+                        ItemGastoFijo(gasto, formatoMoneda, onEdit = { showEditGastoDialog = gasto }, onDelete = { viewModel.eliminarGastoFijo(gasto.id) })
+                    }
+
+                    // --- SECCIÓN GASTOS VARIABLES (RUTA) ---
+                    if (gastosAgrupados.isNotEmpty()) {
+                        item {
+                            Text("GASTOS DE OPERACIÓN (RUTA/VARIABLE)", fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
+                        }
+
+                        items(gastosAgrupados) { group ->
+                            ItemGastoAgrupado(group, formatoMoneda) {
+                                selectedGastoGroup = group
+                            }
+                        }
+                    }
+
+                    item {
+                        Button(
+                            onClick = { showRentabilidad = !showRentabilidad },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(if (showRentabilidad) "OCULTAR RENTABILIDAD" else "VER RENTABILIDAD POR PRODUCTO", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+
+                    if (showRentabilidad) {
+                        val margins = uiState.productos.map { calcularMargen(it) }
+                        val maxM = if (margins.isNotEmpty()) margins.maxOrNull() ?: 0.0 else 0.0
+                        val minM = if (margins.isNotEmpty()) margins.minOrNull() ?: 0.0 else 0.0
+                        items(uiState.productos.sortedByDescending { calcularMargen(it) }) { prod ->
+                            CardProductoFinanzas(prod, formatoMoneda, minM, maxM)
                         }
                     }
                 }
 
-                items(uiState.gastosFijos.filter { it.categoria != "NÓMINA" }) { gasto ->
-                    ItemGastoFijo(gasto, formatoMoneda, onEdit = { showEditGastoDialog = gasto }, onDelete = { viewModel.eliminarGastoFijo(gasto.id) })
-                }
-
-                // --- SECCIÓN GASTOS VARIABLES (RUTA) ---
-                if (uiState.gastosVariables.isNotEmpty()) {
-                    item {
-                        Text("GASTOS DE OPERACIÓN (RUTA/VARIABLE)", fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
-                    }
-
-                    items(uiState.gastosVariables) { gasto ->
-                        ItemGastoVariable(gasto, formatoMoneda)
-                    }
-                }
-
-                item {
-                    Button(
-                        onClick = { showRentabilidad = !showRentabilidad },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(if (showRentabilidad) "OCULTAR RENTABILIDAD" else "VER RENTABILIDAD POR PRODUCTO", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    }
-                }
-
-                if (showRentabilidad) {
-                    val margins = uiState.productos.map { calcularMargen(it) }
-                    val maxM = if (margins.isNotEmpty()) margins.maxOrNull() ?: 0.0 else 0.0
-                    val minM = if (margins.isNotEmpty()) margins.minOrNull() ?: 0.0 else 0.0
-                    items(uiState.productos.sortedByDescending { calcularMargen(it) }) { prod ->
-                        CardProductoFinanzas(prod, formatoMoneda, minM, maxM)
-                    }
+                if (uiState.isLoading || uiState.isFetchingVentas) {
+                    // Ya no usamos el overlay gigante, el feedback está en las tarjetas y TopBar
                 }
             }
-        }
 
-        if (isGeneratingPdf) {
+            if (isGeneratingPdf) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -966,7 +1051,7 @@ fun PantallaResumenOperativo(navController: NavController) {
             ) {
                 Card(
                     modifier = Modifier.padding(32.dp), 
-                    shape = RoundedCornerShape(24.dp), 
+                    shape = RoundedCornerShape(28.dp), 
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
                     elevation = CardDefaults.cardElevation(16.dp)
                 ) {
@@ -976,31 +1061,91 @@ fun PantallaResumenOperativo(navController: NavController) {
                         verticalArrangement = Arrangement.Center
                     ) {
                         Box(contentAlignment = Alignment.Center) { 
-                            CircularProgressIndicator(Modifier.size(80.dp), DelisaRed, 6.dp, trackColor = DelisaRed.copy(0.1f))
-                            Icon(Icons.Rounded.PictureAsPdf, null, tint = DelisaRed, modifier = Modifier.size(32.dp)) 
+                            DelisaLogoPulse()
+                            Icon(
+                                Icons.Rounded.PictureAsPdf, 
+                                null, 
+                                tint = DelisaRed, 
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .align(Alignment.BottomEnd)
+                                    .background(Color.White, CircleShape)
+                                    .padding(2.dp)
+                            ) 
                         }
                         Spacer(Modifier.height(24.dp))
-                        Text(processingMessage, fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, letterSpacing = 1.sp)
+                        Text(processingMessage, fontWeight = FontWeight.Black, fontSize = 16.sp, color = DelisaRed, letterSpacing = 1.sp)
                         Text("Estamos analizando las ventas y\nconstruyendo tu documento...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
                     }
                 }
             }
         }
+
+        if (selectedGastoGroup != null) {
+            DialogoDetalleGastosAgrupados(
+                group = selectedGastoGroup!!,
+                formato = formatoMoneda,
+                onDismiss = { selectedGastoGroup = null }
+            )
+        }
+
+        if (showCostoDetalle) {
+            val listaDetalles = remember(uiState.ventasPeriodo, uiState.productos) {
+                uiState.ventasPeriodo.mapNotNull { v ->
+                    val pInfo = uiState.productos.find { it["nombre"] == v.nombre } ?: return@mapNotNull null
+                    val pCompra = pInfo["precioCompra"]?.toString()?.toDoubleOrNull() ?: 0.0
+                    val gBolsa = pInfo["cantidadUnitario"]?.toString()?.toDoubleOrNull() ?: 1.0
+                    val gVenta = pInfo["gramosVenta"]?.toString()?.toDoubleOrNull() ?: 1.0
+                    val cEmpaque = pInfo["costoEmpaque"]?.toString()?.toDoubleOrNull() ?: 0.0
+                    val aTransporte = pInfo["aplicaTransporte"] as? Boolean ?: true
+                    val cTransporte = if(aTransporte) (gVenta / 1000.0) * 5.0 else 0.0
+                    
+                    val costoRealBolsita = if (gBolsa > 0) ((pCompra / gBolsa) * gVenta) + cEmpaque + cTransporte else 0.0
+                    
+                    CostoProductoDetalle(
+                        nombre = v.nombre,
+                        cantidad = v.cantidad,
+                        costoUnitario = costoRealBolsita,
+                        costoTotal = v.cantidad * costoRealBolsita
+                    )
+                }.sortedByDescending { it.costoTotal }
+            }
+            
+            DialogoDetalleCostoProducto(
+                detalles = listaDetalles,
+                formato = formatoMoneda,
+                onDismiss = { showCostoDetalle = false }
+            )
+        }
     }
 }
 
 @Composable
-fun TableroGananciasPremium(vBruta: Double, cMercancia: Double, nominaVentas: Double, nominaApoyo: Double, gFijos: Double, gVariables: Double, uNeta: Double, formato: NumberFormat) {
+fun TableroGananciasPremium(
+    vBruta: Double, 
+    cMercancia: Double, 
+    nominaVentas: Double, 
+    nominaApoyo: Double, 
+    gFijos: Double, 
+    gVariables: Double, 
+    devoluciones: Double,
+    uNeta: Double, 
+    formato: NumberFormat, 
+    modifier: Modifier = Modifier,
+    onCostoClick: () -> Unit = {},
+    onPdfClick: () -> Unit = {}
+) {
     val pctCosto = if (vBruta > 0) (cMercancia / vBruta) * 100 else 0.0
     val pctNomVenta = if (vBruta > 0) (nominaVentas / vBruta) * 100 else 0.0
     val pctNomProd = if (vBruta > 0) (nominaApoyo / vBruta) * 100 else 0.0
     val pctGastosF = if (vBruta > 0) (gFijos / vBruta) * 100 else 0.0
     val pctGastosV = if (vBruta > 0) (gVariables / vBruta) * 100 else 0.0
+    val pctDevol = if (vBruta > 0) (devoluciones / vBruta) * 100 else 0.0
     val pctUtilidad = if (vBruta > 0) (uNeta / vBruta) * 100 else 0.0
 
     Card(
         shape = RoundedCornerShape(28.dp), 
-        modifier = Modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(28.dp)),
+        modifier = modifier.fillMaxWidth().shadow(12.dp, RoundedCornerShape(28.dp)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(24.dp)) {
@@ -1018,12 +1163,17 @@ fun TableroGananciasPremium(vBruta: Double, cMercancia: Double, nominaVentas: Do
                     color = if(uNeta >= 0) DelisaGreen.copy(0.1f) else Color.Red.copy(0.1f),
                     shape = CircleShape
                 ) {
-                    Icon(
-                        if(uNeta >= 0) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
-                        null, 
-                        tint = if(uNeta >= 0) DelisaGreenDark else Color.Red,
-                        modifier = Modifier.padding(12.dp).size(28.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
+                        IconButton(onClick = onPdfClick, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Rounded.PictureAsPdf, null, tint = if(uNeta >= 0) DelisaGreenDark else Color.Red, modifier = Modifier.size(20.dp))
+                        }
+                        Icon(
+                            if(uNeta >= 0) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
+                            null, 
+                            tint = if(uNeta >= 0) DelisaGreenDark else Color.Red,
+                            modifier = Modifier.padding(8.dp).size(24.dp)
+                        )
+                    }
                 }
             }
             
@@ -1031,32 +1181,60 @@ fun TableroGananciasPremium(vBruta: Double, cMercancia: Double, nominaVentas: Do
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
             Spacer(Modifier.height(24.dp))
 
-            // Cascada de Flujo (3 Filas de 2 items cada una para equilibrio visual)
+            // 🚀 SECCIÓN DE INGRESOS (DESTACADA)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(DelisaGreen.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("INGRESOS TOTALES (VENTA BRUTA)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                    Text(formato.format(vBruta), color = DelisaGreenDark, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                }
+                Icon(Icons.Rounded.Payments, null, tint = DelisaGreenDark, modifier = Modifier.size(24.dp))
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // 📊 MATRIZ DE GASTOS (2 COLUMNAS)
+            // Fila 1
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MetricFlowItem("INGRESOS", formato.format(vBruta), DelisaGreenDark)
-                MetricFlowItem("COSTO PRODUCTO", "- ${formato.format(cMercancia)}", Color.Gray, pctCosto)
+                MetricFlowItem("NOM. PRODUCCIÓN", "- ${formato.format(nominaApoyo)}", WarningOrange, pctNomProd)
+                MetricFlowItem("COSTO MERCANCÍA", "- ${formato.format(cMercancia)}", Color.Gray, pctCosto, onClick = onCostoClick)
             }
             Spacer(Modifier.height(16.dp))
+            // Fila 2
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 MetricFlowItem("NOM. VENTAS", "- ${formato.format(nominaVentas)}", DelisaBlueDark, pctNomVenta)
-                MetricFlowItem("NOM. PRODUCCIÓN", "- ${formato.format(nominaApoyo)}", WarningOrange, pctNomProd)
+                MetricFlowItem("DEVOLUCIONES (5%)", "- ${formato.format(devoluciones)}", Color(0xFF9C27B0), pctDevol)
             }
             Spacer(Modifier.height(16.dp))
+            // Fila 3
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MetricFlowItem("GASTOS DE RUTA", "- ${formato.format(gVariables)}", DelisaRed.copy(alpha = 0.6f), pctGastosV)
                 MetricFlowItem("GASTOS FIJOS", "- ${formato.format(gFijos)}", DelisaRed, pctGastosF)
-                MetricFlowItem("GASTOS RUTA", "- ${formato.format(gVariables)}", DelisaRed.copy(alpha = 0.6f), pctGastosV)
             }
         }
     }
 }
 
 @Composable
-fun MetricFlowItem(label: String, value: String, color: Color, percentage: Double? = null) {
-    Column(Modifier.width(140.dp)) {
+fun MetricFlowItem(label: String, value: String, color: Color, percentage: Double? = null, onClick: (() -> Unit)? = null) {
+    Column(
+        modifier = Modifier
+            .width(140.dp)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, fontWeight = FontWeight.Black)
             if (percentage != null && percentage > 0) {
                 Text(" ${String.format(Locale.US, "%.1f", percentage)}%", color = color.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Black)
+            }
+            if (onClick != null) {
+                Icon(Icons.Rounded.Info, null, tint = color.copy(alpha = 0.4f), modifier = Modifier.padding(start = 4.dp).size(10.dp))
             }
         }
         Text(value, color = color, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1064,9 +1242,9 @@ fun MetricFlowItem(label: String, value: String, color: Color, percentage: Doubl
 }
 
 @Composable
-fun ItemNominaAuto(vendedores: Int, base: Double, comision: Double, dias: Int, formato: NumberFormat) {
+fun ItemNominaAuto(vendedores: Int, base: Double, comision: Double, dias: Int, formato: NumberFormat, modifier: Modifier = Modifier) {
     Card(
-        Modifier.fillMaxWidth(), 
+        modifier.fillMaxWidth(), 
         shape = RoundedCornerShape(16.dp), 
         colors = CardDefaults.cardColors(containerColor = DelisaBlue.copy(alpha = 0.05f)),
         border = BorderStroke(1.dp, DelisaBlue.copy(alpha = 0.1f))
@@ -1154,6 +1332,235 @@ fun ItemVendedorDetalleFinanzas(info: SellerEarnings, formato: NumberFormat, onE
             }
         }
     }
+}
+
+@Composable
+fun ItemGastoAgrupado(group: GroupedGasto, formato: NumberFormat, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier.size(42.dp).clip(CircleShape).background(DelisaRed.copy(0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = when(group.categoria.uppercase()) {
+                        "GASOLINA" -> Icons.Rounded.LocalGasStation
+                        "COMIDA" -> Icons.Rounded.Fastfood
+                        "OTROS" -> Icons.Rounded.MoreHoriz
+                        else -> Icons.Rounded.ReceiptLong
+                    },
+                    contentDescription = null,
+                    tint = DelisaRed,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("${group.categoria.uppercase()} - ${group.rutaNombre.uppercase()}", fontWeight = FontWeight.Black, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text("${group.detalles.size} registros", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(formato.format(group.montoTotal), fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = DelisaRed)
+        }
+    }
+}
+
+@Composable
+fun DialogoDetalleGastosAgrupados(group: GroupedGasto, formato: NumberFormat, onDismiss: () -> Unit) {
+    val fmtFecha = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.forLanguageTag("es-MX")) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(28.dp),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.fillMaxWidth(0.95f),
+        title = {
+            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(
+                    color = DelisaRed.copy(alpha = 0.1f),
+                    shape = CircleShape,
+                    modifier = Modifier.size(50.dp)
+                ) {
+                    Icon(
+                        imageVector = when(group.categoria.uppercase()) {
+                            "GASOLINA" -> Icons.Rounded.LocalGasStation
+                            "COMIDA" -> Icons.Rounded.Fastfood
+                            else -> Icons.Rounded.ReceiptLong
+                        },
+                        contentDescription = null,
+                        tint = DelisaRed,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(group.categoria.uppercase(), fontWeight = FontWeight.Black, color = DelisaRed, fontSize = 20.sp)
+                Text(group.rutaNombre.uppercase(), fontSize = 13.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(vertical = 12.dp)
+            ) {
+                items(group.detalles) { gasto ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)),
+                        border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.15f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = gasto.descripcion.uppercase(),
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                
+                                // Vendedor
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.Person, null, tint = Color.Gray, modifier = Modifier.size(12.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = gasto.vendedorNombre,
+                                        fontSize = 11.sp,
+                                        color = Color.Gray,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                
+                                Spacer(Modifier.height(2.dp))
+                                
+                                // Fecha
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.Schedule, null, tint = Color.Gray, modifier = Modifier.size(12.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = fmtFecha.format(Date(gasto.fecha)),
+                                        fontSize = 11.sp,
+                                        color = Color.Gray
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = formato.format(gasto.monto),
+                                fontWeight = FontWeight.Black,
+                                fontSize = 17.sp,
+                                color = DelisaRed
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Text("CERRAR DESGLOSE", fontWeight = FontWeight.Bold)
+            }
+        }
+    )
+}
+
+@Composable
+fun DialogoDetalleCostoProducto(detalles: List<CostoProductoDetalle>, formato: NumberFormat, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(28.dp),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.fillMaxWidth(0.95f),
+        title = {
+            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Surface(
+                    color = Color.Gray.copy(alpha = 0.1f),
+                    shape = CircleShape,
+                    modifier = Modifier.size(50.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Inventory2,
+                        null,
+                        tint = Color.Gray,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("INVERSIÓN EN MERCANCÍA", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp)
+                Text("Desglose de costos de adquisición", fontSize = 13.sp, color = Color.Gray)
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(vertical = 12.dp)
+            ) {
+                items(detalles) { item ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)),
+                        border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.1f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.nombre.uppercase(),
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "${item.cantidad} PIEZAS • COSTO UNIT: ${formato.format(item.costoUnitario)}",
+                                    fontSize = 11.sp,
+                                    color = Color.Gray,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Text(
+                                text = formato.format(item.costoTotal),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onSurface),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Text("CERRAR", fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }
 
 @Composable
@@ -1250,7 +1657,10 @@ fun CardProductoFinanzas(prod: Map<String, Any>, formato: NumberFormat, minMarge
     val gBolsa = prod["cantidadUnitario"]?.toString()?.toDoubleOrNull() ?: 0.0
     val display = prod["unidadesPorDisplay"]?.toString()?.toDoubleOrNull() ?: 0.0
     val gVenta = prod["gramosVenta"]?.toString()?.toDoubleOrNull() ?: 0.0
-    val costoPz = if (gBolsa > 0) (pCompra / gBolsa) * gVenta else 0.0
+    val cEmpaque = prod["costoEmpaque"]?.toString()?.toDoubleOrNull() ?: 0.0
+    val aTransporte = prod["aplicaTransporte"] as? Boolean ?: true
+    val cTransporte = if(aTransporte) (gVenta / 1000.0) * 5.0 else 0.0
+    val costoPz = if (gBolsa > 0) ((pCompra / gBolsa) * gVenta) + cEmpaque + cTransporte else 0.0
     val utilidad = pVenta - costoPz; val margen = if (pVenta > 0) (utilidad / pVenta) * 100 else 0.0
     val colorMargen = if (maxMargen == minMargen) DelisaGreen else {
         val ratio = (margen - minMargen) / (maxMargen - minMargen)
@@ -1260,7 +1670,7 @@ fun CardProductoFinanzas(prod: Map<String, Any>, formato: NumberFormat, minMarge
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(colorMargen.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Inventory2, null, tint = colorMargen, modifier = Modifier.size(24.dp)) }
-                Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(nombre, fontWeight = FontWeight.Black, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Costo Display: ${formato.format(pCompra)} ($display pzas)", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(nombre, fontWeight = FontWeight.Black, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Costo Display: ${formato.format(pCompra)} + Empaque: ${formato.format(cEmpaque)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Surface(color = colorMargen, shape = RoundedCornerShape(8.dp)) { Text("${String.format(Locale.US, "%.0f", margen)}%", modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black) }
             }
             Spacer(Modifier.height(16.dp)); HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.dp); Spacer(Modifier.height(16.dp))
@@ -1275,7 +1685,10 @@ fun CardProductoFinanzas(prod: Map<String, Any>, formato: NumberFormat, minMarge
 fun calcularMargen(prod: Map<String, Any>): Double {
     val pV = prod["precio"]?.toString()?.toDoubleOrNull() ?: 0.0; val pC = prod["precioCompra"]?.toString()?.toDoubleOrNull() ?: 0.0
     val gB = prod["cantidadUnitario"]?.toString()?.toDoubleOrNull() ?: 0.0; val gV = prod["gramosVenta"]?.toString()?.toDoubleOrNull() ?: 0.0
-    val cP = if (gB > 0) (pC / gB) * gV else 0.0; return if (pV > 0) ((pV - cP) / pV) * 100 else 0.0
+    val cE = prod["costoEmpaque"]?.toString()?.toDoubleOrNull() ?: 0.0
+    val aT = prod["aplicaTransporte"] as? Boolean ?: true
+    val cT = if(aT) (gV / 1000.0) * 5.0 else 0.0
+    val cP = if (gB > 0) ((pC / gB) * gV) + cE + cT else 0.0; return if (pV > 0) ((pV - cP) / pV) * 100 else 0.0
 }
 
 fun generarPdfInventarioGlobal(context: Context, productos: List<Map<String, Any>>, stockGlobal: Map<String, Int>): File {
@@ -1656,4 +2069,158 @@ fun abrirPdfResumen(context: Context, file: File) {
         val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.provider", file); val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply { setDataAndType(uri, "application/pdf"); addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         context.startActivity(android.content.Intent.createChooser(intent, "Abrir Reporte"))
     } catch (e: Exception) { Toast.makeText(context, "No se pudo abrir el PDF", Toast.LENGTH_SHORT).show() }
+}
+
+suspend fun generarPdfResumenFinanciero(context: Context, state: ResumenOperativoUiState, inicio: Date, fin: Date): File {
+    val pdfDocument = PdfDocument(); val pageWidth = 612; val pageHeight = 792; val nf = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
+    val df = SimpleDateFormat("dd/MM/yyyy", Locale.forLanguageTag("es-MX")); val dfConHora = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.forLanguageTag("es-MX")); val fechaReporte = dfConHora.format(Date())
+    val rangoTexto = if (df.format(inicio) == df.format(fin)) df.format(inicio).uppercase() else "${df.format(inicio)} AL ${df.format(fin)}".uppercase()
+    
+    val cDeepBlack = android.graphics.Color.rgb(15, 15, 15)
+    val cTechGray = android.graphics.Color.rgb(45, 45, 45)
+    val cElectricRed = android.graphics.Color.rgb(227, 6, 19)
+    val cNeonGreen = android.graphics.Color.rgb(0, 255, 150)
+    val cPureWhite = android.graphics.Color.WHITE
+    
+    val pMainHeader = Paint().apply { isAntiAlias = true }
+    val pTitle = Paint().apply { textSize = 22f; color = cPureWhite; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD); isAntiAlias = true }
+    val pSubTitle = Paint().apply { textSize = 10f; color = android.graphics.Color.rgb(180, 180, 180); typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL); isAntiAlias = true }
+    val pValueBig = Paint().apply { textSize = 32f; color = cPureWhite; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD); isAntiAlias = true }
+    val pLabelLabel = Paint().apply { textSize = 8f; color = android.graphics.Color.GRAY; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD); isAntiAlias = true }
+
+    val imageLoader = ImageLoader(context)
+    val sellerPhotos = java.util.Collections.synchronizedMap(mutableMapOf<String, Bitmap>())
+    coroutineScope {
+        state.nominaDetallada.plus(state.nominaProduccionLista).take(15).forEach { seller ->
+            if (!seller.photoUrl.isNullOrEmpty()) {
+                launch {
+                    try {
+                        val request = ImageRequest.Builder(context)
+                            .data(seller.photoUrl)
+                            .allowHardware(false) // Importante para PDF
+                            .build()
+                        val result = imageLoader.execute(request).drawable
+                        if (result is BitmapDrawable) {
+                            sellerPhotos[seller.uid] = result.bitmap
+                        }
+                    } catch (e: Exception) { }
+                }
+            }
+        }
+    }
+
+    var currentPageNumber = 1; var pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create(); var page = pdfDocument.startPage(pageInfo); var canvas = page.canvas
+
+    fun drawCyberHeader(canv: android.graphics.Canvas, pNum: Int) {
+        val headerH = 140f
+        val gradient = LinearGradient(0f, 0f, pageWidth.toFloat(), 0f, cDeepBlack, cTechGray, Shader.TileMode.CLAMP)
+        pMainHeader.shader = gradient
+        canv.drawRect(0f, 0f, pageWidth.toFloat(), headerH, pMainHeader)
+        canv.drawRect(0f, headerH - 4f, pageWidth.toFloat(), headerH, Paint().apply { color = cElectricRed })
+        canv.drawText("INTELIGENCIA FINANCIERA", 40f, 50f, pTitle)
+        canv.drawText("ANÁLISIS DE UTILIDAD NETA Y FLUJO OPERATIVO", 40f, 75f, pSubTitle)
+        pSubTitle.textSize = 8f; canv.drawText("PÁGINA $pNum", 40f, 95f, pSubTitle); pSubTitle.textSize = 10f
+        pSubTitle.textAlign = Paint.Align.RIGHT; canv.drawText("REPORTE GENERADO: $fechaReporte", pageWidth - 40f, 50f, pSubTitle); canv.drawText("PERIODO: $rangoTexto", pageWidth - 40f, 75f, pSubTitle); pSubTitle.textAlign = Paint.Align.LEFT
+        val logo = androidx.appcompat.content.res.AppCompatResources.getDrawable(context, com.gruposanangel.delivery.R.drawable.logo)
+        logo?.let { it.setBounds(40, 100, 120, 130); it.draw(canv) }
+    }
+    
+    drawCyberHeader(canvas, currentPageNumber); var y = 180f
+    val rectSummary = RectF(40f, y, pageWidth - 40f, y + 100f)
+    canvas.drawRoundRect(rectSummary, 16f, 12f, Paint().apply { color = android.graphics.Color.rgb(245, 245, 245); style = Paint.Style.FILL })
+    canvas.drawRoundRect(rectSummary, 16f, 12f, Paint().apply { color = android.graphics.Color.rgb(220, 220, 220); style = Paint.Style.STROKE; strokeWidth = 1f })
+    
+    canvas.drawText("RENDIMIENTO DE UTILIDAD NETA", 60f, y + 30f, pLabelLabel)
+    pValueBig.color = if(state.utilidadNeta >= 0) android.graphics.Color.rgb(0, 150, 80) else android.graphics.Color.RED
+    canvas.drawText(nf.format(state.utilidadNeta), 60f, y + 70f, pValueBig)
+    
+    // Margen %
+    val marginPct = if(state.ventaBruta > 0) (state.utilidadNeta / state.ventaBruta) * 100 else 0.0
+    val pMargin = Paint().apply { textSize = 14f; color = pValueBig.color; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD); isAntiAlias = true }
+    canvas.drawText("${String.format(Locale.US, "%.1f", marginPct)}% DE MARGEN", pageWidth - 180f, y + 70f, pMargin)
+    y += 130f; canvas.drawText("ANÁLISIS DE BALANCE MONETARIO ($)", 40f, y, Paint(pLabelLabel).apply { textSize = 9f }); y += 15f
+    
+    val chartH = 110f; val chartW = pageWidth - 100f; val maxVal = state.ventaBruta.coerceAtLeast(1.0)
+    val categories = listOf(
+        "INGRESOS" to state.ventaBruta, 
+        "MERCANCÍA" to -state.costoMercancia, 
+        "NÓMINAS" to -(state.nominaVentas + state.nominaProduccion), 
+        "OPERACIÓN" to -(state.gastosFijosMonto + state.gastosVariablesMonto), 
+        "DEVOLUCIÓN" to -state.devolucionesMonto, 
+        "NETO REAL" to state.utilidadNeta
+    )
+    val barW = chartW / categories.size - 10f; var currentYVal = 0.0
+    
+    // --- GRÁFICA 1: MONTOS ($) ---
+    categories.forEachIndexed { index, (label, value) ->
+        val x = 50f + index * (barW + 10f); val barStart = currentYVal; val isTotalBar = index == 0 || index == categories.size - 1
+        val barEnd = if(isTotalBar) value else currentYVal + value
+        val drawFrom = if(isTotalBar) 0.0 else barStart; val drawTo = barEnd
+        val top = y + chartH - (drawFrom.coerceAtLeast(drawTo) / maxVal * chartH).toFloat(); val bottom = y + chartH - (drawFrom.coerceAtMost(drawTo) / maxVal * chartH).toFloat()
+        val barColor = when { index == 0 -> android.graphics.Color.rgb(46, 125, 50); index == categories.size - 1 -> if(value >= 0) android.graphics.Color.rgb(0, 150, 80) else android.graphics.Color.RED; else -> if(value < 0) android.graphics.Color.rgb(200, 50, 50) else android.graphics.Color.rgb(180, 180, 180) }
+        canvas.drawRoundRect(RectF(x, top, x + barW, bottom), 4f, 4f, Paint().apply { color = barColor; isAntiAlias = true })
+        if (index < categories.size - 1) { canvas.drawLine(x + barW, bottom, x + barW + 10f, bottom, Paint().apply { color = android.graphics.Color.GRAY; strokeWidth = 1f; pathEffect = DashPathEffect(floatArrayOf(5f, 5f), 0f) }) }
+        
+        // Etiquetas de Monto ($)
+        val pAmt = Paint(); pAmt.color = android.graphics.Color.DKGRAY; pAmt.textSize = 6f; pAmt.textAlign = Paint.Align.CENTER
+        canvas.drawText(nf.format(if(isTotalBar) value else Math.abs(value)), x + barW/2, top - 5f, pAmt)
+        
+        val pLabel = Paint(pSubTitle); pLabel.color = android.graphics.Color.DKGRAY; pLabel.textSize = 6f; pLabel.textAlign = Paint.Align.CENTER
+        canvas.drawText(label, x + barW/2, y + chartH + 12f, pLabel)
+        currentYVal = barEnd
+    }
+    
+    y += chartH + 45f
+    
+    // --- GRÁFICA 2: PORCENTAJES (%) ---
+    canvas.drawText("ANÁLISIS DE PARTICIPACIÓN PORCENTUAL (%)", 40f, y, Paint(pLabelLabel).apply { textSize = 9f }); y += 15f
+    categories.forEachIndexed { index, (label, value) ->
+        if (index == 0) return@forEachIndexed // Saltamos ingresos ya que es el 100%
+        val x = 50f + index * (barW + 10f)
+        val pct = if(state.ventaBruta > 0) (Math.abs(value) / state.ventaBruta) * 100 else 0.0
+        val barHeight = (pct / 100.0 * chartH).toFloat()
+        val top = y + chartH - barHeight
+        val bottom = y + chartH
+        
+        val barColor = when { index == categories.size - 1 -> android.graphics.Color.rgb(0, 120, 215); else -> android.graphics.Color.rgb(100, 100, 100) }
+        canvas.drawRoundRect(RectF(x, top, x + barW, bottom), 4f, 4f, Paint().apply { color = barColor; isAntiAlias = true; alpha = 180 })
+        
+        // Etiqueta de %
+        val pPct = Paint(); pPct.color = android.graphics.Color.BLACK; pPct.textSize = 7f; pPct.textAlign = Paint.Align.CENTER; pPct.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        canvas.drawText("${String.format(Locale.US, "%.1f", pct)}%", x + barW/2, top - 5f, pPct)
+        
+        val pLabel = Paint(pSubTitle); pLabel.color = android.graphics.Color.DKGRAY; pLabel.textSize = 6f; pLabel.textAlign = Paint.Align.CENTER
+        canvas.drawText(label, x + barW/2, y + chartH + 12f, pLabel)
+    }
+    
+    y += chartH + 50f; canvas.drawText("DESEMPEÑO DE CAPITAL HUMANO", 40f, y, pLabelLabel); y += 15f
+    val allPayroll = (state.nominaDetallada + state.nominaProduccionLista).sortedByDescending { it.totalGanado }
+    allPayroll.take(12).forEach { info ->
+        if (y > pageHeight - 80f) { pdfDocument.finishPage(page); currentPageNumber++; pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, currentPageNumber).create(); page = pdfDocument.startPage(pageInfo); canvas = page.canvas; drawCyberHeader(canvas, currentPageNumber); y = 180f }
+        canvas.drawRoundRect(RectF(40f, y, pageWidth - 40f, y + 40f), 8f, 8f, Paint().apply { color = android.graphics.Color.rgb(252, 252, 252); style = Paint.Style.FILL })
+        val photo = sellerPhotos[info.uid]
+        if (photo != null) { val dest = RectF(50f, y + 5f, 80f, y + 35f); val path = Path(); path.addOval(dest, Path.Direction.CW); canvas.save(); canvas.clipPath(path); canvas.drawBitmap(photo, null, dest, Paint(Paint.FILTER_BITMAP_FLAG)); canvas.restore() }
+        else { canvas.drawCircle(65f, y + 20f, 15f, Paint().apply { color = cElectricRed; alpha = 50; isAntiAlias = true }); val pInit = Paint(); pInit.color = cElectricRed; pInit.textSize = 14f; pInit.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD); canvas.drawText(info.nombre.take(1).uppercase(), 60f, y + 26f, pInit) }
+        val pName = Paint().apply { color = android.graphics.Color.BLACK; textSize = 10f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD) }
+        canvas.drawText(info.nombre.uppercase(), 90f, y + 18f, pName)
+        val pPuesto = Paint().apply { color = android.graphics.Color.GRAY; textSize = 8f }
+        canvas.drawText(info.puesto, 90f, y + 32f, pPuesto)
+        val pAmount = Paint().apply { color = cTechGray; textSize = 12f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD); textAlign = Paint.Align.RIGHT }
+        canvas.drawText(nf.format(info.totalGanado), pageWidth - 60f, y + 26f, pAmount); y += 45f
+    }
+    val footerY = pageHeight - 60f; canvas.drawRect(0f, footerY, pageWidth.toFloat(), pageHeight.toFloat(), Paint().apply { color = cDeepBlack })
+    val pFoot = Paint(pSubTitle).apply { color = android.graphics.Color.rgb(150, 150, 150); textAlign = Paint.Align.RIGHT }
+    canvas.drawText("SISTEMA DE INTELIGENCIA DELISA v4.0", pageWidth - 40f, footerY + 25f, pFoot); canvas.drawText("DATOS PRIVADOS Y CONFIDENCIALES", pageWidth - 40f, footerY + 40f, pFoot)
+    try {
+        val qrContent = "DELISA_PROFIT_ELITE|NET:${state.utilidadNeta}|REVENUE:${state.ventaBruta}|DATE:${fechaReporte}"
+        val bitMatrix = QRCodeWriter().encode(qrContent, BarcodeFormat.QR_CODE, 100, 100); val qrBitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.RGB_565)
+        for (i in 0 until 100) for (j in 0 until 100) qrBitmap.setPixel(i, j, if (bitMatrix.get(i, j)) android.graphics.Color.WHITE else android.graphics.Color.BLACK)
+        canvas.drawBitmap(qrBitmap, null, RectF(40f, footerY + 5f, 90f, footerY + 55f), null)
+    } catch (e: Exception) { }
+    pdfDocument.finishPage(page)
+    val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+    val file = File(outputDir, "Elite_Utility_Report_${System.currentTimeMillis()}.pdf")
+    withContext(Dispatchers.IO) { pdfDocument.writeTo(FileOutputStream(file)) }
+    pdfDocument.close()
+    return file
 }

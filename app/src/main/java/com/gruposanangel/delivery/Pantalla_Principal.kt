@@ -42,6 +42,7 @@ import coil.compose.AsyncImage
 import com.gruposanangel.delivery.R
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
+import com.gruposanangel.delivery.data.RepositoryRuta
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.VentaRepository
 import com.gruposanangel.delivery.RepositoryUsuario
@@ -93,7 +94,8 @@ fun Pantalla_Principal(
     // 🔥 VALIDACIONES ROBUSTAS (Ignoran mayúsculas/minúsculas y variaciones de género/acentos)
     val isAdmin = remember(puestoActual) {
         val p = puestoActual.uppercase()
-        p == "CEO" || p == "GERENTE GENERAL" || p == "SUPERVISOR" || p.contains("ADMINISTRACI")
+        p == "CEO" || p == "GERENTE GENERAL" || p == "SUPERVISOR" || 
+        p.contains("ADMINISTRACI")
     }
 
     val esVendedor = remember(puestoActual) {
@@ -208,14 +210,13 @@ fun Pantalla_Principal(
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+            modifier = Modifier.fillMaxSize()
         ) {
             // Mostrar Header en Inicio (Admin/Vendedor) o en General (Almacén)
             val mostrarHeader = selectedScreen == Screen.Inicio || (esAlmacen && selectedScreen == Screen.AlmacenGeneral)
             
             if (mostrarHeader) {
+                Spacer(Modifier.height(innerPadding.calculateTopPadding()))
                 ModernProfileHeader(
                     nombre = usuarioActual?.nombre ?: (if(isPreview) "Admin Test" else "Cargando..."),
                     puesto = if (isAdmin && tieneRutaAsignada && adminModoVendedor) "VENDEDOR (MODO RUTA)" else puestoActual.ifEmpty { "Cargando..." },
@@ -224,10 +225,18 @@ fun Pantalla_Principal(
                     onLogout = onLogout,
                     onProfileClick = { navController.navigate("perfil_usuario") }
                 )
-                // 🔥 Eliminado Spacer de 8dp para subir todo el contenido
             }
 
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = innerPadding.calculateBottomPadding())
+                    .then(
+                        if (!mostrarHeader && selectedScreen != Screen.Mapa) 
+                            Modifier.padding(top = innerPadding.calculateTopPadding()) 
+                        else Modifier
+                    )
+            ) {
                 when (selectedScreen) {
                     Screen.Inicio -> {
                         when {
@@ -252,7 +261,7 @@ fun Pantalla_Principal(
                         }
                     }
                     Screen.AlmacenGeneral, Screen.Inventario -> {
-                        PantallaInventario(navController, inventarioRepo, effectivelyAdmin)
+                        PantallaInventario(navController, inventarioRepo, effectivelyAdmin || esAlmacen)
                     }
                     Screen.CargasVendedores -> {
                         MovimientosInventarioScreen(
@@ -269,8 +278,10 @@ fun Pantalla_Principal(
                     Screen.Ruta -> PaginaVentaScreen(navController, ventaRepository, effectivelyAdmin)
                     Screen.Mapa -> {
                         if (repository != null) {
+                            val db = AppDatabase.getDatabase(context)
+                            val repoRuta = RepositoryRuta(db.rutaDao(), db.clienteDao())
                             val mapaVm: com.gruposanangel.delivery.ui.screens.MapaViewModel = viewModel(
-                                factory = com.gruposanangel.delivery.ui.screens.MapaViewModelFactory(repository)
+                                factory = com.gruposanangel.delivery.ui.screens.MapaViewModelFactory(repository, repoRuta)
                             )
                             com.gruposanangel.delivery.ui.screens.MapaScreen(navController = navController, viewModel = mapaVm, isAdminOverride = effectivelyAdmin)
                         } else {

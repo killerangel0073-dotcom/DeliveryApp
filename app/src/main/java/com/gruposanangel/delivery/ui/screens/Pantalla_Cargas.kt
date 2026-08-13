@@ -282,7 +282,9 @@ fun MovimientosInventarioScreen(
 
             val totalMonto = catalogo.sumOf { (state.cantidades[it.id] ?: 0) * it.precio }
             val totalPiezas = state.cantidades.values.sum()
-            val habilitarBoton = totalPiezas > 0 && (state.destino != "Selecciona Destino" && (isEmergency || state.origen != "Selecciona Origen"))
+            val habilitarBoton = totalPiezas > 0 && 
+                                (state.destino != "Selecciona Destino" && (isEmergency || state.origen != "Selecciona Origen")) &&
+                                !state.isLoading // 🔥 Bloquear si ya está cargando
 
             Card(
                 modifier = Modifier
@@ -350,6 +352,32 @@ fun MovimientosInventarioScreen(
             },
             onCancelar = { mostrarDialogConfirmacion = false }
         )
+    }
+
+    // 🔥 OVERLAY DE CARGA (Bloqueo de pantalla y feedback visual)
+    if (state.isLoading) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.7f))
+                .clickable(enabled = false) {}, // Bloquear toques
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = DelisaRed, strokeWidth = 5.dp)
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = if (isEmergency) "Procesando Carga Directa..." else "Enviando Carga a la Nube...",
+                    fontWeight = FontWeight.Bold,
+                    color = DelisaRed
+                )
+                Text(
+                    text = "Por favor, espera un momento.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 

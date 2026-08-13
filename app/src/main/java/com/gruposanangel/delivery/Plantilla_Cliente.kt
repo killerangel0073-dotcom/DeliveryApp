@@ -10,5 +10,6 @@ class Plantilla_Cliente (
     val distanciaTexto: String = "",
     val rutaId: String? = null,
     val visitadoAnteriormente: Boolean = false, // 🔥 Nuevo: Guía de ciclo pasado
-    val montoCompraPasada: Double = 0.0          // 🔥 Nuevo: Para mostrar cuánto compró
+    val montoCompraPasada: Double = 0.0,          // 🔥 Nuevo: Para mostrar cuánto compró
+    val valor: String = "medio"                  // 🔥 Nuevo: Tipo de cliente (alto, medio, bajo)
 )

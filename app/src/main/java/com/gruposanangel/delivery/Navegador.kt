@@ -9,6 +9,7 @@ import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.gruposanangel.delivery.data.AppDatabase
 import com.gruposanangel.delivery.data.RepositoryCliente
+import com.gruposanangel.delivery.data.RepositoryRuta
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.data.RepositoryGasto
 import com.gruposanangel.delivery.VentaRepository
@@ -157,8 +158,10 @@ fun Navegador(
 
         composable("MAPA_SCREEN") {
             if (repository != null) {
+                val db = AppDatabase.getDatabase(context)
+                val repoRuta = RepositoryRuta(db.rutaDao(), db.clienteDao())
                 val mapaViewModel: com.gruposanangel.delivery.ui.screens.MapaViewModel = viewModel(
-                    factory = com.gruposanangel.delivery.ui.screens.MapaViewModelFactory(repository)
+                    factory = com.gruposanangel.delivery.ui.screens.MapaViewModelFactory(repository, repoRuta)
                 )
                 com.gruposanangel.delivery.ui.screens.MapaScreen(navController = navController, viewModel = mapaViewModel)
             }

@@ -1,13 +1,16 @@
 package com.gruposanangel.delivery.ui.screens
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,7 +25,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -55,7 +60,10 @@ fun PantallaClientes(navController: NavController, repository: RepositoryCliente
     val isPreview = LocalInspectionMode.current
     if (isPreview || repository == null) {
         PantallaClientesContent(
-            uiState = ClienteUiState(clientes = listOf(Plantilla_Cliente("1", "Tienda A", "Juan", "", true), Plantilla_Cliente("2", "Abarrotes B", "Mary", "", true))),
+            uiState = ClienteUiState(clientes = listOf(
+                Plantilla_Cliente("1", "Tienda A", "Juan", "", true, valor = "alto"), 
+                Plantilla_Cliente("2", "Abarrotes B", "Mary", "", true, valor = "medio")
+            )),
             onSearchQueryChanged = {}, onClienteClick = {}, onCarritoClick = {}, onNuevoCliente = {}, isAdmin = isAdmin, onEditClick = {}, onToggleCiclo = {}
         )
     } else {
@@ -112,6 +120,27 @@ fun PantallaClientesContent(
     // 🔥 FIX DEFINITIVO: Estado local puro para el buscador. 
     // NO sincronizar con el ViewModel para evitar que el cursor salte.
     var textFieldValue by remember { mutableStateOf(TextFieldValue(uiState.searchQuery)) }
+
+    val listState = rememberLazyListState()
+
+    // ✨ AUTO-SCROLL AL PRINCIPIO CUANDO CAMBIEN LOS DATOS (Búsqueda o filtros)
+    LaunchedEffect(uiState.clientes.size, uiState.filtrandoSoloCicloAnterior) {
+        if (uiState.clientes.isNotEmpty()) {
+            listState.animateScrollToItem(0)
+        }
+    }
+
+    // ✨ RELOJ DE ANIMACIÓN MAESTRO (Optimización de rendimiento)
+    val infiniteTransition = rememberInfiniteTransition(label = "masterGlowTransition")
+    val masterAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "masterAlpha"
+    )
 
     Scaffold(
         floatingActionButton = {
@@ -189,7 +218,12 @@ fun PantallaClientesContent(
             Spacer(Modifier.height(16.dp))
             if (uiState.isLoading) { Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary) } }
             else {
-                LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 80.dp)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(), 
+                    verticalArrangement = Arrangement.spacedBy(10.dp), 
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
                     items(uiState.clientes, key = { it.id }) { cliente ->
                         val interactionSource = remember { MutableInteractionSource() }
                         val isPressed by interactionSource.collectIsPressedAsState()
@@ -216,9 +250,55 @@ fun PantallaClientesContent(
                                     onClick = { onClienteClick(cliente.id) }
                                 )
                         ) {
+                            val colorValor = when(cliente.valor.lowercase()) {
+                                "alto" -> DelisaGreen
+                                "medio" -> DelisaYellow
+                                "bajo" -> DelisaRed
+                                else -> Color.Gray
+                            }
+
                             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                AsyncImage(model = cliente.fotografiaCliente, contentDescription = null, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentScale = ContentScale.Crop, modifier = Modifier.size(70.dp).clip(RoundedCornerShape(16.dp)))
-                                Spacer(Modifier.width(14.dp))
+                                // Foto con Efecto Neon Glow Moderno (Usa alpha maestro)
+                                Box(
+                                    modifier = Modifier
+                                        .size(80.dp)
+                                        .drawBehind {
+                                            drawCircle(
+                                                brush = Brush.radialGradient(
+                                                    colors = listOf(colorValor.copy(alpha = masterAlpha * 0.4f), Color.Transparent),
+                                                    center = center,
+                                                    radius = size.width * 0.7f
+                                                ),
+                                                radius = size.width * 0.7f
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Surface(
+                                        modifier = Modifier.size(70.dp),
+                                        shape = RoundedCornerShape(18.dp),
+                                        color = MaterialTheme.colorScheme.surface,
+                                        border = BorderStroke(
+                                            width = 1.5.dp,
+                                            brush = Brush.linearGradient(
+                                                0.0f to colorValor.copy(alpha = 0.8f),
+                                                0.5f to colorValor.copy(alpha = 0.2f),
+                                                1.0f to colorValor.copy(alpha = 0.8f)
+                                            )
+                                        ),
+                                        tonalElevation = 2.dp
+                                    ) {
+                                        AsyncImage(
+                                            model = cliente.fotografiaCliente, 
+                                            contentDescription = null, 
+                                            placeholder = painterResource(R.drawable.repartidor), 
+                                            error = painterResource(R.drawable.repartidor), 
+                                            contentScale = ContentScale.Crop, 
+                                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(18.dp))
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(cliente.nombreNegocio, fontWeight = FontWeight.Black, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
@@ -311,7 +391,7 @@ fun PantallaClientesContent(
 @Preview(showBackground = true, showSystemUi = true, name = "Clientes - Lista")
 @Composable
 fun PantallaClientesPreview() {
-    val clientes = listOf(Plantilla_Cliente("1", "Abarrotes La Pasadita", "Don Chon", "", true))
+    val clientes = listOf(Plantilla_Cliente("1", "Abarrotes La Pasadita", "Don Chon", "", true, valor = "alto"))
     DeliveryTheme { PantallaClientesContent(ClienteUiState(clientes = clientes, isLoading = false), {}, {}, {}, {}, true, {}, {}) }
 }
 

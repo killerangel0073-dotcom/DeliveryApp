@@ -3,7 +3,7 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -53,7 +53,7 @@ import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.util.Locale
 
-// 🔹 AQUÍ ESTÁ EL MODELO DE DATOS QUE FALTABA (Ya no marcará Unresolved reference)
+// 🔹 MODELO DE DATOS
 data class ProductoFirestore(
     val id: String,
     val nombre: String,
@@ -77,7 +77,7 @@ fun ListaProductosScreen(
     var showDialogEliminar by remember { mutableStateOf<String?>(null) }
     var productos by remember { mutableStateOf<List<ProductoFirestore>>(previewProductos ?: emptyList()) }
     var isLoading by remember { mutableStateOf(!isPreview) }
-    val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
+    val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
 
     // 🔍 ESTADO DEL BUSCADOR
     var textoBusqueda by remember { mutableStateOf("") }
@@ -88,6 +88,14 @@ fun ListaProductosScreen(
             it.nombre.contains(textoBusqueda, ignoreCase = true) ||
                     it.marca.contains(textoBusqueda, ignoreCase = true)
         }
+    }
+
+    // 📦 AGRUPACIÓN POR CATEGORÍA
+    val productosPorCategoria = remember(productosFiltrados) {
+        productosFiltrados
+            .sortedBy { it.nombre }
+            .groupBy { it.categoria }
+            .toSortedMap()
     }
 
     // Cargar de Firestore en tiempo real
@@ -145,7 +153,6 @@ fun ListaProductosScreen(
                             .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Flecha elegante para ir hacia atrás (Dashboard)
                         IconButton(onClick = { navController.popBackStack() }) {
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
@@ -154,7 +161,6 @@ fun ListaProductosScreen(
                             )
                         }
 
-                        // Input del Buscador
                         TextField(
                             value = textoBusqueda,
                             onValueChange = { textoBusqueda = it },
@@ -200,7 +206,6 @@ fun ListaProductosScreen(
                     }
                 }
 
-                // LISTADO DE PRODUCTOS FILTRADOS
                 if (isLoading) {
                     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = DelisaRed)
@@ -220,90 +225,93 @@ fun ListaProductosScreen(
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 80.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        items(productosFiltrados, key = { it.id }) { producto ->
-                            Card(
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(20.dp))
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .padding(12.dp)
-                                        .fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    AsyncImage(
-                                        model = producto.imagenUrl,
-                                        placeholder = painterResource(R.drawable.repartidor),
-                                        error = painterResource(R.drawable.repartidor),
-                                        contentDescription = producto.nombre,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .size(75.dp)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(MaterialTheme.colorScheme.background)
-                                    )
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Column(
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(
-                                            text = producto.nombre,
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = 16.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = "${producto.marca} • ${producto.categoria}",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = formatoMoneda.format(producto.precio),
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = 16.sp,
-                                            color = DelisaRed
-                                        )
-                                    }
+                        productosPorCategoria.forEach { (categoria, lista) ->
+                            item(key = "header_$categoria") {
+                                CategoryHeader(categoria.ifEmpty { "Sin Categoría" })
+                            }
 
-                                    // 🔹 BLOQUE DE ICONOS ADAPTATIVO:
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp) 
+                            items(lista, key = { it.id }) { producto ->
+                                Card(
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    modifier = Modifier.fillMaxWidth().shadow(2.dp, RoundedCornerShape(20.dp))
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .padding(12.dp)
+                                            .fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // 🖊️ BOTÓN EDITAR MODERNO
-                                        Surface(
-                                            onClick = { navController.navigate("EDITAR_PRODUCTOS/${producto.id}") },
-                                            shape = CircleShape,
-                                            color = DelisaBlue.copy(alpha = 0.1f), 
-                                            modifier = Modifier.size(36.dp) 
+                                        AsyncImage(
+                                            model = producto.imagenUrl,
+                                            placeholder = painterResource(R.drawable.repartidor),
+                                            error = painterResource(R.drawable.repartidor),
+                                            contentDescription = producto.nombre,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(75.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(MaterialTheme.colorScheme.background)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Column(
+                                            modifier = Modifier.weight(1f)
                                         ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.Edit,
-                                                    contentDescription = "Editar",
-                                                    tint = DelisaBlue,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
+                                            Text(
+                                                text = producto.nombre,
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 16.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "${producto.marca} • ${producto.categoria}",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = formatoMoneda.format(producto.precio),
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 16.sp,
+                                                color = DelisaRed
+                                            )
                                         }
 
-                                        // 🗑️ BOTÓN ELIMINAR MODERNO
-                                        Surface(
-                                            onClick = { showDialogEliminar = producto.id },
-                                            shape = CircleShape,
-                                            color = DelisaRed.copy(alpha = 0.1f),
-                                            modifier = Modifier.size(36.dp)
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(8.dp) 
                                         ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.Delete,
-                                                    contentDescription = "Eliminar",
-                                                    tint = DelisaRed,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
+                                            Surface(
+                                                onClick = { navController.navigate("EDITAR_PRODUCTOS/${producto.id}") },
+                                                shape = CircleShape,
+                                                color = DelisaBlue.copy(alpha = 0.1f), 
+                                                modifier = Modifier.size(36.dp) 
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Edit,
+                                                        contentDescription = "Editar",
+                                                        tint = DelisaBlue,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            Surface(
+                                                onClick = { showDialogEliminar = producto.id },
+                                                shape = CircleShape,
+                                                color = DelisaRed.copy(alpha = 0.1f),
+                                                modifier = Modifier.size(36.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Delete,
+                                                        contentDescription = "Eliminar",
+                                                        tint = DelisaRed,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -354,25 +362,20 @@ fun ListaProductosScreen(
             )
         }
 
-        // DIÁLOGO DE CONFIRMACIÓN DE ELIMINACIÓN
         if (showDialogEliminar != null) {
             DialogoConfirmacion(
                 titulo = "Eliminar Producto",
-                mensaje = "¿Estás seguro de que deseas eliminar este producto del sistema? Esta acción no se puede deshacer y borrará el artículo de Firebase permanentemente.",
+                mensaje = "¿Estás seguro de que deseas eliminar este producto del sistema?",
                 textoConfirmar = "Eliminar",
                 textoCancelar = "Cancelar",
                 colorConfirmar = DelisaRed,
                 onConfirmar = {
                     val id = showDialogEliminar!!
                     if (!isPreview) {
-                        val db = FirebaseFirestore.getInstance()
-                        db.collection("producto").document(id)
+                        FirebaseFirestore.getInstance().collection("producto").document(id)
                             .delete()
                             .addOnSuccessListener {
                                 Toast.makeText(context, "Producto eliminado con éxito", Toast.LENGTH_SHORT).show()
-                            }
-                            .addOnFailureListener {
-                                Toast.makeText(context, "Error al eliminar el producto", Toast.LENGTH_SHORT).show()
                             }
                     }
                     showDialogEliminar = null
@@ -387,29 +390,10 @@ fun ListaProductosScreen(
 @Composable
 fun ListaProductosPreview() {
     val productosFalsos = listOf(
-        ProductoFirestore(
-            id = "1",
-            nombre = "Papas Adobadas Delisa 45g",
-            marca = "Delisa",
-            categoria = "Botanas",
-            subcategoria = "Mix",
-            descripcion = "Botana deliciosa",
-            precio = 13.0,
-            imagenUrl = ""
-        ),
-        ProductoFirestore(
-            id = "2",
-            nombre = "Salchicha Viena El Cazador",
-            marca = "El Cazador",
-            categoria = "Carnes frías",
-            subcategoria = "Salchicha",
-            descripcion = "Salchicha premium",
-            precio = 45.5,
-            imagenUrl = ""
-        )
+        ProductoFirestore("1", "Papas Adobadas", "Delisa", "Botanas", "", "Botana", 13.0, ""),
+        ProductoFirestore("2", "Salchicha Viena", "El Cazador", "Carnes frías", "", "Salchicha", 45.5, "")
     )
-
-    MaterialTheme {
+    DeliveryTheme {
         ListaProductosScreen(
             navController = rememberNavController(),
             previewProductos = productosFalsos
