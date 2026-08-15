@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -282,9 +283,16 @@ fun MapaScreen(
                         shape = RoundedCornerShape(16.dp), 
                         colors = CardDefaults.cardColors(containerColor = cardBg)
                     ) {
-                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.LocalShipping, null, tint = if (activo) Color.White else DelisaRed, modifier = Modifier.size(tamIconoRuta))
-                            Spacer(Modifier.width(6.dp)); Text(text = v.ruta.replace(" Delisa", ""), fontSize = tamTextoRuta, fontWeight = FontWeight.Black, color = textTint)
+                            Spacer(Modifier.width(6.dp)); Text(
+                                text = v.ruta.replace(" Delisa", ""), 
+                                fontSize = tamTextoRuta, 
+                                fontWeight = FontWeight.Bold, 
+                                color = textTint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }
@@ -301,7 +309,12 @@ fun MapaScreen(
                     ) {
                         Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.MyLocation, null, tint = if (activo) Color.White else DelisaRed, modifier = Modifier.size(tamIconoRuta))
-                            Spacer(Modifier.width(6.dp)); Text(text = "MI RUTA", fontSize = tamTextoRuta, fontWeight = FontWeight.Black, color = textTint)
+                            Spacer(Modifier.width(6.dp)); Text(
+                                text = "MI RUTA", 
+                                fontSize = tamTextoRuta, 
+                                fontWeight = FontWeight.Bold, 
+                                color = textTint
+                            )
                         }
                     }
                 }
@@ -350,7 +363,9 @@ fun MapaScreen(
             )
 
             Surface(
-                modifier = Modifier.shadow(if (activo) 8.dp else 4.dp, RoundedCornerShape(24.dp)),
+                modifier = Modifier
+                    .widthIn(max = (screenWidth - 130).dp)
+                    .shadow(if (activo) 8.dp else 4.dp, RoundedCornerShape(24.dp)),
                 shape = RoundedCornerShape(24.dp),
                 color = bgColor,
                 contentColor = contentColor,
@@ -361,7 +376,7 @@ fun MapaScreen(
                     Row(
                         modifier = Modifier
                             .clickable { viewModel.toggleMarkersVisible() }
-                            .padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+                            .padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (uiState.isLoading) {
@@ -374,14 +389,14 @@ fun MapaScreen(
                             Icon(
                                 imageVector = if (activo) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                                 contentDescription = null,
-                                modifier = Modifier.size(if (esPantallaPequena) 16.dp else 18.dp)
+                                modifier = Modifier.size(if (esPantallaPequena) 15.dp else 17.dp)
                             )
                         }
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            text = if (activo) "CLIENTES: ${uiState.clientes.size}" else "MOSTRAR CLIENTES",
-                            fontWeight = FontWeight.Black,
-                            fontSize = if (esPantallaPequena) 10.sp else 12.sp,
+                            text = if (activo) "CLIENTES: ${uiState.clientes.size}" else "CLIENTES",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (esPantallaPequena) 9.sp else 11.sp,
                             letterSpacing = 0.5.sp
                         )
                     }
@@ -394,70 +409,97 @@ fun MapaScreen(
                         Box(
                             modifier = Modifier
                                 .clickable { showRouteMenu = !showRouteMenu }
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = if (showRouteMenu) Icons.Default.Close else Icons.Default.Search,
                                 contentDescription = "Filtrar",
-                                modifier = Modifier.size(if (esPantallaPequena) 16.dp else 18.dp)
+                                modifier = Modifier.size(if (esPantallaPequena) 15.dp else 17.dp)
                             )
+
+                            // 🔍 MENÚ DE RUTAS FLOTANTE (ULTRA COMPACTO)
+                            DropdownMenu(
+                                expanded = showRouteMenu && esAdminEfectivo && uiState.listaRutas.size > 1,
+                                onDismissRequest = { showRouteMenu = false },
+                                modifier = Modifier
+                                    .width(IntrinsicSize.Max)
+                                    .shadow(elevation = 8.dp, shape = RoundedCornerShape(12.dp))
+                                    .background(if (isDark) MaterialTheme.colorScheme.surface else Color.White),
+                                offset = androidx.compose.ui.unit.DpOffset(x = (0).dp, y = (4).dp),
+                                scrollState = rememberScrollState()
+                            ) {
+                                uiState.listaRutas.forEach { ruta ->
+                                    val selected = uiState.filtroRuta == ruta
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = ruta.replace("Todas las Rutas", "TODOS").replace(" Delisa", "").uppercase(),
+                                                fontSize = 11.sp,
+                                                fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
+                                                color = if (selected) DelisaRed else if (isDark) Color.White else Color.Black,
+                                                letterSpacing = 0.sp
+                                            )
+                                        },
+                                        onClick = {
+                                            viewModel.actualizarFiltroRuta(ruta)
+                                            showRouteMenu = false
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                        modifier = Modifier.heightIn(min = 28.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            // 🔍 FILTRO DE RUTAS VERTICAL - INTEGRACIÓN TOTAL
+            // 📊 RESUMEN DE CATEGORÍAS (Solo si están activos los clientes)
+            val listaActualResumen = if (uiState.modoHojaRuta) uiState.clientesRuta else uiState.clientes
+            val vCount = listaActualResumen.count { it.valor.lowercase().trim() == "alto" }
+            val aCount = listaActualResumen.count { it.valor.lowercase().trim() == "medio" }
+            val rCount = listaActualResumen.count { it.valor.lowercase().trim() == "bajo" }
+
             AnimatedVisibility(
-                visible = showRouteMenu && esAdminEfectivo && uiState.listaRutas.size > 1,
-                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
+                visible = activo && listaActualResumen.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
             ) {
                 Surface(
-                    color = if (isDark) DelisaRed.copy(alpha = 0.75f) else DelisaRed.copy(alpha = 0.95f),
-                    shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                    shadowElevation = 4.dp,
-                    modifier = Modifier
-                        .offset(y = (-10).dp)
-                        .width(IntrinsicSize.Max)
+                    modifier = Modifier.padding(top = 6.dp).shadow(4.dp, RoundedCornerShape(12.dp)),
+                    color = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.95f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.05f))
                 ) {
-                    Column(
-                        modifier = Modifier.padding(top = 10.dp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        uiState.listaRutas.forEachIndexed { index, ruta ->
-                            val selected = uiState.filtroRuta == ruta
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { 
-                                        viewModel.actualizarFiltroRuta(ruta)
-                                        showRouteMenu = false // Cerrar al seleccionar
-                                    }
-                                    .background(if (selected) Color.White.copy(alpha = 0.25f) else Color.Transparent)
-                                    .padding(horizontal = 24.dp, vertical = 2.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = ruta.replace("Todas las Rutas", "TODOS").replace(" Delisa", "").uppercase(),
-                                    fontSize = 10.sp,
-                                    fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
-                                    color = Color.White,
-                                    letterSpacing = 0.5.sp,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                            if (index < uiState.listaRutas.size - 1) {
-                                HorizontalDivider(
-                                    thickness = 0.5.dp,
-                                    color = Color.White.copy(alpha = 0.2f),
-                                    modifier = Modifier.padding(horizontal = 12.dp)
-                                )
-                            }
+                        // VERDE (ALTO)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(8.dp).background(DelisaGreen, CircleShape))
+                            Spacer(Modifier.width(4.dp))
+                            Text(text = "$vCount", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        // AMARILLO (MEDIO)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(8.dp).background(WarningOrange, CircleShape))
+                            Spacer(Modifier.width(4.dp))
+                            Text(text = "$aCount", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        // ROJO (BAJO)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(8.dp).background(DelisaRed, CircleShape))
+                            Spacer(Modifier.width(4.dp))
+                            Text(text = "$rCount", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
+
+
         }
 
         // 📍 BOTÓN MI UBICACIÓN

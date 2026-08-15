@@ -228,6 +228,8 @@ class VentaViewModel(
     }
 
     fun actualizarRangoFechas(inicio: Long, fin: Long) {
+        if (_fechaInicioFiltro.value == inicio && _fechaFinFiltro.value == fin) return
+        
         _uiState.update { it.copy(cargandoDashboard = true) }
         _fechaInicioFiltro.value = inicio
         _fechaFinFiltro.value = fin

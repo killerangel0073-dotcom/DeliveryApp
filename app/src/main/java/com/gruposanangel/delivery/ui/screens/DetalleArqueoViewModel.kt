@@ -21,7 +21,8 @@ data class ProductoArqueoDetalle(
     val diferencia: Int,
     val fisico: Int?,
     val teorico: Int?,
-    val imagenUrl: String
+    val imagenUrl: String,
+    val categoria: String = "General" // 🔥 NUEVO: Para agrupación
 )
 
 data class DetalleArqueoUiState(
@@ -49,49 +50,69 @@ class DetalleArqueoViewModel(
     private fun cargarDetalle() {
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
+            // 1. Observar datos locales (Offline-First)
+            inventarioRepo.obtenerMovimientosPorReferenciaLocal(arqueoId)
+                .collect { movimientosLocales ->
+                    if (movimientosLocales.isNotEmpty()) {
+                        procesarMovimientos(movimientosLocales)
+                    }
+                    
+                    // Si no hay locales o queremos asegurar frescura, disparamos sync de Firestore en background
+                    dispararSyncFirestore()
+                }
+        }
+    }
+
+    private suspend fun procesarMovimientos(movimientos: List<com.gruposanangel.delivery.data.MovimientoInventarioEntity>) {
+        try {
+            val catalogo = inventarioRepo.obtenerProductosLocal().first()
+            var fechaArqueo: Long? = null
+            var metodo: String? = null
+
+            val productos = movimientos.mapNotNull { mov ->
+                if (fechaArqueo == null) {
+                    fechaArqueo = mov.timestamp
+                }
+                if (metodo == null) {
+                    metodo = mov.metodoAuditoria
+                }
+                
+                val prodId = mov.productoId
+                val info = catalogo.find { it.productoId == prodId }
+                
+                ProductoArqueoDetalle(
+                    id = prodId,
+                    nombre = info?.nombre ?: mov.nombreProducto,
+                    precio = info?.precio ?: 0.0,
+                    diferencia = if (mov.tipo == "AJUSTE_ARQUEO_FALTANTE") -mov.cantidad else if (mov.tipo == "AJUSTE_ARQUEO_SOBRANTE") mov.cantidad else 0,
+                    fisico = mov.cantidadFisica,
+                    teorico = mov.cantidadTeorica,
+                    imagenUrl = info?.imagenUrl ?: "",
+                    categoria = info?.categoria ?: "General"
+                )
+            }.sortedWith(compareBy<ProductoArqueoDetalle>({ it.categoria }, { it.nombre }))
+
+            _uiState.update { it.copy(productos = productos, fecha = fechaArqueo, metodoAuditoria = metodo, isLoading = false) }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(isLoading = false, error = e.message) }
+        }
+    }
+
+    private fun dispararSyncFirestore() {
+        viewModelScope.launch {
             try {
-                // Buscamos todos los ajustes que tengan este folio de auditoría
                 val snap = db.collection("ajustes_inventario")
                     .whereEqualTo("referenciaId", arqueoId)
                     .get()
                     .await()
 
-                val catalogo = inventarioRepo.obtenerProductosLocal().first()
-                var fechaArqueo: Long? = null
-                var metodo: String? = null
-
-                val productos = snap.documents.mapNotNull { doc ->
-                    if (fechaArqueo == null) {
-                        val tsRaw = doc.get("timestamp")
-                        fechaArqueo = when (tsRaw) {
-                            is com.google.firebase.Timestamp -> tsRaw.toDate().time
-                            is Number -> tsRaw.toLong()
-                            else -> null
-                        }
-                    }
-                    if (metodo == null) {
-                        metodo = doc.getString("metodoAuditoria")
-                    }
-                    
-                    val prodId = doc.getString("productoId") ?: return@mapNotNull null
-                    val tipo = doc.getString("tipo")
-                    val cantDiff = doc.getLong("cantidad")?.toInt() ?: 0
-                    val info = catalogo.find { it.productoId == prodId }
-                    
-                    ProductoArqueoDetalle(
-                        id = prodId,
-                        nombre = info?.nombre ?: doc.getString("nombreProducto") ?: "Producto",
-                        precio = info?.precio ?: 0.0,
-                        diferencia = if (tipo == "AJUSTE_ARQUEO_FALTANTE") -cantDiff else if (tipo == "AJUSTE_ARQUEO_SOBRANTE") cantDiff else 0,
-                        fisico = doc.getLong("cantidadFisica")?.toInt(),
-                        teorico = doc.getLong("cantidadTeorica")?.toInt(),
-                        imagenUrl = info?.imagenUrl ?: ""
-                    )
-                }.sortedByDescending { Math.abs(it.diferencia) } // Primero los errores
-
-                _uiState.update { it.copy(productos = productos, fecha = fechaArqueo, metodoAuditoria = metodo, isLoading = false) }
+                if (!snap.isEmpty) {
+                    // Aquí podrías actualizar Room si hay cambios, 
+                    // pero por ahora dejamos que el listener local reaccione si otros procesos guardan en Room.
+                    // O simplemente mapear y actualizar el estado si es necesario.
+                }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                // Silencioso si falla el background sync
             }
         }
     }

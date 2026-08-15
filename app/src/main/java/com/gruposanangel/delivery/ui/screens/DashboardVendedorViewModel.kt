@@ -50,7 +50,9 @@ data class DashboardVendedorUiState(
     val comisionPctConfig: Double = 3.0,
     val perfilesVenta: List<com.gruposanangel.delivery.data.PerfilVenta> = emptyList(),
     val ventasPorPerfil: List<PerfilBreakdown> = emptyList(),
-    val fechaFiltroDiario: Long = System.currentTimeMillis(), // 🔥 Nueva: Filtro para la tarjeta principal
+    val fechaInicio: Long = 0L, // 🔥 Inicializar en 0 para disparar carga por defecto
+    val fechaFin: Long = 0L,
+    val numDiasFiltro: Int = 1,
     val error: String? = null
 )
 
@@ -159,8 +161,38 @@ class DashboardVendedorViewModel(
         }
     }
 
-    fun actualizarFechaFiltro(nuevaFecha: Long) {
-        _uiState.update { it.copy(fechaFiltroDiario = nuevaFecha) }
+    fun actualizarRangoFechas(inicio: Long, fin: Long) {
+        if (_uiState.value.fechaInicio == inicio && _uiState.value.fechaFin == fin) return
+        
+        val calStart = Calendar.getInstance().apply { timeInMillis = inicio; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
+        val calEnd = Calendar.getInstance().apply { timeInMillis = fin; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
+        var dias = 0
+        while (!calStart.after(calEnd)) { dias++; calStart.add(Calendar.DAY_OF_YEAR, 1) }
+        
+        _uiState.update { it.copy(
+            fechaInicio = inicio, 
+            fechaFin = fin, 
+            numDiasFiltro = if (dias <= 0) 1 else dias,
+            isLoading = true 
+        ) }
+    }
+
+    fun resetFiltro() {
+        val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal().takeIf { it > 1000000L } ?: System.currentTimeMillis()
+        val cal = Calendar.getInstance().apply { timeInMillis = ahoraReal; set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
+        val inicio = cal.timeInMillis
+        cal.set(Calendar.HOUR_OF_DAY, 23); cal.set(Calendar.MINUTE, 59); cal.set(Calendar.SECOND, 59); cal.set(Calendar.MILLISECOND, 999)
+        val fin = cal.timeInMillis
+        
+        val yaEsHoy = _uiState.value.fechaInicio == inicio && _uiState.value.fechaFin == fin
+        if (yaEsHoy) return
+        
+        _uiState.update { it.copy(
+            fechaInicio = inicio, 
+            fechaFin = fin, 
+            numDiasFiltro = 1,
+            isLoading = true
+        ) }
     }
 
     private fun cargarDatosPerfil() {
@@ -355,7 +387,7 @@ class DashboardVendedorViewModel(
     private fun observarVentasReactivo() {
         _uiState.update { it.copy(isLoading = true) }
         
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             val ahoraReal = com.gruposanangel.delivery.utilidades.TimeManager.getHoraReal()
             
             // Definimos el inicio del bloque (4 semanas atrás) basado SIEMPRE en ahoraReal
@@ -375,7 +407,14 @@ class DashboardVendedorViewModel(
             calSem.set(Calendar.HOUR_OF_DAY, 0); calSem.set(Calendar.MINUTE, 0); calSem.set(Calendar.SECOND, 0); calSem.set(Calendar.MILLISECOND, 0)
             val iniSemanaReal = calSem.timeInMillis
 
-            usuarioRepository.getUsuarioActual().flatMapLatest { usuario ->
+            usuarioRepository.getUsuarioActual()
+                .distinctUntilChanged { old, new -> 
+                    old?.uid == new?.uid && 
+                    old?.ultimoAlmacenNombre == new?.ultimoAlmacenNombre &&
+                    old?.ultimaRutaNombre == new?.ultimaRutaNombre &&
+                    old?.perfilesVentaJson == new?.perfilesVentaJson
+                }
+                .flatMapLatest { usuario ->
                 val almid = usuario?.ultimoAlmacenNombre ?: ""
                 val rNom = usuario?.ultimaRutaNombre ?: ""
                 val rId = usuario?.ultimaRutaId ?: ""
@@ -394,14 +433,22 @@ class DashboardVendedorViewModel(
                     },
                     
                     inventarioRepository.obtenerProductosLocal(),
-                    _uiState.map { it.fechaFiltroDiario }.distinctUntilChanged()
-                ) { todasLasVentas, todosLosGastos, detallesBloque, catalog, fechaFiltro ->
+                    _uiState.map { it.fechaInicio to it.fechaFin }.distinctUntilChanged()
+                ) { todasLasVentas, todosLosGastos, detallesBloque, catalog, rango ->
                     
-                    // 📅 Cálculo del inicio y fin del día filtrado
-                    val calFiltro = Calendar.getInstance().apply { timeInMillis = fechaFiltro }
-                    calFiltro.set(Calendar.HOUR_OF_DAY, 0); calFiltro.set(Calendar.MINUTE, 0); calFiltro.set(Calendar.SECOND, 0); calFiltro.set(Calendar.MILLISECOND, 0)
-                    val iniDiaFiltrado = calFiltro.timeInMillis
-                    val finDiaFiltrado = iniDiaFiltrado + 86400000 - 1
+                    val iniDiaFiltrado: Long
+                    val finDiaFiltrado: Long
+
+                    if (rango.first == 0L || rango.second == 0L) {
+                        // 📅 Lógica por defecto para "Hoy" si no hay filtro establecido
+                        val calFiltro = Calendar.getInstance().apply { timeInMillis = ahoraReal }
+                        calFiltro.set(Calendar.HOUR_OF_DAY, 0); calFiltro.set(Calendar.MINUTE, 0); calFiltro.set(Calendar.SECOND, 0); calFiltro.set(Calendar.MILLISECOND, 0)
+                        iniDiaFiltrado = calFiltro.timeInMillis
+                        finDiaFiltrado = iniDiaFiltrado + 86400000 - 1
+                    } else {
+                        iniDiaFiltrado = rango.first
+                        finDiaFiltrado = rango.second
+                    }
 
                     val catalogMap = catalog.associate { it.productoId to (it.marca to it.categoria) }
 

@@ -24,7 +24,9 @@ data class MovimientosUiState(
     val cantidades: Map<String, Int> = emptyMap(),
     val isAlmacenRole: Boolean = false,
     val isAdmin: Boolean = false,
-    val editOrderId: String? = null
+    val editOrderId: String? = null,
+    val loadingMessage: String? = null, // 🔥 NUEVO: Para mensajes contextuales
+    val mostrarDialogoExito: Boolean = false // 🔥 NUEVO: Para flujo de salida
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -38,6 +40,7 @@ class MovimientosViewModel(
     val uiState: StateFlow<MovimientosUiState> = _uiState.asStateFlow()
 
     private val _almacenSeleccionado = MutableStateFlow<String?>(null)
+    private var timeoutJob: kotlinx.coroutines.Job? = null // 🔥 Para evitar carga infinita
 
     val catalogoProductos: StateFlow<List<Plantilla_Producto>> = inventarioRepo.obtenerProductosLocal()
         .map { entities ->
@@ -66,11 +69,27 @@ class MovimientosViewModel(
             .filter { it != "Selecciona Origen" }
             .flatMapLatest { almacen ->
                 val almacenConsultar = if (almacen == "Compra Producto") "Almacen Huasteca" else almacen
+                
+                // 🔥 Iniciar Timer de Seguridad: Si en 12s no hay datos, apagar cargador
+                timeoutJob?.cancel()
+                timeoutJob = viewModelScope.launch {
+                    kotlinx.coroutines.delay(12000)
+                    if (_uiState.value.isLoading) {
+                        _uiState.update { it.copy(isLoading = false, error = "No se pudo conectar con el almacén. Revisa tu internet.") }
+                    }
+                }
+
                 inventarioRepo.obtenerStockAlmacenFlow(almacenConsultar)
-                    .onStart { _uiState.update { it.copy(isLoading = true) } }
-                    .catch { e -> _uiState.update { it.copy(isLoading = false, error = e.message) } }
+                    .onStart { 
+                        _uiState.update { it.copy(isLoading = true, loadingMessage = "Descargando stock de $almacenConsultar...") } 
+                    }
+                    .catch { e -> 
+                        timeoutJob?.cancel()
+                        _uiState.update { it.copy(isLoading = false, error = e.message) } 
+                    }
             }
             .onEach { stock ->
+                timeoutJob?.cancel()
                 _uiState.update { it.copy(stockOrigen = stock, isLoading = false) }
             }
             .launchIn(viewModelScope)
@@ -242,7 +261,7 @@ class MovimientosViewModel(
 
     fun crearOrden(origen: String, destino: String, productosSeleccionados: List<Plantilla_Producto>, cantidades: Map<String, Int>, onSuccess: (String) -> Unit) {
         if (_uiState.value.isLoading) return // 🔥 CANDADO: Evitar múltiples clics
-        _uiState.update { it.copy(isLoading = true) }
+        _uiState.update { it.copy(isLoading = true, loadingMessage = "Enviando carga a la nube...") }
         viewModelScope.launch {
             try {
                 val state = _uiState.value
@@ -295,7 +314,7 @@ class MovimientosViewModel(
                 }
 
                 limpiarCantidades()
-                _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true, editOrderId = null) }
+                _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true, mostrarDialogoExito = true, editOrderId = null) }
                 onSuccess(finalOrderId)
             } catch (e: Exception) { 
                 _uiState.update { it.copy(isLoading = false, error = e.message) } 
@@ -305,7 +324,7 @@ class MovimientosViewModel(
 
     fun confirmarCargaDirecta(origen: String, destino: String, productosSeleccionados: List<Plantilla_Producto>, cantidades: Map<String, Int>, onSuccess: () -> Unit) {
         if (_uiState.value.isLoading) return // 🔥 CANDADO: Evitar múltiples clics
-        _uiState.update { it.copy(isLoading = true) }
+        _uiState.update { it.copy(isLoading = true, loadingMessage = "Procesando carga directa...") }
         viewModelScope.launch {
             try {
                 val user = usuarioRepo.obtenerUsuarioActual()
@@ -329,7 +348,7 @@ class MovimientosViewModel(
                     inventarioRepo.registrarMovimientoCarga(movimiento, p.copy(cantidad = cant))
                 }
                 limpiarCantidades()
-                _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true) }
+                _uiState.update { it.copy(isLoading = false, ordenCreadaExito = true, mostrarDialogoExito = true) }
                 onSuccess()
             } catch (e: Exception) { _uiState.update { it.copy(isLoading = false, error = e.message) } }
         }

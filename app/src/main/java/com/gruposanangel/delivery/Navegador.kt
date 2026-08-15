@@ -97,12 +97,7 @@ fun Navegador(
         }
 
         composable("DETALLE_CARGA") {
-            val plantilacarga = navController
-                .previousBackStackEntry
-                ?.savedStateHandle
-                ?.get<Plantila_carga>("carga")
-
-            PantallaDetalleCarga(navController, plantilacarga)
+            PantallaDetalleCarga(navController)
         }
 
         composable("DETALLE_ARQUEO") {
@@ -276,6 +271,7 @@ fun Navegador(
             val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
             val viewModel: DashboardVendedorViewModel = viewModel(
+                key = "Dashboard_$uid",
                 factory = object : androidx.lifecycle.ViewModelProvider.Factory {
                     override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = 
                         DashboardVendedorViewModel(ventaRepo, usuarioRepo, inventarioRepo, gastoRepo, uid) as T

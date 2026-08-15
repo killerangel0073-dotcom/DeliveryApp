@@ -1,6 +1,7 @@
 package com.gruposanangel.delivery.ui.screens
 
 import android.widget.Toast
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -67,14 +68,16 @@ data class Notificacion(
     val titulo: String,
     val mensaje: String,
     val fecha: String,
-    val timestamp: Long = 0L, // Para ordenamiento correcto
+    val timestamp: Long = 0L,
     val esCarga: Boolean = false,
     val aceptada: Boolean = false,
     val estado: String = "PENDIENTE",
-    val monto: Double = 0.0, // 🔥 NUEVO: Para ver el valor de la carga
-    val motivo: String? = null, // 🔥 NUEVO: Para el motivo de cancelación
-    val esEmergencia: Boolean = false, // 🔥 NUEVO
-    val esLiquidacion: Boolean = false // 🔥 NUEVO
+    val monto: Double = 0.0,
+    val diferenciaDinero: Double = 0.0, // 🔥 NUEVO
+    val totalPiezas: Int = 0,           // 🔥 NUEVO
+    val motivo: String? = null,
+    val esEmergencia: Boolean = false,
+    val esLiquidacion: Boolean = false
 )
 
 /**
@@ -195,29 +198,28 @@ fun PantallaNotificacionesContent(
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (uiState.isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = DelisaRed, strokeWidth = 3.dp)
-                        Spacer(Modifier.height(12.dp))
-                        Text("Sincronizando...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            } else if (uiState.notificaciones.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Notifications, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                        Spacer(Modifier.height(16.dp))
-                        Text("Sin notificaciones en este periodo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(onClick = { showRangePicker.value = true }) {
-                            Text("Cambiar fechas", color = DelisaRed)
+            // 🔥 TRANSICIÓN FLUIDA: Skeleton -> Contenido Real
+            Crossfade(targetState = uiState.isLoading, label = "notifContentTransition") { isLoading ->
+                if (isLoading) {
+                    NotificacionesSkeleton()
+                } else {
+                    if (uiState.notificaciones.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.Notifications, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                                Spacer(Modifier.height(16.dp))
+                                Text("Sin notificaciones en este periodo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                TextButton(onClick = { showRangePicker.value = true }) {
+                                    Text("Cambiar fechas", color = DelisaRed)
+                                }
+                            }
                         }
-                    }
-                }
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    items(uiState.notificaciones, key = { it.id }) { noti ->
-                        NotificacionItem(noti) { onItemClick(noti) }
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            items(uiState.notificaciones, key = { it.id }) { noti ->
+                                NotificacionItem(noti) { onItemClick(noti) }
+                            }
+                        }
                     }
                 }
             }
@@ -301,21 +303,23 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.98f else 1f,
-        label = "scale"
-    )
-
+    val scale by animateFloatAsState(targetValue = if (isPressed) 0.96f else 1f, animationSpec = spring(0.6f, 300f), label = "")
+    
     val esCancelada = noti.estado == "CANCELADA"
     val esAceptada = noti.aceptada && !esCancelada
+    val esLiquidacion = noti.esLiquidacion || noti.titulo.contains("LIQUIDACIÓN")
+    val esArqueo = !noti.esCarga || noti.titulo.contains("AUDITORÍA") || noti.titulo.contains("ARQUEO")
     
     val statusColor = when {
-        esCancelada -> WarningOrange
+        esCancelada -> Color.Gray
+        esLiquidacion -> MaterialTheme.colorScheme.onSurface
         noti.esEmergencia -> DelisaRed
-        noti.esLiquidacion -> Color.Black
-        noti.esCarga -> DelisaBlue
-        else -> WarningOrange // Arqueo por defecto
+        noti.esCarga -> if (esAceptada) DelisaGreen else DelisaRed
+        esArqueo -> WarningOrange
+        else -> MaterialTheme.colorScheme.onSurfaceVariant 
     }
+
+    val formatoMoneda = remember { NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX")) }
 
     Card(
         modifier = Modifier
@@ -325,135 +329,145 @@ fun NotificacionItem(noti: Notificacion, onClick: () -> Unit) {
                 scaleY = scale 
                 alpha = if (esCancelada) 0.8f else 1f
             }
-            .shadow(if (isPressed) 2.dp else 4.dp, RoundedCornerShape(20.dp))
+            .shadow(if (isPressed) 1.dp else 4.dp, RoundedCornerShape(24.dp))
             .border(
-                width = if (esAceptada && !noti.esEmergencia && !noti.esLiquidacion) 0.dp else 1.5.dp,
-                color = if (esAceptada && !noti.esEmergencia && !noti.esLiquidacion) Color.Transparent else statusColor.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(20.dp)
+                width = if (esLiquidacion) 1.5.dp else if (!esAceptada && noti.esCarga) 2.dp else 1.dp,
+                color = statusColor.copy(alpha = if (!esAceptada && noti.esCarga || esLiquidacion) 0.4f else 0.2f),
+                shape = RoundedCornerShape(24.dp)
             )
             .clickable(
-                interactionSource = interactionSource,
-                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = statusColor),
+                interactionSource = interactionSource, 
+                indication = androidx.compose.material.ripple.rememberRipple(bounded = true, color = statusColor.copy(alpha = 0.1f)), 
                 onClick = onClick
-            ),
-        shape = RoundedCornerShape(20.dp),
+            ), 
+        shape = RoundedCornerShape(24.dp), 
         colors = CardDefaults.cardColors(
-            containerColor = if (noti.esLiquidacion) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f) else MaterialTheme.colorScheme.surface
+            containerColor = when {
+                esCancelada -> MaterialTheme.colorScheme.surfaceVariant
+                else -> MaterialTheme.colorScheme.surface
+            }
         )
     ) {
-        Box {
-            // Barra de acento lateral
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Icono Circular
             Box(
                 modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .fillMaxHeight()
-                    .width(6.dp)
-                    .background(statusColor)
-            )
-
-            Row(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .padding(start = 12.dp) 
-                    .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(statusColor.copy(0.08f))
+                    .border(0.5.dp, statusColor.copy(0.15f), CircleShape), 
+                contentAlignment = Alignment.Center
             ) {
-                // Icono Circular Dinámico
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(statusColor.copy(alpha = 0.1f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val icon = when {
-                        esCancelada -> Icons.Default.Cancel
+                Icon(
+                    imageVector = when {
                         noti.esEmergencia -> Icons.Default.FlashOn
-                        noti.esLiquidacion -> Icons.Default.Warehouse
-                        !noti.esCarga -> Icons.AutoMirrored.Filled.FactCheck
-                        esAceptada -> Icons.Default.CheckCircle
-                        else -> Icons.Default.Inventory
-                    }
-                    Icon(icon, null, tint = statusColor, modifier = Modifier.size(24.dp))
+                        esCancelada -> Icons.Default.Cancel
+                        esLiquidacion -> Icons.Default.Warehouse
+                        esArqueo -> Icons.AutoMirrored.Filled.FactCheck
+                        !esAceptada -> Icons.Default.Inventory
+                        else -> Icons.Default.CheckCircle
+                    }, 
+                    contentDescription = null, 
+                    tint = statusColor, 
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = noti.titulo, 
+                    fontWeight = if (!esAceptada && noti.esCarga) FontWeight.ExtraBold else FontWeight.Black,
+                    fontSize = 15.sp, 
+                    color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = noti.fecha, 
+                    fontSize = 11.sp, 
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, 
+                    maxLines = 1
+                )
+                
+                Spacer(Modifier.height(8.dp))
+                
+                // Etiqueta Unificada
+                val tagText = when {
+                    noti.esEmergencia -> "EMERGENCIA"
+                    esLiquidacion -> "LIQUIDACIÓN"
+                    esArqueo -> "ARQUEO"
+                    else -> "CARGA NORMAL"
                 }
-
-                Spacer(Modifier.width(16.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
+                val estadoVisible = if (esLiquidacion) "COMPLETADA" else noti.estado
+                val textoEtiqueta = if (estadoVisible.isNotBlank()) "$tagText • $estadoVisible" else tagText
+                
+                Surface(
+                    color = statusColor.copy(alpha = 0.08f), 
+                    shape = RoundedCornerShape(6.dp),
+                    border = BorderStroke(if (esLiquidacion) 1.dp else 0.5.dp, statusColor.copy(alpha = 0.15f))
+                ) { 
                     Text(
-                        text = noti.titulo.uppercase(),
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, letterSpacing = 1.sp),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    Spacer(Modifier.height(4.dp))
-
-                    Text(
-                        text = noti.mensaje,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (!esAceptada && !esCancelada) FontWeight.Bold else FontWeight.Normal,
-                            textDecoration = if (esCancelada) androidx.compose.ui.text.style.TextDecoration.LineThrough else null
-                        ),
-                        color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    if (esCancelada && !noti.motivo.isNullOrBlank()) {
-                        Text(
-                            text = "MOTIVO: ${noti.motivo}",
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                            color = DelisaRed.copy(alpha = 0.7f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    
-                    Spacer(Modifier.height(6.dp))
-
-                    // Etiqueta Unificada Estilo Historial
-                    val tagText = when {
-                        noti.esEmergencia -> "EMERGENCIA"
-                        noti.esLiquidacion -> "LIQUIDACIÓN"
-                        !noti.esCarga -> "ARQUEO"
-                        else -> "CARGA NORMAL"
-                    }
-                    val estadoVisible = if (noti.esLiquidacion) "COMPLETADA" else noti.estado
-                    
-                    // 🔥 Blindaje visual: Solo poner el punto si el estado no está en blanco
-                    val textoEtiqueta = if (estadoVisible.isNotBlank()) {
-                        "$tagText • $estadoVisible"
-                    } else {
-                        tagText
-                    }
-                    
-                    Surface(
-                        color = statusColor.copy(alpha = 0.08f),
-                        shape = RoundedCornerShape(6.dp),
-                        border = BorderStroke(0.5.dp, statusColor.copy(alpha = 0.15f))
-                    ) {
-                        Text(
-                            text = textoEtiqueta.uppercase(),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (esCancelada) Color.Gray else statusColor,
-                            letterSpacing = 0.5.sp
-                        )
-                    }
-
-                    if (noti.monto > 0) {
-                        val formatoMoneda = remember { NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX")) }
-                        Text(
-                            text = formatoMoneda.format(noti.monto),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else DelisaRed,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
+                        text = textoEtiqueta.uppercase(), 
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), 
+                        fontSize = 9.sp, 
+                        fontWeight = FontWeight.Black, 
+                        color = if (esCancelada) Color.Gray else statusColor, 
+                        maxLines = 1,
+                        letterSpacing = 0.5.sp
+                    ) 
                 }
             }
+
+            Spacer(Modifier.width(8.dp))
+
+            Column(horizontalAlignment = Alignment.End, modifier = Modifier.widthIn(min = 75.dp)) {
+                // Cantidad de piezas/productos
+                Text(
+                    text = "${noti.totalPiezas} pzas", 
+                    fontWeight = FontWeight.Bold, 
+                    fontSize = 12.sp, 
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+                
+                // Monto Principal
+                if (noti.monto > 0 || esArqueo) {
+                    Text(
+                        text = formatoMoneda.format(noti.monto), 
+                        fontWeight = FontWeight.Black, 
+                        fontSize = 16.sp, 
+                        color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Diferencia (Solo Arqueos/Liquidaciones)
+                if (esArqueo) {
+                    val colorDif = when {
+                        noti.diferenciaDinero < 0 -> DelisaRed
+                        noti.diferenciaDinero > 0 -> DelisaBlue
+                        else -> DelisaGreenDark
+                    }
+                    val prefijo = if (noti.diferenciaDinero > 0) "Dif: +" else "Dif: "
+                    Text(
+                        text = prefijo + formatoMoneda.format(noti.diferenciaDinero), 
+                        fontSize = 10.sp, 
+                        fontWeight = FontWeight.ExtraBold, 
+                        color = if (esCancelada) Color.Gray else colorDif,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Icon(
+                imageVector = Icons.Default.ChevronRight, 
+                contentDescription = null, 
+                tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), 
+                modifier = Modifier.padding(start = 8.dp).size(20.dp)
+            )
         }
     }
 }
@@ -505,6 +519,27 @@ fun DialogoAutorizacionEmergencia(
         shape = RoundedCornerShape(24.dp),
         containerColor = MaterialTheme.colorScheme.surface
     )
+}
+
+@Composable
+fun NotificacionesSkeleton() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        val skeletonColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+        repeat(6) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(100.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(skeletonColor)
+            )
+        }
+    }
 }
 
 @Preview(showBackground = true, showSystemUi = true, name = "Notificaciones")

@@ -358,18 +358,40 @@ class ArqueoViewModel(
                 }
 
                 val autorizador = userQuery.documents.first().getString("nombre") ?: "Administrador"
+                val arqueoId = "AUDIT_ARQUEO_${java.util.UUID.randomUUID()}"
+                val ts = System.currentTimeMillis()
 
-                // 1. ACTUALIZAR STOCK REAL EN FIREBASE (Como es supervisor, impactamos la nube directamente)
+                // 1. GENERAR AJUSTES DE INVENTARIO (Delegar a Cloud Function)
                 val batch = db.batch()
                 val almacen = _uiState.value.almacenAuditado
                 
                 _uiState.value.productosArqueo.forEach { p ->
-                    val cantFinal = p.stockReal.toIntOrNull() ?: p.stockTeorico
-                    val stockRef = db.collection("inventarioStock").document("${p.id}_$almacen")
-                    batch.update(stockRef, "cantidad", cantFinal)
+                    val fisico = p.stockReal.toIntOrNull() ?: p.stockTeorico
+                    val teorico = p.stockTeorico
+                    val diferencial = fisico - teorico
+
+                    if (diferencial != 0) {
+                        val tipoAjuste = if (diferencial > 0) "AJUSTE_ARQUEO_SOBRANTE" else "AJUSTE_ARQUEO_FALTANTE"
+                        val movId = java.util.UUID.randomUUID().toString()
+                        
+                        val dataMov = mapOf(
+                            "productoId" to p.id,
+                            "nombreProducto" to p.nombre,
+                            "cantidad" to Math.abs(diferencial),
+                            "cantidadFisica" to fisico,
+                            "cantidadTeorica" to teorico,
+                            "tipo" to tipoAjuste,
+                            "vendedorId" to vendedorId,
+                            "almacenNombre" to almacen,
+                            "timestamp" to ts,
+                            "referenciaId" to arqueoId,
+                            "metodoAuditoria" to "ARQUEO_SUPERVISOR"
+                        )
+                        batch.set(db.collection("ajustes_inventario").document(movId), dataMov)
+                    }
                     
-                    // También actualizar Room por si el supervisor usa el app para otras cosas
-                    productoDao.updateCantidadDisponible("${p.id}_$almacen", cantFinal)
+                    // Actualizar Room localmente para reflejar el cambio inmediato en la UI del supervisor
+                    productoDao.updateCantidadDisponible("${p.id}_$almacen", fisico)
                 }
 
                 // 2. GUARDAR REPORTE EN FIREBASE
@@ -378,6 +400,7 @@ class ArqueoViewModel(
                     "vendedorNombre" to _uiState.value.nombreVendedor,
                     "almacen" to almacen,
                     "fecha" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+                    "referenciaId" to arqueoId,
                     "autorizadoPor" to autorizador,
                     "piezasTeoricas" to _uiState.value.saldoTeoricoCalculado,
                     "piezasReales" to _uiState.value.productosArqueo.sumOf { it.stockReal.toIntOrNull() ?: 0 },

@@ -19,7 +19,8 @@ class RepositoryInventario(
     private val firebaseDataSource: FirebaseDataSource,
     private val productoDao: ProductoDao,
     private val ventaDao: VentaDao,
-    private val movimientoInventarioDao: MovimientoInventarioDao? = null
+    private val movimientoInventarioDao: MovimientoInventarioDao? = null,
+    private val ordenTransferenciaDao: OrdenTransferenciaDao? = null
 ) {
 
     private val firestore = FirebaseFirestore.getInstance()
@@ -457,6 +458,10 @@ class RepositoryInventario(
         }
     }
 
+    suspend fun actualizarEstadoOrdenLocal(id: String, estado: String) {
+        ordenTransferenciaDao?.actualizarEstado(id, estado)
+    }
+
     suspend fun registrarDobleMovimiento(
         tipoOperacion: String,
         productoEntra: Plantilla_Producto,
@@ -593,5 +598,148 @@ class RepositoryInventario(
             saldo[p.nombre] = p.cantidadDisponible
         }
         return saldo
+    }
+
+    // --- LÓGICA DE AUDITORÍA OFFLINE-FIRST ---
+
+    fun obtenerOrdenesLocal(vendedorId: String, inicio: Long, fin: Long): Flow<List<OrdenTransferenciaEntity>> {
+        return ordenTransferenciaDao?.obtenerOrdenesPorPeriodoFlow(vendedorId, inicio, fin) ?: flowOf(emptyList())
+    }
+
+    fun obtenerArqueosLocal(almacen: String, inicio: Long, fin: Long): Flow<List<MovimientoInventarioEntity>> {
+        return movimientoInventarioDao?.obtenerArqueosPeriodoFlow(almacen, inicio, fin) ?: flowOf(emptyList())
+    }
+
+    suspend fun obtenerDetallesOrdenLocal(ordenId: String): List<OrdenTransferenciaDetalleEntity> {
+        return ordenTransferenciaDao?.obtenerDetallesPorOrden(ordenId) ?: emptyList()
+    }
+
+    fun obtenerMovimientosPorReferenciaLocal(referenciaId: String): Flow<List<MovimientoInventarioEntity>> {
+        return movimientoInventarioDao?.obtenerMovimientosPorReferencia(referenciaId) ?: flowOf(emptyList())
+    }
+
+    suspend fun sincronizarOrdenesPeriodo(inicio: Long, fin: Long) {
+        try {
+            val snapshot = firestore.collection("ordenesTransferencia")
+                .whereGreaterThanOrEqualTo("timestamp", com.google.firebase.Timestamp(java.util.Date(inicio)))
+                .whereLessThanOrEqualTo("timestamp", com.google.firebase.Timestamp(java.util.Date(fin)))
+                .get().await()
+
+            snapshot.documents.forEach { doc ->
+                val data = doc.data ?: return@forEach
+                
+                // 🔥 LECTURA ROBUSTA: Soporta tanto Long como Timestamp de Firebase
+                val tsRaw = data["timestamp"]
+                val timestamp = when (tsRaw) {
+                    is Number -> tsRaw.toLong()
+                    is com.google.firebase.Timestamp -> tsRaw.toDate().time
+                    else -> 0L
+                }
+
+                if (timestamp == 0L) return@forEach // Ignorar si no tiene fecha válida
+
+                val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
+                val totalPiezas = productosRaw.sumOf { (it["cantidad"] as? Number)?.toInt() ?: 0 }
+                val montoTotal = productosRaw.sumOf { 
+                    ((it["cantidad"] as? Number)?.toInt() ?: 0) * ((it["precio"] as? Number)?.toDouble() ?: 0.0)
+                }
+
+                val orden = OrdenTransferenciaEntity(
+                    id = doc.id,
+                    origen = data["origen"] as? String ?: "",
+                    destino = data["destino"] as? String ?: "",
+                    estado = data["estado"] as? String ?: "PENDIENTE",
+                    timestamp = timestamp,
+                    esEmergencia = data["esEmergencia"] as? Boolean ?: false,
+                    metodoAuditoria = data["metodoAuditoria"] as? String,
+                    montoTotal = montoTotal,
+                    totalPiezas = totalPiezas
+                )
+
+                val detalles = productosRaw.map { p ->
+                    OrdenTransferenciaDetalleEntity(
+                        ordenId = doc.id,
+                        productoId = p["productoId"] as? String ?: "",
+                        nombre = p["nombre"] as? String ?: "",
+                        precio = (p["precio"] as? Number)?.toDouble() ?: 0.0,
+                        cantidad = (p["cantidad"] as? Number)?.toInt() ?: 0
+                    )
+                }
+
+                ordenTransferenciaDao?.insertarOrdenConDetalles(orden, detalles)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sincronizando órdenes: ${e.message}")
+        }
+    }
+
+    suspend fun sincronizarMovimientosPeriodo(inicio: Long, fin: Long, filtroVendedor: String = "Todos") {
+        try {
+            val tiposInteres = listOf("AJUSTE_ARQUEO_FALTANTE", "AJUSTE_ARQUEO_SOBRANTE", "AJUSTE_ARQUEO_OK", "LIQUIDACION")
+            
+            // 🔥 ESTRATEGIA ROBUSTA: Consultamos solo por rango de fecha para evitar requerir índices compuestos complejos.
+            // Esto replica la lógica que ya funciona con las Cargas.
+            val inicioTs = com.google.firebase.Timestamp(java.util.Date(inicio))
+            val finTs = com.google.firebase.Timestamp(java.util.Date(fin))
+
+            // 1. Consulta para registros con formato Timestamp (Nuevos)
+            val queryTS = firestore.collection("ajustes_inventario")
+                .whereGreaterThanOrEqualTo("timestamp", inicioTs)
+                .whereLessThanOrEqualTo("timestamp", finTs)
+                .get().await()
+
+            // 2. Consulta para registros con formato Long (Legacy/Offline)
+            val queryLong = firestore.collection("ajustes_inventario")
+                .whereGreaterThanOrEqualTo("timestamp", inicio)
+                .whereLessThanOrEqualTo("timestamp", fin)
+                .get().await()
+
+            val allDocs = (queryTS.documents + queryLong.documents).distinctBy { it.id }
+
+            Log.d(TAG, "📥 Sincronización: Se encontraron ${allDocs.size} movimientos totales en el periodo.")
+
+            allDocs.forEach { doc ->
+                val data = doc.data ?: return@forEach
+                
+                // Filtrado manual en Kotlin (No requiere índices en Firestore)
+                val tipo = data["tipo"] as? String ?: ""
+                val almacenDoc = data["almacenNombre"] as? String ?: ""
+                
+                // Si no es un arqueo/liquidación de los que buscamos, o no coincide el vendedor, ignoramos
+                if (!tiposInteres.contains(tipo)) return@forEach
+                if (filtroVendedor != "Todos" && almacenDoc != filtroVendedor) return@forEach
+
+                val tsRaw = data["timestamp"]
+                val timestamp = when (tsRaw) {
+                    is Number -> tsRaw.toLong()
+                    is com.google.firebase.Timestamp -> tsRaw.toDate().time
+                    else -> 0L
+                }
+
+                if (timestamp == 0L) return@forEach
+
+                val mov = MovimientoInventarioEntity(
+                    id = doc.id,
+                    productoId = data["productoId"] as? String ?: "",
+                    nombreProducto = data["nombreProducto"] as? String ?: "",
+                    cantidad = (data["cantidad"] as? Number)?.toInt() ?: 0,
+                    tipo = tipo,
+                    motivo = data["motivo"] as? String,
+                    vendedorId = data["vendedorId"] as? String ?: "",
+                    almacenNombre = almacenDoc,
+                    clienteId = data["clienteId"] as? String,
+                    timestamp = timestamp,
+                    referenciaId = data["referenciaId"] as? String ?: doc.id, 
+                    sincronizado = true,
+                    cantidadFisica = (data["cantidadFisica"] as? Number)?.toInt(),
+                    cantidadTeorica = (data["cantidadTeorica"] as? Number)?.toInt(),
+                    metodoAuditoria = data["metodoAuditoria"] as? String
+                )
+                movimientoInventarioDao?.insertarMovimiento(mov)
+            }
+            Log.d(TAG, "✅ Sincronización de movimientos completada satisfactoriamente.")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error crítico sincronizando movimientos: ${e.message}")
+        }
     }
 }

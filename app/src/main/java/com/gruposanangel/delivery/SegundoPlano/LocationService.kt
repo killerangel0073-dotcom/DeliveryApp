@@ -314,19 +314,31 @@ class LocationService : Service() {
             return START_NOT_STICKY
         }
         
-        startForeground(1, buildNotification())
         isRunning = true
 
         if (intent == null || intent.action == null) {
             Log.d(TAG, "Reinicio por el sistema detectado (Sticky)")
+            // Si reinicia el sistema y no sabemos la acción, por seguridad lo ponemos en Foreground 
+            // solo si tiene una notificación previa, o simplemente intentamos recuperar el estado.
+            // Para simplicidad en producción, si hay reinicio forzamos foreground si es posible.
+            startForeground(1, buildNotification())
             adquirirWakeLock()
             requestLocationUpdates()
             iniciarWatchdog()
         } else {
             when (intent.action) {
                 ACTION_START -> {
+                    startForeground(1, buildNotification())
                     adquirirWakeLock()
                     requestLocationUpdates()
+                }
+                ACTION_START_PASSIVE -> {
+                    // Modo pasivo: No llamamos a startForeground
+                    // Quitamos de foreground si ya estaba (por si cambió el rol del usuario)
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    adquirirWakeLock()
+                    requestLocationUpdates()
+                    Log.i(TAG, "🛰️ Iniciando en modo PASIVO (Sin notificación)")
                 }
                 ACTION_STOP -> {
                     detenerTodo()
@@ -335,7 +347,7 @@ class LocationService : Service() {
                 }
             }
         }
-        return START_NOT_STICKY // 🔥 Cambiado de START_STICKY para evitar reinicios automáticos sin permisos
+        return START_NOT_STICKY
     }
 
 
@@ -921,6 +933,7 @@ class LocationService : Service() {
     companion object {
         var isRunning = false
         const val ACTION_START = "ACTION_START"
+        const val ACTION_START_PASSIVE = "ACTION_START_PASSIVE"
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_TEST_ALERT = "ACTION_TEST_ALERT"
     }

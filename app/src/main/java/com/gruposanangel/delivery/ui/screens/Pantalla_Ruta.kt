@@ -132,9 +132,28 @@ fun PaginaVentaContent(
     var showDatePicker by remember { mutableStateOf(false) }
 
     if (showDatePicker) {
+        val utcStart = remember(uiState.fechaInicio) {
+            if (uiState.fechaInicio > 0) {
+                val cal = Calendar.getInstance().apply { timeInMillis = uiState.fechaInicio }
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } else null
+        }
+        val utcEnd = remember(uiState.fechaFin) {
+            if (uiState.fechaFin > 0) {
+                val cal = Calendar.getInstance().apply { timeInMillis = uiState.fechaFin }
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } else null
+        }
+
         val dateRangePickerState = rememberDateRangePickerState(
-            initialSelectedStartDateMillis = if (uiState.fechaInicio > 0) uiState.fechaInicio else System.currentTimeMillis(),
-            initialSelectedEndDateMillis = if (uiState.fechaFin > 0) uiState.fechaFin else System.currentTimeMillis()
+            initialSelectedStartDateMillis = utcStart,
+            initialSelectedEndDateMillis = utcEnd
         )
         
         DatePickerDialog(
@@ -145,8 +164,24 @@ fun PaginaVentaContent(
                         val start = dateRangePickerState.selectedStartDateMillis
                         val end = dateRangePickerState.selectedEndDateMillis
                         if (start != null) {
-                            val c = Calendar.getInstance(); c.timeInMillis = start; c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); val i = c.timeInMillis
-                            val f = if (end != null) { val ce = Calendar.getInstance(); ce.timeInMillis = end; ce.set(Calendar.HOUR_OF_DAY, 23); ce.set(Calendar.MINUTE, 59); ce.timeInMillis } else { i + 86399999L }
+                            // 🛡️ CORRECCIÓN DE DESFASE: Convertir UTC a Local conservando el día visual
+                            val calUtc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = start }
+                            val calI = Calendar.getInstance().apply {
+                                set(calUtc.get(Calendar.YEAR), calUtc.get(Calendar.MONTH), calUtc.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }
+                            val i = calI.timeInMillis
+
+                            val f = if (end != null) {
+                                val calUtcEnd = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = end }
+                                val calF = Calendar.getInstance().apply {
+                                    set(calUtcEnd.get(Calendar.YEAR), calUtcEnd.get(Calendar.MONTH), calUtcEnd.get(Calendar.DAY_OF_MONTH), 23, 59, 59)
+                                    set(Calendar.MILLISECOND, 999)
+                                }
+                                calF.timeInMillis
+                            } else {
+                                i + 86399999L
+                            }
                             onDateRangeSelected(i, f)
                         }
                         showDatePicker = false
@@ -272,7 +307,9 @@ fun PaginaVentaContent(
                 isLoading = uiState.cargandoDashboard,
                 onUpdateMeta = { meta = it; prefs.guardarValores(meta, cliTarget) }, 
                 onUpdateClientes = { cliTarget = it; prefs.guardarValores(meta, cliTarget) },
-                onCalendarClick = { showDatePicker = true }
+                onCalendarClick = { showDatePicker = true },
+                fechaInicio = uiState.fechaInicio,
+                fechaFin = uiState.fechaFin
             )
             Spacer(Modifier.height(16.dp))
             

@@ -11,11 +11,9 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.gruposanangel.delivery.data.RepositoryInventario
 import com.gruposanangel.delivery.model.Plantilla_Producto
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
@@ -30,6 +28,8 @@ data class CargaResumen(
     val timestamp: Long,
     val totalPiezas: Int,
     val montoTotal: Double,
+    val diferenciaDinero: Double = 0.0, // 🔥 Nueva: Para Arqueos/Liquidaciones
+    val diferenciaPiezas: Int = 0,      // 🔥 Nueva: Para Arqueos/Liquidaciones
     val productos: List<Plantilla_Producto>,
     val esEmergencia: Boolean = false,
     val metodoAuditoria: String? = null
@@ -37,6 +37,8 @@ data class CargaResumen(
 
 data class HistorialCargasUiState(
     val isLoading: Boolean = false,
+    val isQueryingCloud: Boolean = false, // 🔥 NUEVO: Para saber si estamos trayendo datos viejos de la nube
+    val tabIndex: Int = 0, // 🔥 PERSISTENCIA DE PESTAÑA: 0=Cargas, 1=Arqueos
     val cargas: List<CargaResumen> = emptyList(),
     val arqueos: List<CargaResumen> = emptyList(), // 🔥 Nueva lista separada
     val listaVendedores: List<String> = emptyList(),
@@ -55,7 +57,9 @@ class HistorialCargasViewModel(
     val uiState: StateFlow<HistorialCargasUiState> = _uiState.asStateFlow()
 
     private val db = FirebaseFirestore.getInstance()
-    private var snapshotListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var localCargasJob: kotlinx.coroutines.Job? = null
+    private var localArqueosJob: kotlinx.coroutines.Job? = null
+    private var remoteSyncJob: kotlinx.coroutines.Job? = null // 🔥 NUEVO: Para controlar el proceso de la nube
     private val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("es", "MX"))
     
     // 🔥 NUEVO: Para control de permisos en la UI
@@ -71,25 +75,21 @@ class HistorialCargasViewModel(
             userUid = user?.uid ?: ""
             userName = user?.nombre ?: "Admin"
         }
+        
         // Establecer rango de la semana actual (Lunes a Domingo) por defecto
         val cal = Calendar.getInstance(Locale("es", "MX"))
         cal.firstDayOfWeek = Calendar.MONDAY
-        
-        // Ir al lunes de esta semana
         cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
         cal.set(Calendar.HOUR_OF_DAY, 0)
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
         
-        // Si hoy es domingo y el Calendar lo movió al lunes de MAÑANA, retroceder 7 días
         if (cal.timeInMillis > System.currentTimeMillis()) {
             cal.add(Calendar.DAY_OF_YEAR, -7)
         }
-        
         val inicio = cal.timeInMillis
         
-        // Calcular el domingo (inicio + 6 días)
         val calEnd = cal.clone() as Calendar
         calEnd.add(Calendar.DAY_OF_YEAR, 6)
         calEnd.set(Calendar.HOUR_OF_DAY, 23)
@@ -101,13 +101,12 @@ class HistorialCargasViewModel(
         _uiState.update { it.copy(fechaInicio = inicio, fechaFin = fin) }
         
         cargarVendedores()
-        activarListenerCargas()
+        observarDatosReactivos()
     }
 
     private fun cargarVendedores() {
         viewModelScope.launch {
             try {
-                // Obtener almacenes que son vendedores
                 val snapshot = db.collection("almacenes").get().await()
                 val vendedores = snapshot.documents
                     .map { it.id }
@@ -120,142 +119,160 @@ class HistorialCargasViewModel(
         }
     }
 
-    fun cargarHistorial() {
-        // Esta función ahora simplemente refresca el listener
-        activarListenerCargas()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observarDatosReactivos() {
+        viewModelScope.launch {
+            // Combinamos los cambios de filtros y reaccionamos de forma reactiva
+            _uiState.asStateFlow()
+                .map { state -> Triple(state.filtroVendedor, state.fechaInicio, state.fechaFin) }
+                .distinctUntilChanged()
+                .onEach {
+                    // 🔥 SOLO MOSTRAR LOADING SI NO HAY DATOS LOCALES PARA ESE FILTRO
+                    // (Evitamos el círculo de carga intrusivo si ya tenemos historial)
+                    val tieneDatos = _uiState.value.cargas.isNotEmpty() || _uiState.value.arqueos.isNotEmpty()
+                    if (!tieneDatos) {
+                        _uiState.update { it.copy(isLoading = true) }
+                    }
+                }
+                .flatMapLatest { (vendedor, inicio, fin) ->
+                    // Disparar sync en segundo plano cuando cambian filtros
+                    dispararSincronizacionRemota(vendedor, inicio, fin)
+                    
+                    combine(
+                        inventarioRepo.obtenerOrdenesLocal(vendedor, inicio, fin),
+                        inventarioRepo.obtenerArqueosLocal(vendedor, inicio, fin)
+                    ) { ordenes, arqueos -> ordenes to arqueos }
+                }
+                .collect { (ordenes, arqueos) ->
+                    procesarDatosLocales(ordenes, arqueos)
+                }
+        }
     }
 
-    private fun activarListenerCargas() {
-        snapshotListener?.remove()
-        
-        val state = _uiState.value
-        // 🔥 LIMPIEZA ATÓMICA: Borramos la lista anterior y errores antes de iniciar la nueva búsqueda
-        _uiState.update { it.copy(isLoading = true, cargas = emptyList(), error = null) }
-
-        // Buscamos ordenes de transferencia cuyo destino sea un vendedor o vengan del almacén central
-        var query = db.collection("ordenesTransferencia")
-            .whereGreaterThanOrEqualTo("timestamp", Timestamp(Date(state.fechaInicio)))
-            .whereLessThanOrEqualTo("timestamp", Timestamp(Date(state.fechaFin)))
-
-        // Aplicamos el filtro de destino si no es "Todos"
-        if (state.filtroVendedor != "Todos") {
-            query = query.whereEqualTo("destino", state.filtroVendedor)
+    private suspend fun procesarDatosLocales(ordenes: List<com.gruposanangel.delivery.data.OrdenTransferenciaEntity>, arqueos: List<com.gruposanangel.delivery.data.MovimientoInventarioEntity>) {
+        // 1. Transformar Órdenes (Cargas)
+        val cargasResumen = ordenes.map { entity ->
+            val detalles = inventarioRepo.obtenerDetallesOrdenLocal(entity.id)
+            CargaResumen(
+                id = entity.id,
+                origen = entity.origen,
+                destino = entity.destino,
+                estado = entity.estado,
+                fechaFormateada = sdf.format(Date(entity.timestamp)),
+                timestamp = entity.timestamp,
+                totalPiezas = entity.totalPiezas,
+                montoTotal = entity.montoTotal,
+                diferenciaDinero = 0.0, // Cargas no tienen "diferencia" en esta vista
+                diferenciaPiezas = 0,
+                productos = detalles.map { d ->
+                    Plantilla_Producto(id = d.productoId, nombre = d.nombre, precio = d.precio, cantidad = d.cantidad)
+                },
+                esEmergencia = entity.esEmergencia,
+                metodoAuditoria = entity.metodoAuditoria
+            )
         }
 
-        snapshotListener = query.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.e("HistorialCargasVM", "Error en listener: ${error.message}")
-                _uiState.update { it.copy(isLoading = false, error = error.message) }
-                return@addSnapshotListener
-            }
+        // 2. Transformar Arqueos / Liquidaciones
+        // 🔥 MEJORA: Obtener catálogo de forma segura
+        val catalogo = try {
+            inventarioRepo.obtenerProductosLocal().first()
+        } catch (e: Exception) {
+            emptyList<com.gruposanangel.delivery.data.ProductoEntity>()
+        }
 
-            viewModelScope.launch {
-                val listaCargas = snapshot?.documents?.mapNotNull { doc ->
-                    val data = doc.data ?: return@mapNotNull null
-                    val ts = data["timestamp"] as? Timestamp
-                    val timestamp = ts?.toDate()?.time ?: 0L
-                    
-                    val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
-                    val productos = productosRaw.map { p ->
-                        Plantilla_Producto(
-                            id = p["productoId"] as? String ?: "",
-                            nombre = p["nombre"] as? String ?: "",
-                            precio = (p["precio"] as? Number)?.toDouble() ?: 0.0,
-                            cantidad = (p["cantidad"] as? Number)?.toInt() ?: 0
-                        )
-                    }
-
-                    CargaResumen(
-                        id = doc.id,
-                        origen = data["origen"] as? String ?: "",
-                        destino = data["destino"] as? String ?: "",
-                        estado = data["estado"] as? String ?: "PENDIENTE",
-                        fechaFormateada = sdf.format(Date(timestamp)),
-                        timestamp = timestamp,
-                        totalPiezas = productos.sumOf { it.cantidad },
-                        montoTotal = productos.sumOf { it.cantidad * it.precio },
-                        productos = productos,
-                        esEmergencia = data["esEmergencia"] as? Boolean ?: false
+        val listaArqueos = arqueos.groupBy { it.referenciaId ?: it.id } 
+            .map { (referenciaId, docs) ->
+                val primerDoc = docs.first()
+                
+                val productos = docs.map { d ->
+                    val precio = catalogo.find { it.productoId == d.productoId }?.precio ?: 0.0
+                    Plantilla_Producto(
+                        id = d.productoId,
+                        nombre = d.nombreProducto,
+                        precio = precio,
+                        cantidad = d.cantidad // Diferencia
                     )
-                } ?: emptyList()
-
-                // 🔥 2. CONSULTAR TAMBIÉN LOS ARQUEOS (Ajustes de auditoría) con Blindaje
-                try {
-                    var arqueosQuery: com.google.firebase.firestore.Query = db.collection("ajustes_inventario")
-                        .whereIn("tipo", listOf("AJUSTE_ARQUEO_FALTANTE", "AJUSTE_ARQUEO_SOBRANTE", "AJUSTE_ARQUEO_OK"))
-                        .whereGreaterThanOrEqualTo("timestamp", state.fechaInicio)
-                        .whereLessThanOrEqualTo("timestamp", state.fechaFin)
-                        .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-
-                    if (state.filtroVendedor != "Todos") {
-                        arqueosQuery = arqueosQuery.whereEqualTo("almacenNombre", state.filtroVendedor)
-                    }
-
-                    val arqueosSnap = arqueosQuery.get().await()
-                    
-                    // Agrupamos los micro-ajustes por su referenciaId (El Arqueo Completo)
-                    val catalogo = inventarioRepo.obtenerProductosLocal().first()
-
-                    val listaArqueos = arqueosSnap.documents.groupBy { it.getString("referenciaId") ?: "SIN_ID" }
-                        .mapNotNull { (referenciaId, docs) ->
-                            if (referenciaId == "SIN_ID") return@mapNotNull null
-                            val primerDoc = docs.first()
-                            val timestamp = primerDoc.getLong("timestamp") ?: 0L
-                            val metodo = primerDoc.getString("metodoAuditoria")
-                            
-                            val productos = docs.map { d ->
-                                val tipo = d.getString("tipo")
-                                val cant = d.getLong("cantidad")?.toInt() ?: 0
-                                val prodId = d.getString("productoId") ?: ""
-                                val precio = catalogo.find { it.productoId == prodId }?.precio ?: 0.0
-                                Plantilla_Producto(
-                                    id = prodId,
-                                    nombre = d.getString("nombreProducto") ?: "Producto",
-                                    precio = precio, 
-                                    cantidad = if (tipo == "AJUSTE_ARQUEO_FALTANTE") -cant else cant
-                                )
-                            }
-
-                            CargaResumen(
-                                id = referenciaId,
-                                origen = if (metodo == "LIQUIDACION") "LIQUIDACIÓN" else "AUDITORÍA FÍSICA",
-                                destino = primerDoc.getString("almacenNombre") ?: "",
-                                estado = if (metodo == "LIQUIDACION") "LIQUIDADO" else "ARQUEADO",
-                                fechaFormateada = sdf.format(Date(timestamp)),
-                                timestamp = timestamp,
-                                totalPiezas = productos.sumOf { it.cantidad },
-                                montoTotal = productos.sumOf { it.cantidad * it.precio }, // Ahora sí calculamos el valor de la diferencia
-                                productos = productos,
-                                metodoAuditoria = metodo
-                            )
-                        }.sortedByDescending { it.timestamp }
-
-                    _uiState.update { it.copy(
-                        cargas = listaCargas.sortedByDescending { it.timestamp },
-                        arqueos = listaArqueos,
-                        isLoading = false
-                    ) }
-                } catch (e: Exception) {
-                    Log.e("HistorialCargasVM", "Error en Arqueos (Falta índice Firestore?): ${e.message}")
-                    // Si fallan los arqueos por falta de índice, al menos mostramos las cargas normales
-                    _uiState.update { it.copy(
-                        cargas = listaCargas.sortedByDescending { it.timestamp },
-                        isLoading = false,
-                        error = if (e.message?.contains("index") == true) "Preparando base de datos de auditoría..." else e.message
-                    ) }
                 }
+
+                // Cálculo de Totales Reales (Físicos)
+                val valorRealTotal = docs.sumOf { (it.cantidadFisica ?: 0) * (catalogo.find { p -> p.productoId == it.productoId }?.precio ?: 0.0) }
+                val piezasRealesTotal = docs.sumOf { it.cantidadFisica ?: 0 }
+                val diferenciaDinero = productos.sumOf { it.cantidad * it.precio }
+                val diferenciaPiezas = productos.sumOf { it.cantidad }
+
+                CargaResumen(
+                    id = referenciaId,
+                    origen = if (primerDoc.metodoAuditoria == "LIQUIDACION") "LIQUIDACIÓN" else "AUDITORÍA FÍSICA",
+                    destino = primerDoc.almacenNombre ?: "",
+                    estado = if (primerDoc.metodoAuditoria == "LIQUIDACION") "LIQUIDADO" else "ARQUEADO",
+                    fechaFormateada = sdf.format(Date(primerDoc.timestamp)),
+                    timestamp = primerDoc.timestamp,
+                    totalPiezas = piezasRealesTotal, // Mostramos lo que hay/regresó
+                    montoTotal = valorRealTotal,     // Mostramos el valor de lo que hay/regresó
+                    diferenciaDinero = diferenciaDinero,
+                    diferenciaPiezas = diferenciaPiezas,
+                    productos = productos,
+                    metodoAuditoria = primerDoc.metodoAuditoria
+                )
+            }.sortedByDescending { it.timestamp }
+
+        _uiState.update { it.copy(cargas = cargasResumen, arqueos = listaArqueos, isLoading = false) }
+    }
+
+    private fun dispararSincronizacionRemota(vendedor: String, inicio: Long, fin: Long) {
+        // 🔥 CANCELAR BÚSQUEDA ANTERIOR: Evita que el mensaje se quede trabado
+        remoteSyncJob?.cancel()
+        
+        remoteSyncJob = viewModelScope.launch(Dispatchers.IO) {
+            val quinceDiasAtras = System.currentTimeMillis() - (15L * 24 * 60 * 60 * 1000)
+            val esHistorico = inicio < quinceDiasAtras
+            val estaVacio = _uiState.value.cargas.isEmpty() && _uiState.value.arqueos.isEmpty()
+            
+            if (esHistorico || estaVacio) {
+                _uiState.update { it.copy(isQueryingCloud = true) }
+            }
+            
+            // 🔥 MONITOREO DE DATOS: Si detectamos que ya llegaron datos, apagamos el indicador rápido
+            val monitorJob = launch {
+                _uiState.asStateFlow()
+                    .filter { it.cargas.isNotEmpty() || it.arqueos.isNotEmpty() }
+                    .first() // Esperar al primer dato
+                _uiState.update { it.copy(isQueryingCloud = false) }
+            }
+            
+            try {
+                // Ejecutamos ambas sincronizaciones
+                val syncCargas = launch { inventarioRepo.sincronizarOrdenesPeriodo(inicio, fin) }
+                val syncArqueos = launch { inventarioRepo.sincronizarMovimientosPeriodo(inicio, fin, vendedor) }
+                
+                // Esperamos a que ambas terminen o fallen
+                syncCargas.join()
+                syncArqueos.join()
+            } catch (e: Exception) {
+                Log.e("HistorialCargasVM", "Error en sync remoto: ${e.message}")
+            } finally {
+                // 🛡️ SEGURIDAD: Siempre apagar el mensaje al finalizar o ser cancelado
+                monitorJob.cancel()
+                _uiState.update { it.copy(isQueryingCloud = false) }
             }
         }
     }
 
     fun actualizarFiltroVendedor(vendedor: String) {
         _uiState.update { it.copy(filtroVendedor = vendedor) }
-        activarListenerCargas()
     }
 
     fun actualizarFechas(inicio: Long, fin: Long) {
         _uiState.update { it.copy(fechaInicio = inicio, fechaFin = fin) }
-        activarListenerCargas()
+    }
+
+    fun cambiarPestaña(index: Int) {
+        _uiState.update { it.copy(tabIndex = index) }
+    }
+
+    fun cargarHistorial() {
+        val state = _uiState.value
+        dispararSincronizacionRemota(state.filtroVendedor, state.fechaInicio, state.fechaFin)
     }
 
     /**
@@ -289,7 +306,9 @@ class HistorialCargasViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        snapshotListener?.remove()
+        localCargasJob?.cancel()
+        localArqueosJob?.cancel()
+        remoteSyncJob?.cancel()
     }
 }
 

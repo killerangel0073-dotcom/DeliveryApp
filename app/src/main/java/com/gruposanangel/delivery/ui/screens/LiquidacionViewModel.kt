@@ -255,40 +255,17 @@ class LiquidacionViewModel(
                         "tipo" to tipoAjuste,
                         "vendedorId" to uid,
                         "almacenNombre" to state.origen,
+                        "almacenDestino" to destinoFinal, // 🔥 Agregado para que la Cloud Function sepa a dónde mandar
                         "timestamp" to ts,
                         "referenciaId" to arqueoId,
                         "metodoAuditoria" to metodo
                     )
                     batch.set(db.collection("ajustes_inventario").document(movId), dataMov)
                     
-                    // Solo actualizamos el stock si hubo cambio físico
-                    if (diferencial != 0) {
-                        val stockRef = db.collection("inventarioStock").document("${p.id}_${state.origen}")
-                        batch.update(stockRef, "cantidad", fisico)
-                    }
-
-                    // 2. RETORNO (Carga inversa hacia el almacén central)
-                    if (retornarABodega && fisico > 0) {
-                        // En Liquidación Directa, el supervisor manda a bodega.
-                        // Impactamos la nube para ambos almacenes.
-                        val stockOrigenRef = db.collection("inventarioStock").document("${p.id}_${state.origen}")
-                        val stockDestinoRef = db.collection("inventarioStock").document("${p.id}_$destinoFinal")
-                        
-                        // Restar de origen (queda en 0 si es liquidación completa)
-                        batch.update(stockOrigenRef, "cantidad", 0)
-                        
-                        // Sumar en destino
-                        // 🔥 MEJORA: Usar set con merge para asegurar que el documento exista antes de incrementar
-                        val dataIncrement = mapOf(
-                            "productoId" to p.id,
-                            "productoNombre" to p.nombre,
-                            "almacenNombre" to destinoFinal,
-                            "cantidad" to com.google.firebase.firestore.FieldValue.increment(fisico.toLong()),
-                            "precioUnitario" to p.precio,
-                            "categoria" to (p.categoria ?: "General")
-                        )
-                        batch.set(stockDestinoRef, dataIncrement, com.google.firebase.firestore.SetOptions.merge())
-                    }
+                    // 🔥 ARQUITECTURA CENTRALIZADA: No modificamos el stock directamente.
+                    // La Cloud Function 'procesarAjusteInventario' se encargará de:
+                    // 1. Ajustar el diferencial en Arqueo.
+                    // 2. Poner en 0 el origen y sumar al destino en Liquidación.
                 }
 
                 batch.commit().await()

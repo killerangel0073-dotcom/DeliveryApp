@@ -126,6 +126,13 @@ fun PantallaDashboardVendedor(
 
     val isDark = ThemeConfig.isActuallyDark
 
+    // 🔥 RESET PROACTIVO AL SALIR
+    DisposableEffect(Unit) {
+        onDispose { 
+            viewModel.resetFiltro()
+        }
+    }
+
     DeliveryTheme(darkTheme = isDark) {
         Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             DashboardVendedorView(
@@ -139,7 +146,7 @@ fun PantallaDashboardVendedor(
                 onNavigate = { navController.navigate(it) },
                 onGastoRegistrado = { m, c, d, cb -> viewModel.registrarGasto(m, c, d, cb) },
                 onMetaFriturasChange = { viewModel.actualizarMetaFrituras(it) },
-                onFechaFiltroChange = { viewModel.actualizarFechaFiltro(it) },
+                onFechaFiltroChange = { inicio, fin -> viewModel.actualizarRangoFechas(inicio, fin) },
                 onConfigurarImpresora = {
                     val hasPermission = bluetoothPermissions.all {
                         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
@@ -187,7 +194,7 @@ fun DashboardVendedorView(
     onNavigate: (String) -> Unit,
     onGastoRegistrado: (Double, String, String, () -> Unit) -> Unit,
     onMetaFriturasChange: (Int) -> Unit,
-    onFechaFiltroChange: (Long) -> Unit,
+    onFechaFiltroChange: (Long, Long) -> Unit,
     onConfigurarImpresora: () -> Unit
 ) {
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("es-MX"))
@@ -197,13 +204,55 @@ fun DashboardVendedorView(
     var showDatePicker by remember { mutableStateOf(false) }
 
     if (showDatePicker) {
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = uiState.fechaFiltroDiario)
+        val utcStart = remember(uiState.fechaInicio) {
+            val cal = Calendar.getInstance().apply { timeInMillis = uiState.fechaInicio }
+            Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
+        val utcEnd = remember(uiState.fechaFin) {
+            val cal = Calendar.getInstance().apply { timeInMillis = uiState.fechaFin }
+            Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        }
+
+        val dateRangePickerState = rememberDateRangePickerState(
+            initialSelectedStartDateMillis = utcStart,
+            initialSelectedEndDateMillis = utcEnd
+        )
+        
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 Button(
                     onClick = {
-                        datePickerState.selectedDateMillis?.let { onFechaFiltroChange(it) }
+                        val start = dateRangePickerState.selectedStartDateMillis
+                        val end = dateRangePickerState.selectedEndDateMillis
+                        
+                        if (start != null) {
+                            // 🛡️ CORRECCIÓN DE DESFASE: Convertir UTC a Local conservando el día visual
+                            val calUtcStart = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = start }
+                            val calI = Calendar.getInstance().apply {
+                                set(calUtcStart.get(Calendar.YEAR), calUtcStart.get(Calendar.MONTH), calUtcStart.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }
+                            val i = calI.timeInMillis
+
+                            val f = if (end != null) {
+                                val calUtcEnd = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = end }
+                                val calF = Calendar.getInstance().apply {
+                                    set(calUtcEnd.get(Calendar.YEAR), calUtcEnd.get(Calendar.MONTH), calUtcEnd.get(Calendar.DAY_OF_MONTH), 23, 59, 59)
+                                    set(Calendar.MILLISECOND, 999)
+                                }
+                                calF.timeInMillis
+                            } else {
+                                i + 86399999L
+                            }
+                            onFechaFiltroChange(i, f)
+                        }
                         showDatePicker = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = DelisaRed),
@@ -217,16 +266,19 @@ fun DashboardVendedorView(
             },
             colors = DatePickerDefaults.colors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
-            DatePicker(
-                state = datePickerState, 
-                showModeToggle = false, 
+            DateRangePicker(
+                state = dateRangePickerState,
+                showModeToggle = false,
+                modifier = Modifier.weight(1f),
                 colors = DatePickerDefaults.colors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     headlineContentColor = DelisaRed,
                     selectedDayContainerColor = DelisaRed,
                     selectedDayContentColor = Color.White,
                     todayDateBorderColor = DelisaRed,
-                    todayContentColor = DelisaRed
+                    todayContentColor = DelisaRed,
+                    dayInSelectionRangeContainerColor = DelisaRed.copy(alpha = 0.15f),
+                    dayInSelectionRangeContentColor = DelisaRed
                 )
             )
         }
@@ -409,11 +461,13 @@ fun DashboardVendedorView(
 
         VentaPrincipalCard(
             monto = uiState.ventaDia, 
-            meta = uiState.metaDia, 
+            metaBase = uiState.metaDia, 
             clientes = uiState.clientesDia, 
             ticketPromedio = uiState.ticketPromedioDia, 
             formato = formatoMoneda,
-            fechaFiltro = uiState.fechaFiltroDiario,
+            fechaInicio = uiState.fechaInicio,
+            fechaFin = uiState.fechaFin,
+            numDias = uiState.numDiasFiltro,
             onCierreClick = { onNavigate("CIERRE_DIA") },
             onGastoClick = { showGastoSheet = true },
             onCalendarClick = { showDatePicker = true }
@@ -946,28 +1000,42 @@ fun AccionCardVendedor(
 @Composable
 fun VentaPrincipalCard(
     monto: Double, 
-    meta: Double, 
+    metaBase: Double, 
     clientes: Int, 
     ticketPromedio: Double, 
     formato: NumberFormat,
-    fechaFiltro: Long,
+    fechaInicio: Long,
+    fechaFin: Long,
+    numDias: Int,
     onCierreClick: () -> Unit,
     onGastoClick: () -> Unit,
     onCalendarClick: () -> Unit
 ) {
-    val esHoy = remember(fechaFiltro) {
-        val cal = Calendar.getInstance()
-        val calFiltro = Calendar.getInstance().apply { timeInMillis = fechaFiltro }
-        cal.get(Calendar.YEAR) == calFiltro.get(Calendar.YEAR) && 
-        cal.get(Calendar.DAY_OF_YEAR) == calFiltro.get(Calendar.DAY_OF_YEAR)
+    val titulo = remember(fechaInicio, fechaFin) {
+        val calInicio = Calendar.getInstance().apply { timeInMillis = fechaInicio }
+        val calFin = Calendar.getInstance().apply { timeInMillis = fechaFin }
+        val calHoy = Calendar.getInstance()
+
+        val esMismoDia = calInicio.get(Calendar.YEAR) == calFin.get(Calendar.YEAR) &&
+                        calInicio.get(Calendar.DAY_OF_YEAR) == calFin.get(Calendar.DAY_OF_YEAR)
+
+        if (esMismoDia) {
+            val esHoy = calInicio.get(Calendar.YEAR) == calHoy.get(Calendar.YEAR) &&
+                       calInicio.get(Calendar.DAY_OF_YEAR) == calHoy.get(Calendar.DAY_OF_YEAR)
+            
+            if (esHoy) "VENTA TOTAL HOY"
+            else {
+                val sdf = SimpleDateFormat("EEEE d 'de' MMM", Locale.forLanguageTag("es-MX"))
+                "VENTA DEL ${sdf.format(Date(fechaInicio))}".uppercase()
+            }
+        } else {
+            val sdf = SimpleDateFormat("d 'de' MMM", Locale.forLanguageTag("es-MX"))
+            "VENTA DEL ${sdf.format(Date(fechaInicio))} AL ${sdf.format(Date(fechaFin))}".uppercase()
+        }
     }
 
-    val titulo = if (esHoy) "VENTA TOTAL HOY" else {
-        val sdf = SimpleDateFormat("dd 'de' MMM", Locale.forLanguageTag("es-MX"))
-        "VENTA DEL ${sdf.format(Date(fechaFiltro))}".uppercase()
-    }
-
-    val progreso = (monto / meta).coerceIn(0.0, 1.0).toFloat()
+    val metaAjustada = metaBase * numDias
+    val progreso = (monto / metaAjustada).coerceIn(0.0, 1.0).toFloat()
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1380,5 +1448,5 @@ fun DashboardVendedorActivePreview() {
         ventaBloque = 60000.0,
         ventasPorDiaSemana = sampleVentas
     )
-    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}, {}, {_,_,_,_ -> }, {}, {}, {}) }
+    DeliveryTheme { DashboardVendedorView(state, 45f, 75, false, null, {}, {}, {}, {_,_,_,_ -> }, {}, {_,_ -> }, {}) }
 }

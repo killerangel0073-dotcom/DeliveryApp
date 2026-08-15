@@ -15,9 +15,11 @@ import androidx.room.RoomDatabase
         LocationEntity::class,
         RutaEntity::class,
         MovimientoInventarioEntity::class,
-        GastoEntity::class
+        GastoEntity::class,
+        OrdenTransferenciaEntity::class,
+        OrdenTransferenciaDetalleEntity::class
     ],
-    version = 37,
+    version = 39,
     exportSchema = true // Habilitado para soportar migraciones automáticas
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,6 +32,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun rutaDao(): RutaDao
     abstract fun movimientoInventarioDao(): MovimientoInventarioDao
     abstract fun gastoDao(): GastoDao
+    abstract fun ordenTransferenciaDao(): OrdenTransferenciaDao
 
     companion object {
         @Volatile

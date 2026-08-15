@@ -1,5 +1,6 @@
 package com.gruposanangel.delivery.ui.screens
 
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -56,19 +57,33 @@ fun PantallaHistorialCargas(
         com.gruposanangel.delivery.data.FirebaseDataSource(),
         db.productoDao(),
         db.VentaDao(),
-        db.movimientoInventarioDao()
+        db.movimientoInventarioDao(),
+        db.ordenTransferenciaDao()
     )
     
     val vm: HistorialCargasViewModel = viewModel(
         factory = HistorialCargasViewModelFactory(repoUsuario, repoInventario)
     )
     val uiState by vm.uiState.collectAsState()
+
+    // 🔥 REFRESCAR AL REGRESAR A LA PANTALLA (QUIRÚRGICO)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                vm.cargarHistorial()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val formatoMoneda = NumberFormat.getCurrencyInstance(Locale("es", "MX"))
     val formatoFechaSimple = SimpleDateFormat("dd/MM/yyyy", Locale("es", "MX"))
 
     var showVendedorFilter by remember { mutableStateOf(false) }
     var showDateRangePicker by remember { mutableStateOf(false) }
-    var tabIndex by remember { mutableIntStateOf(0) }
+    val tabIndex = uiState.tabIndex // 🔥 USAMOS EL ÍNDICE DEL VIEWMODEL PARA PERSISTENCIA
     
     // --- ESTADOS PARA CANCELACIÓN ---
     var cargaSeleccionadaParaCancelar by remember { mutableStateOf<CargaResumen?>(null) }
@@ -126,12 +141,12 @@ fun PantallaHistorialCargas(
         ) {
             Tab(
                 selected = tabIndex == 0,
-                onClick = { tabIndex = 0 },
+                onClick = { vm.cambiarPestaña(0) },
                 text = { Text("CARGAS", fontWeight = FontWeight.Black, fontSize = 12.sp) }
             )
             Tab(
                 selected = tabIndex == 1,
-                onClick = { tabIndex = 1 },
+                onClick = { vm.cambiarPestaña(1) },
                 text = { Text("ARQUEOS", fontWeight = FontWeight.Black, fontSize = 12.sp) }
             )
         }
@@ -207,10 +222,12 @@ fun PantallaHistorialCargas(
 
         // --- RESUMEN DE TOTALES ---
         val listaActual = if (tabIndex == 0) uiState.cargas else uiState.arqueos
-        if (listaActual.isNotEmpty() && !uiState.isLoading) {
+        if (listaActual.isNotEmpty() || uiState.isQueryingCloud || uiState.isLoading) {
             val listaFiltrada = if (tabIndex == 0) listaActual.filter { it.estado != "CANCELADA" } else listaActual
             
-            val totalMonto = listaFiltrada.sumOf { it.montoTotal }
+            // 🔥 Cálculos Dinámicos
+            val totalMonto = if (tabIndex == 0) listaFiltrada.sumOf { it.montoTotal } else listaActual.sumOf { it.diferenciaDinero }
+            val totalValorFisico = if (tabIndex == 1) listaActual.sumOf { it.montoTotal } else 0.0
             val totalPiezas = if (tabIndex == 0) listaFiltrada.sumOf { it.totalPiezas } else listaActual.sumOf { it.totalPiezas }
             
             BoxWithConstraints(modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -229,32 +246,49 @@ fun PantallaHistorialCargas(
                             .background(Brush.verticalGradient(listOf(DelisaRed, DelisaRedDark)))
                             .padding(vertical = if (isSmallScreen) 16.dp else 20.dp, horizontal = 12.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            // 1. IZQUIERDA: CANTIDAD DE EVENTOS
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                                Text(if (tabIndex == 0) "CARGAS" else "ARQUEOS", color = Color.White.copy(0.6f), fontSize = if (isSmallScreen) 8.sp else 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                                Text(text = "${if (tabIndex == 0) listaFiltrada.size else listaActual.size}", color = Color.White, fontSize = if (isSmallScreen) 18.sp else 20.sp, fontWeight = FontWeight.Black)
-                            }
-                            
-                            Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
+                        Crossfade(targetState = uiState.isQueryingCloud || uiState.isLoading, label = "loadingCrossfade") { isQuerying ->
+                            if (isQuerying) {
+                                // 🔥 ESTADO: CONSULTANDO NUBE
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 3.dp)
+                                    Spacer(Modifier.width(16.dp))
+                                    Text("CONSULTANDO BASE DE DATOS...", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                                }
+                            } else {
+                                // 🔥 ESTADO: MOSTRAR TOTALES
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceEvenly
+                                ) {
+                                    // 1. IZQUIERDA: CANTIDAD DE EVENTOS
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                        Text(if (tabIndex == 0) "CARGAS" else "ARQUEOS", color = Color.White.copy(0.6f), fontSize = if (isSmallScreen) 8.sp else 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                        Text(text = "${if (tabIndex == 0) listaFiltrada.size else listaActual.size}", color = Color.White, fontSize = if (isSmallScreen) 18.sp else 20.sp, fontWeight = FontWeight.Black)
+                                    }
+                                    
+                                    Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
 
-                            // 2. CENTRO: VALOR MONETARIO O DIFERENCIA
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1.5f)) {
-                                Text(if (tabIndex == 0) "TOTAL PERIODO" else "DIFERENCIA NETA", color = Color.White.copy(0.6f), fontSize = if (isSmallScreen) 8.sp else 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                                val valorTexto = formatoMoneda.format(totalMonto)
-                                Text(text = valorTexto, color = if (totalMonto < 0 && tabIndex == 1) Color.Yellow else Color.White, fontSize = if (isSmallScreen) 20.sp else 22.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            
-                            Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
+                                    // 2. CENTRO: DIFERENCIA O TOTAL PERIODO
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1.5f)) {
+                                        Text(if (tabIndex == 0) "TOTAL PERIODO" else "DIFERENCIA NETA", color = Color.White.copy(0.6f), fontSize = if (isSmallScreen) 8.sp else 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                        val valorTexto = formatoMoneda.format(totalMonto)
+                                        Text(text = valorTexto, color = if (totalMonto < 0 && tabIndex == 1) Color.Yellow else Color.White, fontSize = if (isSmallScreen) 20.sp else 22.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    
+                                    Box(Modifier.width(1.dp).height(35.dp).background(Color.White.copy(0.2f)))
 
-                            // 3. DERECHA: PRODUCTOS AUDITADOS
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                                Text(if (tabIndex == 0) "PIEZAS" else "PRODS AUDIT.", color = Color.White.copy(0.6f), fontSize = if (isSmallScreen) 8.sp else 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                                Text(text = "${if (tabIndex == 0) totalPiezas else listaActual.sumOf { it.productos.size }}", color = Color.White, fontSize = if (isSmallScreen) 18.sp else 20.sp, fontWeight = FontWeight.Black)
+                                    // 3. DERECHA: VALOR REAL (Solo para Arqueos) o PIEZAS (para Cargas)
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1.2f)) {
+                                        Text(if (tabIndex == 0) "PIEZAS" else "VALOR TOTAL", color = Color.White.copy(0.6f), fontSize = if (isSmallScreen) 8.sp else 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                        val subTexto = if (tabIndex == 0) "$totalPiezas" else formatoMoneda.format(totalValorFisico)
+                                        Text(text = subTexto, color = Color.White, fontSize = if (isSmallScreen) 16.sp else 18.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
                             }
                         }
                     }
@@ -264,9 +298,7 @@ fun PantallaHistorialCargas(
         }
 
         // --- LISTA ---
-        if (uiState.isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color.Red) }
-        } else if (listaActual.isEmpty()) {
+        if (listaActual.isEmpty() && !uiState.isLoading && !uiState.isQueryingCloud) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.History, null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
@@ -383,7 +415,29 @@ fun PantallaHistorialCargas(
     }
 
     if (showDateRangePicker) {
-        val dateRangePickerState = rememberDateRangePickerState(initialSelectedStartDateMillis = uiState.fechaInicio, initialSelectedEndDateMillis = uiState.fechaFin)
+        val utcStart = remember(uiState.fechaInicio) {
+            if (uiState.fechaInicio > 0) {
+                val cal = Calendar.getInstance().apply { timeInMillis = uiState.fechaInicio }
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } else null
+        }
+        val utcEnd = remember(uiState.fechaFin) {
+            if (uiState.fechaFin > 0) {
+                val cal = Calendar.getInstance().apply { timeInMillis = uiState.fechaFin }
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } else null
+        }
+
+        val dateRangePickerState = rememberDateRangePickerState(
+            initialSelectedStartDateMillis = utcStart, 
+            initialSelectedEndDateMillis = utcEnd
+        )
         val isDark = ThemeConfig.isActuallyDark
         
         DeliveryTheme(darkTheme = isDark) {
@@ -395,8 +449,24 @@ fun PantallaHistorialCargas(
                             val start = dateRangePickerState.selectedStartDateMillis
                             val end = dateRangePickerState.selectedEndDateMillis
                             if (start != null) {
-                                val c = Calendar.getInstance(); c.timeInMillis = start; c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); val i = c.timeInMillis
-                                val f = if (end != null) { val ce = Calendar.getInstance(); ce.timeInMillis = end; ce.set(Calendar.HOUR_OF_DAY, 23); ce.set(Calendar.MINUTE, 59); ce.timeInMillis } else { i + 86399999L }
+                                // 🛡️ CORRECCIÓN DE DESFASE: Convertir UTC a Local conservando el día visual
+                                val calUtc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = start }
+                                val calI = Calendar.getInstance().apply {
+                                    set(calUtc.get(Calendar.YEAR), calUtc.get(Calendar.MONTH), calUtc.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+                                    set(Calendar.MILLISECOND, 0)
+                                }
+                                val i = calI.timeInMillis
+
+                                val f = if (end != null) {
+                                    val calUtcEnd = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = end }
+                                    val calF = Calendar.getInstance().apply {
+                                        set(calUtcEnd.get(Calendar.YEAR), calUtcEnd.get(Calendar.MONTH), calUtcEnd.get(Calendar.DAY_OF_MONTH), 23, 59, 59)
+                                        set(Calendar.MILLISECOND, 999)
+                                    }
+                                    calF.timeInMillis
+                                } else {
+                                    i + 86399999L
+                                }
                                 vm.actualizarFechas(i, f)
                             }
                             showDateRangePicker = false
@@ -419,7 +489,9 @@ fun PantallaHistorialCargas(
                     title = { Text("PERIODO", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurface) },
                     headline = {
                         val s = dateRangePickerState.selectedStartDateMillis; val e = dateRangePickerState.selectedEndDateMillis
-                        val text = if (s != null && e != null) "${formatoFechaSimple.format(Date(s))} - ${formatoFechaSimple.format(Date(e))}" else "Selecciona Rango"
+                        // 🔥 USAR UTC PARA EL HEADLINE: Para que el texto coincida con los días marcados
+                        val fmtUtc = SimpleDateFormat("dd/MM/yyyy", Locale("es", "MX")).apply { timeZone = TimeZone.getTimeZone("UTC") }
+                        val text = if (s != null && e != null) "${fmtUtc.format(Date(s))} - ${fmtUtc.format(Date(e))}" else "Selecciona Rango"
                         Text(text, modifier = Modifier.padding(horizontal = 16.dp), fontWeight = FontWeight.Black, color = DelisaRed, fontSize = 18.sp)
                     },
                     showModeToggle = false,
@@ -464,16 +536,16 @@ fun ItemHistorialCarga(
     
     val esCancelada = carga.estado == "CANCELADA"
     val esPendiente = carga.estado == "PENDIENTE"
-    val esLiquidacion = carga.metodoAuditoria == "LIQUIDACION"
+    val esLiquidacion = carga.metodoAuditoria == "LIQUIDACION" || carga.origen.contains("LIQUIDACIÓN")
+    val esInventario = carga.origen.contains("INVENTARIO")
     
     val statusColor = when {
-        esCancelada -> WarningOrange
+        esCancelada -> Color.Gray
+        esLiquidacion || esInventario -> MaterialTheme.colorScheme.onSurface // 🔥 ADAPTATIVO: Negro en Claro, Blanco en Oscuro
+        esPendiente -> DelisaRed // 🔥 CARGA SIN ACEPTAR -> ROJA
+        carga.estado == "ACEPTADA" || carga.estado == "COMPLETADA" -> DelisaGreen // 🔥 CARGA ACEPTADA -> VERDE
+        carga.estado == "ARQUEADO" || carga.origen.contains("AUDITORÍA") -> WarningOrange // 🔥 ARQUEO -> NARANJA
         carga.esEmergencia -> DelisaRed
-        esLiquidacion -> Color.Black
-        carga.estado == "ACEPTADA" || carga.estado == "ARQUEADO" || carga.estado == "COMPLETADA" -> {
-            if (carga.origen.contains("AUDITORÍA")) WarningOrange else DelisaBlue
-        }
-        esPendiente -> WarningOrange
         else -> MaterialTheme.colorScheme.onSurfaceVariant 
     }
 
@@ -483,8 +555,8 @@ fun ItemHistorialCarga(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .shadow(if (isPressed) 1.dp else 4.dp, RoundedCornerShape(24.dp))
             .border(
-                width = 1.dp,
-                color = statusColor.copy(alpha = 0.2f),
+                width = if (esLiquidacion || esInventario) 1.5.dp else if (esPendiente) 2.dp else 1.dp, // 🔥 Más borde para negros y rojos
+                color = statusColor.copy(alpha = if (esLiquidacion || esInventario || esPendiente) 0.4f else 0.2f),
                 shape = RoundedCornerShape(24.dp)
             )
             .clickable(
@@ -496,7 +568,6 @@ fun ItemHistorialCarga(
         colors = CardDefaults.cardColors(
             containerColor = when {
                 esCancelada -> MaterialTheme.colorScheme.surfaceVariant
-                esLiquidacion -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
                 else -> MaterialTheme.colorScheme.surface
             }
         )
@@ -522,10 +593,10 @@ fun ItemHistorialCarga(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = carga.destino, 
-                        fontWeight = FontWeight.Black, 
+                        fontWeight = if (esPendiente) FontWeight.ExtraBold else FontWeight.Black, // 🔥 Énfasis si es pendiente
                         fontSize = 16.sp, 
                         color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
+                        maxLines = 2, // 🔥 Aumentado a 2 líneas para que no se corte en teléfonos pequeños
                         overflow = TextOverflow.Ellipsis,
                         style = if (esCancelada) TextStyle(textDecoration = TextDecoration.LineThrough) else TextStyle.Default
                     )
@@ -537,6 +608,7 @@ fun ItemHistorialCarga(
                     val tagText = when {
                         carga.esEmergencia -> "EMERGENCIA"
                         esLiquidacion -> "LIQUIDACIÓN"
+                        esInventario -> "INVENTARIO"
                         carga.origen.contains("AUDITORÍA") -> "ARQUEO"
                         else -> "CARGA NORMAL"
                     }
@@ -550,9 +622,9 @@ fun ItemHistorialCarga(
                     }
                     
                     Surface(
-                        color = statusColor.copy(alpha = 0.08f), 
+                        color = statusColor.copy(alpha = if (esLiquidacion || esInventario) 0.12f else 0.08f), 
                         shape = RoundedCornerShape(6.dp),
-                        border = BorderStroke(0.5.dp, statusColor.copy(alpha = 0.15f))
+                        border = BorderStroke(if (esLiquidacion || esInventario) 1.dp else 0.5.dp, statusColor.copy(alpha = 0.3f))
                     ) { 
                         Text(
                             text = textoEtiqueta.uppercase(), 
@@ -566,24 +638,43 @@ fun ItemHistorialCarga(
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                Column(horizontalAlignment = Alignment.End, modifier = Modifier.widthIn(min = 60.dp)) {
+                Column(horizontalAlignment = Alignment.End, modifier = Modifier.widthIn(min = 70.dp)) {
+                    val esAuditoria = carga.origen.contains("AUDITORÍA") || esLiquidacion
+                    
                     Text(
-                        text = "${carga.productos.size} prods", 
+                        text = if (esAuditoria) "${carga.totalPiezas} pzas" else "${carga.productos.size} prods", 
                         fontWeight = FontWeight.Bold, 
                         fontSize = 12.sp, 
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         style = if (esCancelada) TextStyle(textDecoration = TextDecoration.LineThrough) else TextStyle.Default
                     )
-                    if (carga.montoTotal != 0.0 || !carga.origen.contains("AUDITORÍA")) {
+                    
+                    // 💰 MONTO PRINCIPAL (Valor Real o Monto Carga)
+                    Text(
+                        text = formato.format(carga.montoTotal), 
+                        fontWeight = FontWeight.Black, 
+                        fontSize = 16.sp, 
+                        color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else if (carga.montoTotal < 0 && !esAuditoria) DelisaRed else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = if (esCancelada) TextStyle(textDecoration = TextDecoration.LineThrough) else TextStyle.Default
+                    )
+
+                    // ⚠️ DIFERENCIA (Solo para Arqueos/Liquidaciones)
+                    if (esAuditoria) {
+                        val colorDif = when {
+                            carga.diferenciaDinero < 0 -> DelisaRed
+                            carga.diferenciaDinero > 0 -> DelisaBlue
+                            else -> DelisaGreenDark // 🔥 Verde si es exactamente cero
+                        }
+                        val prefijo = if (carga.diferenciaDinero > 0) "Dif: +" else "Dif: "
                         Text(
-                            text = formato.format(carga.montoTotal), 
-                            fontWeight = FontWeight.Black, 
-                            fontSize = 16.sp, 
-                            color = if (esCancelada) MaterialTheme.colorScheme.onSurfaceVariant else if (carga.montoTotal < 0) DelisaRed else DelisaGreen,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = if (esCancelada) TextStyle(textDecoration = TextDecoration.LineThrough) else TextStyle.Default
+                            text = prefijo + formato.format(carga.diferenciaDinero), 
+                            fontSize = 10.sp, 
+                            fontWeight = FontWeight.ExtraBold, 
+                            color = if (esCancelada) Color.Gray else colorDif,
+                            maxLines = 1
                         )
                     }
                 }

@@ -104,7 +104,16 @@ fun PantallaCierreDia(
                             Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Atrás", tint = DelisaRed)
                         }
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
+                    actions = {
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(end = 16.dp).size(24.dp),
+                                color = DelisaRed,
+                                strokeWidth = 3.dp
+                            )
+                        }
+                    }
                 )
             },
             containerColor = MaterialTheme.colorScheme.background
@@ -295,26 +304,6 @@ fun PantallaCierreDia(
                         }
                     }
 
-                    OutlinedButton(
-                        onClick = {
-                            // Demo data logic remains the same
-                            val nombresTiendas = listOf("Abarrotes La Esperanza", "Tienda El Paso", "Miscelánea Doña Mary", "Abarrotes Don Pepe")
-                            val estados = listOf("VENTA", "VENTA", "SIN VENTA")
-                            val demoData = nombresTiendas.map { nombre ->
-                                VentaReporteItem(nombre, (15..60).random(), (450..1800).random().toDouble(), (7..17).random(), (0..59).random(), estados.random())
-                            }.sortedWith(compareBy({ it.hora }, { it.minutos }))
-                            val file = GenerarPDFCierreCarta(context, uiState, demoData, true)
-                            abrirPdfCierre(context, file)
-                        },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-                    ) {
-                        Icon(Icons.Rounded.AutoMode, null)
-                        Spacer(Modifier.width(12.dp))
-                        Text("VISTA PREVIA DESEMPEÑO", fontWeight = FontWeight.Bold)
-                    }
                 }
                 Spacer(Modifier.height(40.dp))
             }

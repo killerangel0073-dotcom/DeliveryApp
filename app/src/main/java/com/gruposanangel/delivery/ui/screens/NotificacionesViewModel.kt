@@ -82,7 +82,13 @@ class NotificacionesViewModel(
                 .distinctBy { it.id } 
                 .sortedByDescending { it.timestamp } 
         }.onEach { lista ->
-            _uiState.update { it.copy(notificaciones = lista, isLoading = false) }
+            // 🔥 MEJORA: Solo apagar el loading si realmente hay datos.
+            // Si la lista está vacía, dejaremos que el 'timeout' de 2.5s decida si mostrar el mensaje de "vacío".
+            if (lista.isNotEmpty()) {
+                _uiState.update { it.copy(notificaciones = lista, isLoading = false) }
+            } else {
+                _uiState.update { it.copy(notificaciones = lista) }
+            }
         }.catch { e ->
             Log.e("NOTIF_VM", "Error en combine", e)
             _uiState.update { it.copy(isLoading = false) }
@@ -107,8 +113,9 @@ class NotificacionesViewModel(
             }
         }
         
+        // 🔥 TIMEOUT INTELIGENTE: Si en 2.5 segundos no ha llegado nada, asumimos que realmente está vacío
         viewModelScope.launch {
-            kotlinx.coroutines.delay(8000)
+            kotlinx.coroutines.delay(2500)
             if (_uiState.value.isLoading) {
                 _uiState.update { it.copy(isLoading = false) }
             }
@@ -118,51 +125,65 @@ class NotificacionesViewModel(
     private fun observarLocales() {
         localesJob?.cancel()
         val uidActual = auth.currentUser?.uid ?: ""
-        localesJob = inventarioRepo.obtenerMovimientosDesdeFlow(uidActual, _uiState.value.fechaInicio)
-            .map { lista ->
-                lista.filter { 
-                    it.timestamp <= _uiState.value.fechaFin &&
-                    ((it.tipo == "CARGA_INVENTARIO" && it.referenciaId?.startsWith("DIRECT_LOAD") == true) ||
-                    it.tipo.contains("ARQUEO"))
-                }
-                .map { mov ->
-                    val esArqueo = mov.tipo.contains("ARQUEO")
-                    val esDirectLoad = mov.referenciaId?.startsWith("DIRECT_LOAD") == true
-                    val esLiquidacion = mov.tipo.contains("LIQUIDACION") // Por si se guarda localmente
-                    
-                    val tituloFinal = when {
-                        esLiquidacion -> "LIQUIDACIÓN FINALIZADA"
-                        esArqueo -> "ARQUEO DE INVENTARIO"
-                        esDirectLoad -> "LIQUIDACIÓN PROCESADA"
-                        else -> "CARGA MANUAL"
-                    }
-
-                    Notificacion(
-                        // 🔥 CRITICO: El ID debe coincidir con el de la nube (referenciaId) para no duplicarse
-                        id = mov.referenciaId ?: mov.id,
-                        titulo = tituloFinal,
-                        mensaje = if (esArqueo) {
-                            val prefijo = when {
-                                mov.tipo.contains("FALTANTE") -> "Faltante"
-                                mov.tipo.contains("SOBRANTE") -> "Sobrante"
-                                else -> "Correcto"
-                            }
-                            "Resultado de auditoría: $prefijo de ${mov.cantidad} pzas en ${mov.nombreProducto}."
-                        } else if (esDirectLoad) {
-                            "Liquidación de ${mov.cantidad} pzas de ${mov.nombreProducto}."
-                        } else {
-                            "Se cargaron ${mov.cantidad} pzas de ${mov.nombreProducto}."
-                        },
-                        fecha = try { formatoFecha.format(Date(mov.timestamp)) } catch(_:Exception) { "Reciente" },
-                        timestamp = mov.timestamp,
-                        esCarga = !esArqueo,
-                        aceptada = true,
-                        estado = if (esDirectLoad) "COMPLETADA" else "ACEPTADA"
-                    )
-                }
+        localesJob = combine(
+            inventarioRepo.obtenerMovimientosDesdeFlow(uidActual, _uiState.value.fechaInicio),
+            inventarioRepo.obtenerProductosLocal()
+        ) { lista, catalogo ->
+            lista.filter { 
+                it.timestamp <= _uiState.value.fechaFin &&
+                ((it.tipo == "CARGA_INVENTARIO" && it.referenciaId?.startsWith("DIRECT_LOAD") == true) ||
+                it.tipo.contains("ARQUEO") || it.metodoAuditoria != null)
             }
-            .onEach { _notificacionesLocales.value = it }
-            .launchIn(viewModelScope)
+            .groupBy { it.referenciaId ?: it.id }
+            .map { (refId, docs) ->
+                val mov = docs.first()
+                val esArqueo = mov.tipo.contains("ARQUEO") || mov.metodoAuditoria == "ARQUEO"
+                val esLiquidacion = mov.metodoAuditoria == "LIQUIDACION" || mov.referenciaId?.startsWith("DIRECT_LOAD") == true
+                
+                val tituloFinal = when {
+                    esLiquidacion -> "LIQUIDACIÓN PROCESADA"
+                    esArqueo -> "ARQUEO DE INVENTARIO"
+                    else -> "CARGA MANUAL"
+                }
+
+                // Cálculo de Totales
+                val diferenciaDinero = docs.sumOf { d ->
+                    val precio = catalogo.find { it.productoId == d.productoId }?.precio ?: 0.0
+                    val cant = if (d.tipo.contains("FALTANTE")) -d.cantidad else if (d.tipo.contains("SOBRANTE")) d.cantidad else 0
+                    cant * precio
+                }
+                
+                val montoRealTotal = docs.sumOf { d ->
+                    val precio = catalogo.find { it.productoId == d.productoId }?.precio ?: 0.0
+                    (d.cantidadFisica ?: 0) * precio
+                }
+                
+                val piezasRealesTotal = docs.sumOf { it.cantidadFisica ?: 0 }
+
+                Notificacion(
+                    id = refId,
+                    titulo = tituloFinal,
+                    mensaje = if (esArqueo) {
+                        "Arqueo realizado localmente (Sin internet)."
+                    } else if (esLiquidacion) {
+                        "Liquidación procesada localmente."
+                    } else {
+                        "Movimiento de inventario local."
+                    },
+                    fecha = try { formatoFecha.format(Date(mov.timestamp)) } catch(_:Exception) { "Reciente" },
+                    timestamp = mov.timestamp,
+                    esCarga = !esArqueo && !esLiquidacion,
+                    aceptada = true,
+                    estado = "COMPLETADA",
+                    monto = montoRealTotal,
+                    diferenciaDinero = diferenciaDinero,
+                    totalPiezas = piezasRealesTotal,
+                    esLiquidacion = esLiquidacion
+                )
+            }
+        }
+        .onEach { _notificacionesLocales.value = it }
+        .launchIn(viewModelScope)
     }
 
     fun actualizarFiltroFechas(inicio: Long, fin: Long) {
@@ -208,9 +229,12 @@ class NotificacionesViewModel(
                 
                 val esRetorno = origen == nombreAlmacen
                 val productosRaw = data["productos"] as? List<Map<String, Any>> ?: emptyList()
+                
+                var totalPiezasCarga = 0
                 val totalMonto = productosRaw.sumOf { p ->
                     val cant = (p["cantidad"] as? Number)?.toDouble() ?: 0.0
                     val prec = (p["precio"] as? Number)?.toDouble() ?: 0.0
+                    totalPiezasCarga += Math.abs(cant).toInt()
                     Math.abs(cant) * prec // Usamos absoluto para el valor visual
                 }
                 
@@ -239,6 +263,7 @@ class NotificacionesViewModel(
                     aceptada = esRetorno || estado == "COMPLETADA" || estado == "ACEPTADA",
                     estado = estado,
                     monto = totalMonto,
+                    totalPiezas = totalPiezasCarga,
                     motivo = motivo,
                     esEmergencia = esEmergencia
                 )
@@ -256,37 +281,56 @@ class NotificacionesViewModel(
                     return@addSnapshotListener
                 }
                 
-                val arqs = snapshot?.documents?.groupBy { it.getString("referenciaId") ?: it.id }
-                    ?.mapNotNull { (refId, docs) ->
-                        val first = docs.first()
-                        val tsRaw = first.get("timestamp")
-                        val tsMillis = when (tsRaw) {
-                            is com.google.firebase.Timestamp -> tsRaw.toDate().time
-                            is Number -> tsRaw.toLong()
-                            else -> 0L
-                        }
+                viewModelScope.launch {
+                    val catalogo = inventarioRepo.obtenerProductosLocal().first()
 
-                        if (tsMillis < _uiState.value.fechaInicio || tsMillis > _uiState.value.fechaFin) return@mapNotNull null
-                        
-                        val metodo = first.getString("metodoAuditoria")
-                        val esLiquidacion = metodo == "LIQUIDACION"
-                        val totalFaltantes = docs.filter { it.getString("tipo") == "AJUSTE_ARQUEO_FALTANTE" }.sumOf { it.getLong("cantidad")?.toInt() ?: 0 }
-                        val totalSobrantes = docs.filter { it.getString("tipo") == "AJUSTE_ARQUEO_SOBRANTE" }.sumOf { it.getLong("cantidad")?.toInt() ?: 0 }
-                        
-                        Notificacion(
-                            id = refId,
-                            titulo = if (esLiquidacion) "LIQUIDACIÓN FINALIZADA" else "AUDITORÍA FINALIZADA",
-                            mensaje = if (esLiquidacion) "Se ha vaciado la unidad y retornado el stock a bodega." 
-                                      else "Arqueo registrado. Resumen: -$totalFaltantes faltantes, +$totalSobrantes sobrantes.",
-                            fecha = if (tsMillis > 0) formatoFecha.format(Date(tsMillis)) else "Reciente",
-                            timestamp = tsMillis,
-                            esCarga = false,
-                            aceptada = true,
-                            estado = if (esLiquidacion) "LIQUIDADO" else "ARQUEADO",
-                            esLiquidacion = esLiquidacion
-                        )
-                    } ?: emptyList()
-                _notificacionesNubeArqueos.value = arqs
+                    val arqs = snapshot?.documents?.groupBy { it.getString("referenciaId") ?: it.id }
+                        ?.mapNotNull { (refId, docs) ->
+                            val first = docs.first()
+                            val tsRaw = first.get("timestamp")
+                            val tsMillis = when (tsRaw) {
+                                is com.google.firebase.Timestamp -> tsRaw.toDate().time
+                                is Number -> tsRaw.toLong()
+                                else -> 0L
+                            }
+
+                            if (tsMillis < _uiState.value.fechaInicio || tsMillis > _uiState.value.fechaFin) return@mapNotNull null
+                            
+                            val metodo = first.getString("metodoAuditoria")
+                            val esLiquidacion = metodo == "LIQUIDACION"
+                            
+                            val totalFaltantes = docs.filter { it.getString("tipo") == "AJUSTE_ARQUEO_FALTANTE" }.sumOf { it.getLong("cantidad")?.toInt() ?: 0 }
+                            val totalSobrantes = docs.filter { it.getString("tipo") == "AJUSTE_ARQUEO_SOBRANTE" }.sumOf { it.getLong("cantidad")?.toInt() ?: 0 }
+                            
+                            val diferenciaDinero = docs.sumOf { doc ->
+                                val tipo = doc.getString("tipo")
+                                val cant = doc.getLong("cantidad")?.toInt() ?: 0
+                                val prodId = doc.getString("productoId") ?: ""
+                                val precio = catalogo.find { it.productoId == prodId }?.precio ?: 0.0
+                                if (tipo == "AJUSTE_ARQUEO_FALTANTE") -cant * precio else if (tipo == "AJUSTE_ARQUEO_SOBRANTE") cant * precio else 0.0
+                            }
+
+                            val valorRealTotal = docs.sumOf { (it.getLong("cantidadFisica")?.toInt() ?: 0) * (catalogo.find { p -> p.productoId == it.getString("productoId") }?.precio ?: 0.0) }
+                            val piezasRealesTotal = docs.sumOf { it.getLong("cantidadFisica")?.toInt() ?: 0 }
+
+                            Notificacion(
+                                id = refId,
+                                titulo = if (esLiquidacion) "LIQUIDACIÓN FINALIZADA" else "AUDITORÍA FINALIZADA",
+                                mensaje = if (esLiquidacion) "Se ha vaciado la unidad y retornado el stock a bodega." 
+                                          else "Arqueo registrado. Resumen: -$totalFaltantes faltantes, +$totalSobrantes sobrantes.",
+                                fecha = if (tsMillis > 0) formatoFecha.format(Date(tsMillis)) else "Reciente",
+                                timestamp = tsMillis,
+                                esCarga = false,
+                                aceptada = true,
+                                estado = if (esLiquidacion) "LIQUIDADO" else "ARQUEADO",
+                                esLiquidacion = esLiquidacion,
+                                monto = valorRealTotal,
+                                diferenciaDinero = diferenciaDinero,
+                                totalPiezas = piezasRealesTotal
+                            )
+                        } ?: emptyList()
+                    _notificacionesNubeArqueos.value = arqs
+                }
             }
     }
 

@@ -143,10 +143,9 @@ class MapaViewModel(
     }
 
     fun actualizarFiltroRuta(ruta: String) {
-        _uiState.update { it.copy(filtroRuta = ruta, clientes = emptyList()) }
-        if (_uiState.value.markersVisible) {
-            cargarClientes(triggerCenter = true)
-        }
+        // Al seleccionar una ruta desde la lupa, activamos automáticamente la visibilidad
+        _uiState.update { it.copy(filtroRuta = ruta, clientes = emptyList(), markersVisible = true) }
+        cargarClientes(triggerCenter = true)
     }
 
     private fun escucharUbicacionesVendedores(uid: String, puesto: String, miRuta: String?) {

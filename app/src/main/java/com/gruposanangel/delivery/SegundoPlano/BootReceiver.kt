@@ -31,8 +31,8 @@ class BootReceiver : BroadcastReceiver() {
                 val db = AppDatabase.getDatabase(context)
                 val usuario = db.usuarioDao().obtenerUsuarioActual()
 
-                val puesto = usuario?.puestoTrabajo?.trim() ?: ""
-                if (puesto == "Vendedor de Ruta" || puesto == "Suplente de Ruta") {
+                val hasRoute = usuario?.ultimaRutaId != null
+                if (hasRoute) {
                     val serviceIntent = Intent(context, LocationService::class.java).apply {
                         action = LocationService.ACTION_START
                     }
@@ -42,9 +42,9 @@ class BootReceiver : BroadcastReceiver() {
                     } else {
                         context.startService(serviceIntent)
                     }
-                    Log.d("BootReceiver", "🚀 Servicio iniciado para $puesto")
+                    Log.d("BootReceiver", "🚀 Servicio iniciado para usuario con ruta: ${usuario?.ultimaRutaNombre}")
                 } else {
-                    Log.d("BootReceiver", "🛑 Ignorado: Usuario no requiere rastreo activo ($puesto)")
+                    Log.d("BootReceiver", "🛑 Ignorado: Usuario no requiere rastreo activo al boot.")
                 }
             }
         }

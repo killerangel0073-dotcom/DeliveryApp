@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -110,6 +111,7 @@ fun PantallaVentas(
     var showSuccessScreen by remember { mutableStateOf(false) }
     var motivoPendiente by remember { mutableStateOf<String?>(null) }
     var showImageFull by remember { mutableStateOf(false) }
+    var productoParaEditarManual by remember { mutableStateOf<Plantilla_Producto?>(null) } // 🔥 NUEVO: Para diálogo numérico
 
     var ultimoAvisoStock by remember { mutableLongStateOf(0L) }
 
@@ -141,7 +143,7 @@ fun PantallaVentas(
             clienteFotoUrl = cliente?.fotografiaUrl, 
             metodoPago = "Efectivo",
             rutaId = cliente?.rutaId,
-            rutaNombre = cliente?.rutaId, // De momento usamos el ID como nombre si no tenemos el mapeo a la mano
+            rutaNombre = cliente?.rutaId, 
             fotoEvidenciaUrl = fotoPath,
             motivoVisita = motivo
         ) { exito, msg, idDeVentaGenerado ->
@@ -245,6 +247,7 @@ fun PantallaVentas(
             onRestar = { p -> 
                 if (p.cantidad > 0) ventaViewModel.actualizarCantidad(p.id, p.cantidad - 1) 
             },
+            onEditManual = { productoParaEditarManual = it }, // 🔥 PASAR CALLBACK
             onToggleConsolidado = { ventaViewModel.toggleModoConsolidado() },
             onLimpiarCarrito = { ventaViewModel.limpiarCarrito() },
             onFinalizar = { motivo ->
@@ -323,6 +326,24 @@ fun PantallaVentas(
                 }
             }
         }
+
+        if (uiState.estaProcesando) { 
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(0.2f)).zIndex(100f), Alignment.Center) { 
+                CircularProgressIndicator(color = DelisaRed) 
+            } 
+        }
+
+        // 🔥 DIÁLOGO DE EDICIÓN MANUAL DE CANTIDAD
+        productoParaEditarManual?.let { producto ->
+            DialogoCantidadManual(
+                producto = producto,
+                onDismiss = { productoParaEditarManual = null },
+                onConfirm = { nuevaCantidad ->
+                    ventaViewModel.actualizarCantidad(producto.id, nuevaCantidad)
+                    productoParaEditarManual = null
+                }
+            )
+        }
     }
 }
 
@@ -336,6 +357,7 @@ fun PantallaVentasContent(
     onSearchQueryChanged: (String) -> Unit,
     onSumar: (Plantilla_Producto) -> Unit, 
     onRestar: (Plantilla_Producto) -> Unit, 
+    onEditManual: (Plantilla_Producto) -> Unit, // 🔥 NUEVO
     onToggleConsolidado: () -> Unit,
     onLimpiarCarrito: () -> Unit,
     onVerImagenFull: () -> Unit,
@@ -350,11 +372,7 @@ fun PantallaVentasContent(
     val motivos = listOf("Tienda cerrada", "Tiene producto", "No tiene dinero", "No estaba el de compras")
     
     val listState = rememberLazyListState()
-
-    // 🔥 FIX DEFINITIVO: Estado local puro para el buscador.
     var textFieldValue by remember { mutableStateOf(TextFieldValue(uiState.searchQuery)) }
-    
-    // 🔥 AUTO-SCROLL INTELIGENTE: Al precargar, cambiar de perfil o limpiar búsqueda
     var yaScrolledPrecarga by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.perfilSeleccionado, uiState.searchQuery) {
@@ -364,12 +382,10 @@ fun PantallaVentasContent(
     }
 
     LaunchedEffect(uiState.cantidades) {
-        // Si detectamos que hay productos (por precarga) y aún no hemos hecho el scroll inicial
         if (uiState.cantidades.isNotEmpty() && !yaScrolledPrecarga) {
             listState.animateScrollToItem(0)
             yaScrolledPrecarga = true
         }
-        // Si el carrito se vacía, reseteamos el flag por si vuelve a haber una precarga (raro, pero posible)
         if (uiState.cantidades.isEmpty()) {
             yaScrolledPrecarga = false
         }
@@ -421,7 +437,6 @@ fun PantallaVentasContent(
                             )
                         }
                         
-                        // 🔥 BOTÓN DE CONSOLIDACIÓN (TICKET ÚNICO)
                         Surface(
                             onClick = onToggleConsolidado,
                             modifier = Modifier.padding(start = 8.dp, top = 6.dp).size(44.dp),
@@ -491,7 +506,13 @@ fun PantallaVentasContent(
                                                 )
                                             }
                                             items(prods, key = { p -> "sel_${p.id}" }) { producto ->
-                                                ItemVentaProductoModerno(producto, formatoMoneda, { onSumar(producto) }, { onRestar(producto) })
+                                                ItemVentaProductoModerno(
+                                                    producto = producto, 
+                                                    formato = formatoMoneda, 
+                                                    onSumar = { onSumar(producto) }, 
+                                                    onRestar = { onRestar(producto) },
+                                                    onEditManual = { onEditManual(producto) }
+                                                )
                                             }
                                         }
                                         
@@ -510,12 +531,24 @@ fun PantallaVentasContent(
                                                 SeccionHeader(titulo = cat.uppercase())
                                             }
                                             items(prods, key = { p -> p.id }) { producto ->
-                                                ItemVentaProductoModerno(producto, formatoMoneda, { onSumar(producto) }, { onRestar(producto) })
+                                                ItemVentaProductoModerno(
+                                                    producto = producto, 
+                                                    formato = formatoMoneda, 
+                                                    onSumar = { onSumar(producto) }, 
+                                                    onRestar = { onRestar(producto) },
+                                                    onEditManual = { onEditManual(producto) }
+                                                )
                                             }
                                         }
                                     } else {
                                         items(baseLista, key = { p -> p.id }) { producto ->
-                                            ItemVentaProductoModerno(producto, formatoMoneda, { onSumar(producto) }, { onRestar(producto) })
+                                            ItemVentaProductoModerno(
+                                                producto = producto, 
+                                                formato = formatoMoneda, 
+                                                onSumar = { onSumar(producto) }, 
+                                                onRestar = { onRestar(producto) },
+                                                onEditManual = { onEditManual(producto) }
+                                            )
                                         }
                                     }
                                 }
@@ -528,12 +561,6 @@ fun PantallaVentasContent(
                         }
                     }
                 }
-            }
-
-            if (uiState.estaProcesando) { 
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(0.2f)).zIndex(100f), Alignment.Center) { 
-                    CircularProgressIndicator(color = DelisaRed) 
-                } 
             }
         }
 
@@ -750,7 +777,13 @@ fun ModernSalesHeader(cliente: ClienteEntity?, distanciaMetros: Float, estaEnRan
 }
 
 @Composable
-fun ItemVentaProductoModerno(producto: Plantilla_Producto, formato: NumberFormat, onSumar: () -> Unit, onRestar: () -> Unit) {
+fun ItemVentaProductoModerno(
+    producto: Plantilla_Producto, 
+    formato: NumberFormat, 
+    onSumar: () -> Unit, 
+    onRestar: () -> Unit,
+    onEditManual: () -> Unit // 🔥 NUEVO: Callback para edición numérica
+) {
     val enCarrito = producto.cantidad > 0
     val scale by animateFloatAsState(targetValue = if (enCarrito) 1.02f else 1f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow), label = "scale")
     val elevation by animateDpAsState(targetValue = if (enCarrito) 6.dp else 1.dp, label = "elevation")
@@ -773,8 +806,21 @@ fun ItemVentaProductoModerno(producto: Plantilla_Producto, formato: NumberFormat
                 Box {
                     AsyncImage(model = producto.imagenUrl, placeholder = painterResource(R.drawable.repartidor), error = painterResource(R.drawable.repartidor), contentDescription = null, modifier = Modifier.size(90.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentScale = ContentScale.Crop)
                     if (enCarrito) {
-                        Surface(color = DelisaRed, shape = CircleShape, modifier = Modifier.align(Alignment.TopStart).offset((-10).dp, (-10).dp).size(42.dp), shadowElevation = 8.dp) {
-                            Box(contentAlignment = Alignment.Center) { Text(text = "${producto.cantidad}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black) }
+                        // 🔥 CONTADOR ROJO CLICKABLE PARA EDICIÓN MANUAL
+                        Surface(
+                            color = DelisaRed, 
+                            shape = CircleShape, 
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .offset((-10).dp, (-10).dp)
+                                .size(42.dp)
+                                .shadow(8.dp, CircleShape)
+                                .clickable { onEditManual() }, 
+                            shadowElevation = 8.dp
+                        ) {
+                            Box(contentAlignment = Alignment.Center) { 
+                                Text(text = "${producto.cantidad}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black) 
+                            }
                         }
                     }
                 }
@@ -812,7 +858,6 @@ fun CardTotalVentaPro(total: Double, formato: NumberFormat, subtotales: Map<Stri
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // 🔥 DESGLOSE POR PERFIL SI ESTÁ EN MODO CONSOLIDADO (Diseño Mejorado)
             if (modoConsolidado && subtotales.size > 1) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
@@ -951,7 +996,7 @@ fun SearchBarVentas(value: TextFieldValue, onValueChange: (TextFieldValue) -> Un
         onValueChange = onValueChange,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 8.dp), // 🔥 Pegado al componente superior
+            .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 8.dp), 
         placeholder = { Text("Buscar producto...", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
         leadingIcon = { Icon(Icons.Default.Search, null, tint = DelisaRed) },
         trailingIcon = {
@@ -972,4 +1017,126 @@ fun SearchBarVentas(value: TextFieldValue, onValueChange: (TextFieldValue) -> Un
             unfocusedTextColor = MaterialTheme.colorScheme.onSurface
         )
     )
+}
+
+@Composable
+fun DialogoCantidadManual(
+    producto: Plantilla_Producto,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var textValue by remember { mutableStateOf(TextFieldValue(producto.cantidad.toString())) }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Box(
+                    modifier = Modifier.size(56.dp).clip(CircleShape).background(DelisaRed.copy(0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Edit, null, tint = DelisaRed, modifier = Modifier.size(28.dp))
+                }
+                
+                Text(
+                    text = "INGRESAR CANTIDAD",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                
+                Text(
+                    text = producto.nombre,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+
+                OutlinedTextField(
+                    value = textValue,
+                    onValueChange = { 
+                        if (it.text.length <= 4 && (it.text.isEmpty() || it.text.all { char -> char.isDigit() })) {
+                            textValue = it
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 32.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            val cant = textValue.text.toIntOrNull() ?: 0
+                            if (cant <= producto.cantidadDisponible) {
+                                onConfirm(cant)
+                                keyboardController?.hide()
+                            }
+                        }
+                    ),
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = DelisaRed,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    )
+                )
+
+                val cantIngresada = textValue.text.toIntOrNull() ?: 0
+                val stockExcedido = cantIngresada > producto.cantidadDisponible
+
+                if (stockExcedido) {
+                    Text(
+                        "No puedes vender más de ${producto.cantidadDisponible} piezas",
+                        color = DelisaRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("CANCELAR", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    
+                    Button(
+                        onClick = { onConfirm(cantIngresada) },
+                        enabled = !stockExcedido && textValue.text.isNotEmpty(),
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DelisaRed)
+                    ) {
+                        Text("APLICAR", fontWeight = FontWeight.Black, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+    
+    LaunchedEffect(Unit) {
+        textValue = textValue.copy(selection = androidx.compose.ui.text.TextRange(0, textValue.text.length))
+    }
 }

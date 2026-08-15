@@ -250,7 +250,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                             },
                             onLockCleared = { if (syncJob == null) syncJob = startForegroundSyncLoop(); iniciarSincronizacionInmediata() }
                         ) {
-                            startLocationService(usuarioActual?.puestoTrabajo)
+                            startLocationService(usuarioActual)
                             if (usuarioActual != null) { 
                                 Navegador(repository = repository, onLogout = { cerrarSesion(context) }, intentAction = navAction, intentExtras = navExtras)
                                 if (navAction != null) { navAction = null; navExtras = null }
@@ -322,19 +322,40 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         }
     }
 
-    private fun startLocationService(puesto: String?) {
-        val p = puesto?.trim()?.uppercase() ?: ""
-        // 🔥 Habilitado para Vendedores y puestos Administrativos (Para ver distancias en tiempo real)
-        val esVendedor = p == "VENDEDOR DE RUTA" || p == "SUPLENTE DE RUTA"
-        val esAdmin = p.contains("CEO") || p.contains("GERENTE") || p.contains("SUPERVISOR") || p.contains("ADMIN")
+    private fun startLocationService(usuario: UsuarioEntity?) {
+        val p = usuario?.puestoTrabajo?.trim()?.uppercase() ?: ""
+        val hasRoute = usuario?.ultimaRutaId != null
         
-        if (esVendedor || esAdmin) {
-            val hasLocation = ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-            if (hasLocation && !locationServiceStarted) {
-                try { ContextCompat.startForegroundService(this, Intent(this, LocationService::class.java).apply { action = LocationService.ACTION_START }); locationServiceStarted = true } catch (e: Exception) { }
+        // 🔥 Decisión de Rastreo: 
+        // 1. Foreground (Tracking Activo) SOLO para quien tiene ruta.
+        // 2. Pasivo (Sin notificación) para Admins/Almacén para que funcione el velocímetro/mapa.
+        val requiereForeground = hasRoute
+        val requierePassive = p.contains("CEO") || p.contains("GERENTE") || p.contains("SUPERVISOR") || p.contains("ADMIN") || p.contains("ALMACEN")
+
+        val hasLocation = ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        
+        if (hasLocation) {
+            if (requiereForeground) {
+                try { 
+                    ContextCompat.startForegroundService(this, Intent(this, LocationService::class.java).apply { action = LocationService.ACTION_START })
+                    locationServiceStarted = true 
+                } catch (e: Exception) { Log.e("LOC", "Error starting foreground service: ${e.message}") }
+            } else if (requierePassive) {
+                try { 
+                    startService(Intent(this, LocationService::class.java).apply { action = LocationService.ACTION_START_PASSIVE })
+                    locationServiceStarted = true 
+                } catch (e: Exception) { Log.e("LOC", "Error starting passive service: ${e.message}") }
+            } else {
+                if (locationServiceStarted) { 
+                    try { stopService(Intent(this, LocationService::class.java)) } catch (_: Exception) { }
+                    locationServiceStarted = false 
+                }
             }
         } else {
-            if (locationServiceStarted) { try { stopService(Intent(this, LocationService::class.java)) } catch (_: Exception) { }; locationServiceStarted = false }
+            if (locationServiceStarted) { 
+                try { stopService(Intent(this, LocationService::class.java)) } catch (_: Exception) { }
+                locationServiceStarted = false 
+            }
         }
     }
 

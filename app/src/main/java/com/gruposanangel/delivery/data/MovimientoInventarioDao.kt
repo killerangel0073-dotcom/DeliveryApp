@@ -24,6 +24,16 @@ interface MovimientoInventarioDao {
     @Query("SELECT * FROM movimientos_inventario WHERE timestamp >= :inicio")
     suspend fun obtenerTodosRecientes(inicio: Long): List<MovimientoInventarioEntity>
 
+    @Query("""
+        SELECT * FROM movimientos_inventario 
+        WHERE (almacenNombre = :almacen OR :almacen = 'Todos') 
+        AND timestamp BETWEEN :inicio AND :fin 
+        AND (tipo IN ('AJUSTE_ARQUEO_FALTANTE', 'AJUSTE_ARQUEO_SOBRANTE', 'AJUSTE_ARQUEO_OK', 'LIQUIDACION') 
+             OR metodoAuditoria IS NOT NULL)
+        ORDER BY timestamp DESC
+    """)
+    fun obtenerArqueosPeriodoFlow(almacen: String, inicio: Long, fin: Long): Flow<List<MovimientoInventarioEntity>>
+
     @Query("SELECT * FROM movimientos_inventario WHERE referenciaId = :referenciaId")
     fun obtenerMovimientosPorReferencia(referenciaId: String): Flow<List<MovimientoInventarioEntity>>
 }

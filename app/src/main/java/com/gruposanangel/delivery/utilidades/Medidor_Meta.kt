@@ -28,6 +28,7 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -74,7 +75,9 @@ fun MedidorDeMetaPremium(
     isLoading: Boolean = false,
     onUpdateMeta: (Double) -> Unit,
     onUpdateClientes: (Int) -> Unit,
-    onCalendarClick: (() -> Unit)? = null
+    onCalendarClick: (() -> Unit)? = null,
+    fechaInicio: Long? = null,
+    fechaFin: Long? = null
 ) {
     val currencyFormat = remember { NumberFormat.getCurrencyInstance(Locale("es", "MX")) }
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
@@ -82,6 +85,38 @@ fun MedidorDeMetaPremium(
     var showClientesDialog by remember { mutableStateOf(false) }
 
     val esLogrado = avance >= metaDelDia && !isLoading
+
+    // --- LÓGICA DE TÍTULO DINÁMICO ---
+    val tituloLabel = remember(fechaInicio, fechaFin, esLogrado, numDias) {
+        if (esLogrado) return@remember "¡META ALCANZADA!"
+        
+        if (fechaInicio == null || fechaFin == null || fechaInicio == 0L) {
+            return@remember if (numDias > 1) "PROGRESO DEL PERIODO" else "PROGRESO DEL DÍA"
+        }
+
+        val calInicio = Calendar.getInstance().apply { timeInMillis = fechaInicio }
+        val calFin = Calendar.getInstance().apply { timeInMillis = fechaFin }
+        val calHoy = Calendar.getInstance()
+
+        val esMismoDia = calInicio.get(Calendar.YEAR) == calFin.get(Calendar.YEAR) &&
+                        calInicio.get(Calendar.DAY_OF_YEAR) == calFin.get(Calendar.DAY_OF_YEAR)
+
+        if (esMismoDia) {
+            val esHoy = calInicio.get(Calendar.YEAR) == calHoy.get(Calendar.YEAR) &&
+                       calInicio.get(Calendar.DAY_OF_YEAR) == calHoy.get(Calendar.DAY_OF_YEAR)
+            
+            if (esHoy) "VENTA DEL DÍA"
+            else {
+                val sdfDia = java.text.SimpleDateFormat("EEEE d 'de' MMMM", Locale("es", "MX"))
+                sdfDia.format(calInicio.time).lowercase().replaceFirstChar { it.uppercase() }
+            }
+        } else {
+            val sdfPeriodo = java.text.SimpleDateFormat("d 'de' MMM", Locale("es", "MX"))
+            val inicioStr = sdfPeriodo.format(calInicio.time).replace(".", "")
+            val finStr = sdfPeriodo.format(calFin.time).replace(".", "")
+            "$inicioStr al $finStr".uppercase()
+        }
+    }
 
     // --- ANIMACIONES ---
     val infiniteTransition = rememberInfiniteTransition(label = "premiumEffects")
@@ -170,8 +205,7 @@ fun MedidorDeMetaPremium(
                     // HEADER
                     Box(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.align(Alignment.CenterStart).padding(end = 75.dp)) {
-                            val tituloLabel = if (esLogrado) "¡META ALCANZADA!" else if (numDias > 1) "PROGRESO DEL PERIODO" else "PROGRESO DEL DÍA"
-                            Text(tituloLabel, color = Color.White.copy(0.8f), fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp) 
+                            Text(tituloLabel, color = Color.White.copy(0.8f), fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.2.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) 
                             
                             AnimatedContent(
                                 targetState = avance,

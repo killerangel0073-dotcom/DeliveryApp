@@ -18,5 +18,6 @@ data class MovimientoInventarioEntity(
     val referenciaId: String?, // ID del ticket de venta original
     val sincronizado: Boolean = false,
     val cantidadFisica: Int? = null,   // Lo que se contó manualmente
-    val cantidadTeorica: Int? = null  // Lo que decía el sistema
+    val cantidadTeorica: Int? = null, // Lo que decía el sistema
+    val metodoAuditoria: String? = null // 🔥 Nuevo: "ARQUEO" o "LIQUIDACION"
 )

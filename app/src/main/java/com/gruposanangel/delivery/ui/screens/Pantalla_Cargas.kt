@@ -119,6 +119,12 @@ fun MovimientosInventarioScreen(
         }
     }
 
+    LaunchedEffect(state.error) {
+        state.error?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+        }
+    }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var ultimoAvisoStock by remember { mutableLongStateOf(0L) }
@@ -340,18 +346,56 @@ fun MovimientosInventarioScreen(
                 val productosConCantidad = catalogo.filter { (state.cantidades[it.id] ?: 0) > 0 }
                 if (isEmergency) {
                     viewModel.confirmarCargaDirecta(state.origen, state.destino, productosConCantidad, state.cantidades) {
-                        Toast.makeText(context, "Carga aplicada localmente", Toast.LENGTH_SHORT).show()
-                        navController.popBackStack()
+                        // El ViewModel ahora maneja el éxito con mostrarDialogoExito
                     }
                 } else {
                     viewModel.crearOrden(state.origen, state.destino, productosConCantidad, state.cantidades) { 
-                        Toast.makeText(context, "Carga enviada con éxito", Toast.LENGTH_SHORT).show()
-                        navController.popBackStack()
+                        // El ViewModel ahora maneja el éxito con mostrarDialogoExito
                     }
                 }
             },
             onCancelar = { mostrarDialogConfirmacion = false }
         )
+    }
+
+    // 🔥 DIÁLOGO DE ÉXITO CON SALIDA AUTOMÁTICA (MODERNO)
+    if (state.mostrarDialogoExito) {
+        AlertDialog(
+            onDismissRequest = { },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(28.dp),
+            title = {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle, 
+                        contentDescription = null, 
+                        tint = DelisaGreen, 
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "¡CARGA EXITOSA!", 
+                        fontWeight = FontWeight.Black, 
+                        fontSize = 20.sp, 
+                        color = DelisaGreen
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = "La carga se ha procesado correctamente.\nSaliendo al dashboard...",
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = { }
+        )
+        
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(2200)
+            navController.popBackStack()
+        }
     }
 
     // 🔥 OVERLAY DE CARGA (Bloqueo de pantalla y feedback visual)
@@ -367,7 +411,7 @@ fun MovimientosInventarioScreen(
                 CircularProgressIndicator(color = DelisaRed, strokeWidth = 5.dp)
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = if (isEmergency) "Procesando Carga Directa..." else "Enviando Carga a la Nube...",
+                    text = state.loadingMessage ?: "Procesando...",
                     fontWeight = FontWeight.Bold,
                     color = DelisaRed
                 )

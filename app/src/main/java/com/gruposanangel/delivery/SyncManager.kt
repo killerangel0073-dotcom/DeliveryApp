@@ -88,6 +88,27 @@ class SyncManager(
             // 4. SINCRONIZAR GASTOS
             gastoRepository.descargarGastosPeriodo(uid, noventaDiasAtras.time, System.currentTimeMillis())
 
+            // 5. SINCRONIZAR ÓRDENES DE TRANSFERENCIA (2 SEMANAS LUNES-DOMINGO)
+            try {
+                val calSync = Calendar.getInstance(Locale("es", "MX"))
+                calSync.firstDayOfWeek = Calendar.MONDAY
+                calSync.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                calSync.set(Calendar.HOUR_OF_DAY, 0); calSync.set(Calendar.MINUTE, 0); calSync.set(Calendar.SECOND, 0)
+                if (calSync.timeInMillis > System.currentTimeMillis()) calSync.add(Calendar.DAY_OF_YEAR, -7)
+                calSync.add(Calendar.DAY_OF_YEAR, -7) // Dos semanas atrás
+                val inicioSync = calSync.timeInMillis
+                
+                // Hasta el domingo de esta semana
+                calSync.add(Calendar.DAY_OF_YEAR, 13)
+                calSync.set(Calendar.HOUR_OF_DAY, 23); calSync.set(Calendar.MINUTE, 59)
+                val finSync = calSync.timeInMillis
+                
+                inventarioRepository.sincronizarOrdenesPeriodo(inicioSync, finSync)
+                inventarioRepository.sincronizarMovimientosPeriodo(inicioSync, finSync)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sincronizando órdenes/movimientos en sync maestro: ${e.message}")
+            }
+
             Log.d(TAG, "✅ Blindaje Completado. El dispositivo está listo para operar 100% Offline.")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error en Sincronización de Blindaje: ${e.message}")
